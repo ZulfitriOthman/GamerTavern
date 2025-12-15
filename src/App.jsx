@@ -55,7 +55,7 @@ function App() {
         <div className="relative">
           {/* Ornate top border */}
           <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-500/50 to-transparent" />
-          
+
           <div className="mx-auto flex max-w-7xl items-center justify-between px-8 py-5">
             {/* Logo with mystical aura */}
             <Link to="/" className="group flex items-center gap-4">
@@ -80,7 +80,7 @@ function App() {
             {/* Navigation with elegant styling */}
             <nav className="flex items-center gap-1">
               <Link
-                to="/"
+                to="/shop"
                 className="group relative px-6 py-2.5 font-serif text-sm font-medium tracking-wide text-amber-100 transition-all hover:text-amber-300"
               >
                 <span className="relative z-10">Shop</span>
@@ -126,18 +126,11 @@ function App() {
           <Route
             path="/"
             element={
-              <ShopPage
-                cart={cart}
-                addToCart={addToCart}
-                removeFromCart={removeFromCart}
-                updateQuantity={updateQuantity}
-                cartTotalItems={cartTotalItems}
-                cartTotalPrice={cartTotalPrice}
-              />
+              <NewsPage />
             }
           />
           <Route
-            path="/tcg/:tcgId"
+            path="/shop"
             element={
               <ShopPage
                 cart={cart}
@@ -149,6 +142,19 @@ function App() {
               />
             }
           />
+          <Route
+            path="/tcg/:cardId"
+            element={<ShopPage
+              cart={cart}
+              addToCart={addToCart}
+              removeFromCart={removeFromCart}
+              updateQuantity={updateQuantity}
+              cartTotalItems={cartTotalItems}
+              cartTotalPrice={cartTotalPrice}
+            />
+            }
+          />
+          
           <Route path="/trade" element={<TradePage />} />
           <Route path="/news" element={<NewsPage />} />
           <Route
