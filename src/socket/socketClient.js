@@ -2,7 +2,7 @@
 import { io } from 'socket.io-client';
 
 // Socket connection configuration
-const SOCKET_URL = 'http://localhost:3001';
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3001';
 
 // Create socket instance (will connect when needed)
 export const socket = io(SOCKET_URL, {

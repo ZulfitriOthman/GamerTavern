@@ -7,16 +7,20 @@ import cors from 'cors';
 const app = express();
 const httpServer = createServer(app);
 
+// Environment variables
+const PORT = process.env.PORT || 3001;
+const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
+
 // Configure CORS
 app.use(cors({
-  origin: 'http://localhost:5173', // Your Vite dev server
+  origin: CLIENT_URL,
   credentials: true
 }));
 
 // Initialize Socket.IO with CORS
 const io = new Server(httpServer, {
   cors: {
-    origin: 'http://localhost:5173',
+    origin: CLIENT_URL,
     methods: ['GET', 'POST'],
     credentials: true
   }
@@ -220,13 +224,12 @@ app.get('/api/stats', (req, res) => {
 });
 
 // Start server
-const PORT = process.env.PORT || 3001;
 httpServer.listen(PORT, () => {
   console.log('\n' + '='.repeat(50));
   console.log('🎮 GamerTavern Socket.IO Server Started!');
   console.log('='.repeat(50));
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📡 WebSocket ready for connections`);
-  console.log(`🌐 CORS enabled for http://localhost:5173`);
+  console.log(`🌐 CORS enabled for ${CLIENT_URL}`);
   console.log('='.repeat(50) + '\n');
 });
