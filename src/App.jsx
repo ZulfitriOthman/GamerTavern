@@ -1,3 +1,4 @@
+// App.jsx
 import { useMemo, useState } from "react";
 import { Routes, Route, Link } from "react-router-dom";
 
@@ -8,6 +9,7 @@ import NewsPage from "./pages/NewsPage";
 
 function App() {
   const [cart, setCart] = useState([]);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const cartTotalItems = useMemo(
     () => cart.reduce((sum, item) => sum + item.quantity, 0),
@@ -50,69 +52,124 @@ function App() {
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(139,92,246,0.3),transparent_50%)]" />
       </div>
 
-      {/* NAVBAR - Fantasy Style */}
+      {/* NAVBAR - Fantasy Style (Responsive + Animated Mobile Menu) */}
       <header className="sticky top-0 z-50 border-b border-amber-900/30 bg-slate-950/95 backdrop-blur-xl shadow-2xl shadow-purple-900/20">
         <div className="relative">
           {/* Ornate top border */}
           <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-500/50 to-transparent" />
 
-          <div className="mx-auto flex max-w-7xl items-center justify-between px-8 py-5">
-            {/* Logo with mystical aura */}
-            <Link to="/" className="group flex items-center gap-4">
-              <div className="relative">
+          <div className="mx-auto flex max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8 py-4 sm:py-5">
+            {/* Logo */}
+            <Link
+              to="/"
+              onClick={() => setMobileMenuOpen(false)}
+              className="group flex items-center gap-3 sm:gap-4 min-w-0"
+            >
+              <div className="relative shrink-0">
                 <div className="absolute -inset-2 animate-pulse rounded-full bg-gradient-to-r from-amber-500/30 via-purple-500/30 to-amber-500/30 blur-xl" />
-                <div className="relative h-14 w-14 rounded-full bg-gradient-to-br from-amber-500 via-purple-600 to-amber-600 p-0.5 shadow-2xl shadow-amber-500/50">
+                <div className="relative h-12 w-12 sm:h-14 sm:w-14 rounded-full bg-gradient-to-br from-amber-500 via-purple-600 to-amber-600 p-0.5 shadow-2xl shadow-amber-500/50">
                   <div className="flex h-full w-full items-center justify-center rounded-full bg-gradient-to-br from-slate-900 to-purple-950">
-                    <span className="text-2xl font-serif font-bold text-amber-400">⚔</span>
+                    <span className="text-xl sm:text-2xl font-serif font-bold text-amber-400">
+                      ⚔
+                    </span>
                   </div>
                 </div>
               </div>
-              <div>
-                <h1 className="font-serif text-2xl font-bold tracking-wide text-amber-100">
-                  Gamer Tavern
+
+              <div className="min-w-0">
+                <h1 className="truncate font-serif text-lg sm:text-2xl font-bold tracking-wide text-amber-100">
+                  TBC Name
                 </h1>
-                <p className="font-serif text-xs italic tracking-wider text-amber-600">
-                  Collector's Sanctum & Trading Post
+                <p className="hidden sm:block font-serif text-xs italic tracking-wider text-amber-600">
+                  Collector&apos;s Sanctum & Trading Post
                 </p>
               </div>
             </Link>
 
-            {/* Navigation with elegant styling */}
-            <nav className="flex items-center gap-1">
-              <Link
-                to="/shop"
-                className="group relative px-6 py-2.5 font-serif text-sm font-medium tracking-wide text-amber-100 transition-all hover:text-amber-300"
-              >
-                <span className="relative z-10">Shop</span>
-                <div className="absolute inset-0 scale-x-0 rounded-lg bg-gradient-to-r from-amber-950/50 to-purple-950/50 transition-transform group-hover:scale-x-100" />
-                <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber-500 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
-              </Link>
-              <Link
-                to="/trade"
-                className="group relative px-6 py-2.5 font-serif text-sm font-medium tracking-wide text-amber-100 transition-all hover:text-amber-300"
-              >
-                <span className="relative z-10">Trade</span>
-                <div className="absolute inset-0 scale-x-0 rounded-lg bg-gradient-to-r from-amber-950/50 to-purple-950/50 transition-transform group-hover:scale-x-100" />
-                <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber-500 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
-              </Link>
-              <Link
-                to="/news"
-                className="group relative px-6 py-2.5 font-serif text-sm font-medium tracking-wide text-amber-100 transition-all hover:text-amber-300"
-              >
-                <span className="relative z-10">News</span>
-                <div className="absolute inset-0 scale-x-0 rounded-lg bg-gradient-to-r from-amber-950/50 to-purple-950/50 transition-transform group-hover:scale-x-100" />
-                <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber-500 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
-              </Link>
+            {/* Desktop nav */}
+            <nav className="hidden md:flex items-center gap-1">
+              {[
+                { to: "/shop", label: "Shop" },
+                { to: "/trade", label: "Trade" },
+                { to: "/news", label: "News" },
+              ].map((item) => (
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  className="group relative px-5 lg:px-6 py-2.5 font-serif text-sm font-medium tracking-wide text-amber-100 transition-all hover:text-amber-300"
+                >
+                  <span className="relative z-10">{item.label}</span>
+                  <div className="absolute inset-0 scale-x-0 rounded-lg bg-gradient-to-r from-amber-950/50 to-purple-950/50 transition-transform group-hover:scale-x-100" />
+                  <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber-500 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+                </Link>
+              ))}
 
-              {/* Cart button with golden border */}
               <Link
                 to="/cart"
-                className="group relative ml-4 overflow-hidden rounded-lg border border-amber-600/50 bg-gradient-to-r from-amber-950/50 to-purple-950/50 px-6 py-2.5 font-serif text-sm font-semibold tracking-wide text-amber-100 shadow-lg shadow-amber-900/30 transition-all hover:border-amber-500 hover:shadow-amber-500/40"
+                className="group relative ml-3 lg:ml-4 overflow-hidden rounded-lg border border-amber-600/50 bg-gradient-to-r from-amber-950/50 to-purple-950/50 px-5 lg:px-6 py-2.5 font-serif text-sm font-semibold tracking-wide text-amber-100 shadow-lg shadow-amber-900/30 transition-all hover:border-amber-500 hover:shadow-amber-500/40"
               >
                 <div className="absolute inset-0 bg-gradient-to-r from-amber-600/0 via-amber-600/10 to-amber-600/0 opacity-0 transition-opacity group-hover:opacity-100" />
                 <span className="relative">Cart ({cartTotalItems})</span>
               </Link>
             </nav>
+
+            {/* Mobile controls */}
+            <div className="flex items-center gap-2 md:hidden">
+              <Link
+                to="/cart"
+                onClick={() => setMobileMenuOpen(false)}
+                className="relative rounded-lg border border-amber-600/50 bg-gradient-to-r from-amber-950/50 to-purple-950/50 px-3 py-2 font-serif text-sm font-semibold tracking-wide text-amber-100"
+              >
+                Cart ({cartTotalItems})
+              </Link>
+
+              <button
+                type="button"
+                aria-label="Toggle menu"
+                aria-expanded={mobileMenuOpen}
+                onClick={() => setMobileMenuOpen((v) => !v)}
+                className="rounded-lg border border-amber-900/40 bg-slate-950/60 px-3 py-2 text-amber-100"
+              >
+                <span className="block h-0.5 w-5 bg-current mb-1" />
+                <span className="block h-0.5 w-5 bg-current mb-1" />
+                <span className="block h-0.5 w-5 bg-current" />
+              </button>
+            </div>
+          </div>
+
+          {/* Mobile menu panel (Animated) */}
+          <div
+            className={`md:hidden overflow-hidden transition-all duration-300 ease-out
+              ${
+                mobileMenuOpen
+                  ? "max-h-96 opacity-100 translate-y-0"
+                  : "max-h-0 opacity-0 -translate-y-2"
+              }
+            `}
+          >
+            <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pb-4 pt-2">
+              <div className="rounded-xl border border-amber-900/30 bg-slate-950/70 backdrop-blur-xl overflow-hidden shadow-2xl shadow-purple-900/20">
+                {[
+                  { to: "/shop", label: "Shop" },
+                  { to: "/trade", label: "Trade" },
+                  { to: "/news", label: "News" },
+                ].map((item) => (
+                  <Link
+                    key={item.to}
+                    to={item.to}
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="group block px-4 py-3 font-serif text-sm text-amber-100 hover:bg-amber-950/30 transition-colors"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span>{item.label}</span>
+                      <span className="opacity-0 translate-x-1 transition-all duration-200 group-hover:opacity-100 group-hover:translate-x-0">
+                        →
+                      </span>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </div>
           </div>
 
           {/* Ornate bottom border */}
@@ -121,14 +178,10 @@ function App() {
       </header>
 
       {/* ROUTES */}
-      <main className="relative z-10 mx-auto max-w-7xl px-8 py-10">
+      <main className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 sm:py-10">
         <Routes>
-          <Route
-            path="/"
-            element={
-              <NewsPage />
-            }
-          />
+          <Route path="/" element={<NewsPage />} />
+
           <Route
             path="/shop"
             element={
@@ -142,21 +195,24 @@ function App() {
               />
             }
           />
+
           <Route
             path="/tcg/:cardId"
-            element={<ShopPage
-              cart={cart}
-              addToCart={addToCart}
-              removeFromCart={removeFromCart}
-              updateQuantity={updateQuantity}
-              cartTotalItems={cartTotalItems}
-              cartTotalPrice={cartTotalPrice}
-            />
+            element={
+              <ShopPage
+                cart={cart}
+                addToCart={addToCart}
+                removeFromCart={removeFromCart}
+                updateQuantity={updateQuantity}
+                cartTotalItems={cartTotalItems}
+                cartTotalPrice={cartTotalPrice}
+              />
             }
           />
-          
+
           <Route path="/trade" element={<TradePage />} />
           <Route path="/news" element={<NewsPage />} />
+
           <Route
             path="/cart"
             element={
