@@ -1,0 +1,12 @@
+{
+  "watch": ["server"],
+  "ext": "js,json",
+  "ignore": ["node_modules", "client/src"],
+  "exec": "node server/server.js",
+  "env": {
+    "NODE_ENV": "development"
+  },
+  "restartable": "rs",
+  "colours": true,
+  "verbose": true
+}
