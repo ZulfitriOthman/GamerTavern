@@ -11,25 +11,26 @@ import SignUpPage from "./pages/SignUpPage";
 import LoginPage from "./pages/LoginPage";
 import ChatPage from "./pages/ChatPage";
 
-// Import Socket.IO
-import { connectSocket, disconnectSocket, socket } from "./socket/socketClient";
+// ✅ Socket.IO (no direct `socket` export anymore)
+import { connectSocket, disconnectSocket, getSocket } from "./socket/socketClient";
 
 function App() {
   const [cart, setCart] = useState([]);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [username, setUsername] = useState(() => {
-    // Generate random username or get from localStorage
-    const stored = localStorage.getItem('tavern_username');
+
+  const [username] = useState(() => {
+    const stored = localStorage.getItem("tavern_username");
     if (stored) return stored;
+
     const newUsername = `Traveler${Math.floor(Math.random() * 1000)}`;
-    localStorage.setItem('tavern_username', newUsername);
+    localStorage.setItem("tavern_username", newUsername);
     return newUsername;
   });
 
-  // Connect to Socket.IO on mount
+  // ✅ Connect to Socket.IO on mount
   useEffect(() => {
     connectSocket(username);
-    console.log('🎮 Connecting to Socket.IO as:', username);
+    console.log("🎮 Connecting to Socket.IO as:", username);
 
     return () => {
       disconnectSocket();
@@ -58,10 +59,9 @@ function App() {
     });
 
     // 🔴 Emit socket event - Broadcast to all users!
-    if (socket.connected) {
-      socket.emit('cart:add', { 
-        productName: product.name 
-      });
+    const s = getSocket();
+    if (s?.connected) {
+      s.emit("cart:add", { productName: product.name });
     }
   };
 
@@ -84,10 +84,9 @@ function App() {
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(139,92,246,0.3),transparent_50%)]" />
       </div>
 
-      {/* NAVBAR - Fantasy Style (Responsive + Animated Mobile Menu) */}
+      {/* NAVBAR */}
       <header className="sticky top-0 z-50 border-b border-amber-900/30 bg-slate-950/95 backdrop-blur-xl shadow-2xl shadow-purple-900/20">
         <div className="relative">
-          {/* Ornate top border */}
           <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-500/50 to-transparent" />
 
           <div className="mx-auto flex max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8 py-4 sm:py-5">
@@ -179,7 +178,7 @@ function App() {
             </div>
           </div>
 
-          {/* Mobile menu panel (Animated) */}
+          {/* Mobile menu panel */}
           <div
             className={`md:hidden overflow-hidden transition-all duration-300 ease-out
               ${
@@ -217,7 +216,6 @@ function App() {
             </div>
           </div>
 
-          {/* Ornate bottom border */}
           <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-amber-500/50 to-transparent" />
         </div>
       </header>
