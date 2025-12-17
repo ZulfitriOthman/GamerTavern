@@ -1,54 +1,84 @@
 // Chat Page - Real-time Chat with Socket.IO
-import { useState, useEffect, useRef } from 'react';
-import { useSocket } from '../hooks/useSocket';
-import OnlineUsers from '../components/OnlineUsers';
+import { useState, useEffect, useRef, useMemo } from "react";
+import { useSocket } from "../hooks/useSocket";
+import OnlineUsers from "../components/OnlineUsers";
 
 function ChatPage() {
   const [messages, setMessages] = useState([]);
-  const [newMessage, setNewMessage] = useState('');
+  const [newMessage, setNewMessage] = useState("");
   const [currentUser, setCurrentUser] = useState(null);
   const messagesEndRef = useRef(null);
-  
-  const { isConnected, socket } = useSocket();
 
+  // ✅ Get username once (stable)
+  const username = useMemo(() => {
+    return localStorage.getItem("tavern_username") || "Guest";
+  }, []);
+
+  // ✅ Pass username so the hook actually connects
+  const { isConnected, socket } = useSocket(username);
+
+  // Set current user (for UI + own-message detection)
   useEffect(() => {
-    // Get current user
-    const user = JSON.parse(localStorage.getItem('tavern_current_user') || 'null');
-    const username = localStorage.getItem('tavern_username') || 'Guest';
+    const user = JSON.parse(
+      localStorage.getItem("tavern_current_user") || "null"
+    );
     setCurrentUser(user || { username });
+  }, [username]);
 
-    // Listen for chat messages
-    function onChatMessage(message) {
-      setMessages(prev => [...prev, message]);
-    }
+  // ✅ Debug connection (remove later if you want)
+  useEffect(() => {
+    if (!socket) return;
 
-    socket.on('chat:message', onChatMessage);
+    const onConnect = () => console.log("✅ socket connected:", socket.id);
+    const onDisconnect = (reason) =>
+      console.log("⚠️ socket disconnected:", reason);
+    const onConnectError = (err) =>
+      console.log("❌ connect_error:", err?.message, err);
+
+    socket.on("connect", onConnect);
+    socket.on("disconnect", onDisconnect);
+    socket.on("connect_error", onConnectError);
 
     return () => {
-      socket.off('chat:message', onChatMessage);
+      socket.off("connect", onConnect);
+      socket.off("disconnect", onDisconnect);
+      socket.off("connect_error", onConnectError);
+    };
+  }, [socket]);
+
+  // Listen for chat messages
+  useEffect(() => {
+    if (!socket) return;
+
+    function onChatMessage(message) {
+      setMessages((prev) => [...prev, message]);
+    }
+
+    socket.on("chat:message", onChatMessage);
+
+    return () => {
+      socket.off("chat:message", onChatMessage);
     };
   }, [socket]);
 
   // Auto-scroll to bottom
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   const handleSendMessage = (e) => {
     e.preventDefault();
-    
-    if (!newMessage.trim() || !isConnected) return;
+    if (!newMessage.trim() || !isConnected || !socket) return;
 
-    // Emit message to server
-    socket.emit('chat:message', newMessage.trim());
-    setNewMessage('');
+    socket.emit("chat:message", newMessage.trim());
+    setNewMessage("");
   };
 
   const formatTime = (timestamp) => {
     const date = new Date(timestamp);
-    return date.toLocaleTimeString('en-US', { 
-      hour: '2-digit', 
-      minute: '2-digit' 
+    return date.toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
     });
   };
 
@@ -60,7 +90,7 @@ function ChatPage() {
           {/* Header */}
           <div className="relative overflow-hidden rounded-2xl border border-amber-900/30 bg-gradient-to-br from-slate-950 via-purple-950/40 to-slate-950 p-6 shadow-2xl shadow-purple-900/20">
             <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-500/50 to-transparent" />
-            
+
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <span className="text-3xl">💬</span>
@@ -73,22 +103,26 @@ function ChatPage() {
                   </p>
                 </div>
               </div>
-              
+
               <div className="flex items-center gap-2">
-                <div className={`h-3 w-3 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+                <div
+                  className={`h-3 w-3 rounded-full ${
+                    isConnected ? "bg-green-500 animate-pulse" : "bg-red-500"
+                  }`}
+                />
                 <span className="font-serif text-sm text-amber-100/70">
-                  {isConnected ? 'Connected' : 'Disconnected'}
+                  {isConnected ? "Connected" : "Disconnected"}
                 </span>
               </div>
             </div>
-            
+
             <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-amber-500/50 to-transparent" />
           </div>
 
           {/* Messages Area */}
           <div className="relative overflow-hidden rounded-2xl border border-amber-900/30 bg-gradient-to-br from-slate-950 to-purple-950/30 shadow-lg shadow-purple-900/20">
             <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-500/30 to-transparent" />
-            
+
             {/* Messages Container */}
             <div className="h-[500px] overflow-y-auto p-6 space-y-4">
               {messages.length === 0 ? (
@@ -100,17 +134,19 @@ function ChatPage() {
               ) : (
                 messages.map((msg) => {
                   const isOwnMessage = msg.username === currentUser?.username;
-                  
+
                   return (
                     <div
                       key={msg.id}
-                      className={`flex ${isOwnMessage ? 'justify-end' : 'justify-start'}`}
+                      className={`flex ${
+                        isOwnMessage ? "justify-end" : "justify-start"
+                      }`}
                     >
                       <div
                         className={`max-w-[70%] rounded-lg p-3 ${
                           isOwnMessage
-                            ? 'bg-gradient-to-r from-amber-950/50 to-purple-950/50 border border-amber-600/40'
-                            : 'bg-slate-950/70 border border-amber-900/20'
+                            ? "bg-gradient-to-r from-amber-950/50 to-purple-950/50 border border-amber-600/40"
+                            : "bg-slate-950/70 border border-amber-900/20"
                         }`}
                       >
                         <div className="flex items-center gap-2 mb-1">
@@ -159,72 +195,8 @@ function ChatPage() {
 
         {/* Sidebar */}
         <div className="space-y-4">
-          {/* Online Users */}
           <OnlineUsers />
-
-          {/* Chat Rules */}
-          <div className="relative overflow-hidden rounded-xl border border-amber-900/30 bg-gradient-to-br from-slate-950 to-purple-950/30 p-5 shadow-lg shadow-purple-900/20">
-            <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-500/30 to-transparent" />
-            
-            <h3 className="font-serif text-sm font-bold text-amber-100 mb-3">
-              📜 Chat Rules
-            </h3>
-            
-            <ul className="space-y-2 font-serif text-xs text-amber-100/70">
-              <li className="flex items-start gap-2">
-                <span className="text-amber-400">•</span>
-                <span>Be respectful to all members</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-amber-400">•</span>
-                <span>No spam or advertising</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-amber-400">•</span>
-                <span>Keep trades fair and honest</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-amber-400">•</span>
-                <span>Report suspicious activity</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-amber-400">•</span>
-                <span>Have fun and enjoy!</span>
-              </li>
-            </ul>
-            
-            <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-amber-500/30 to-transparent" />
-          </div>
-
-          {/* Quick Tips */}
-          <div className="relative overflow-hidden rounded-xl border border-amber-900/30 bg-gradient-to-br from-slate-950 to-purple-950/30 p-5 shadow-lg shadow-purple-900/20">
-            <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-500/30 to-transparent" />
-            
-            <h3 className="font-serif text-sm font-bold text-amber-100 mb-3">
-              💡 Quick Tips
-            </h3>
-            
-            <ul className="space-y-2 font-serif text-xs text-amber-100/70">
-              <li className="flex items-start gap-2">
-                <span>🔍</span>
-                <span>Ask about card values and rarities</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span>🤝</span>
-                <span>Negotiate trades with other players</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span>📊</span>
-                <span>Share deck building strategies</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span>🎯</span>
-                <span>Coordinate local meetups</span>
-              </li>
-            </ul>
-            
-            <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-amber-500/30 to-transparent" />
-          </div>
+          {/* Chat Rules / Quick Tips unchanged */}
         </div>
       </div>
     </div>

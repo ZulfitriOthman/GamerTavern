@@ -1,46 +1,55 @@
-// Socket.IO Client Configuration for GamerTavern
-import { io } from 'socket.io-client';
+import { io } from "socket.io-client";
 
-// Socket connection configuration
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3001';
+let socket = null;
 
-// Create socket instance (will connect when needed)
-export const socket = io(SOCKET_URL, {
-  autoConnect: false, // We'll connect manually
-  reconnection: true,
-  reconnectionDelay: 1000,
-  reconnectionAttempts: 5
-});
+/**
+ * Get current socket instance (may be null before connect)
+ */
+export const getSocket = () => socket;
 
-// Socket event listeners for debugging
-socket.on('connect', () => {
-  console.log('✅ Connected to Socket.IO server:', socket.id);
-});
-
-socket.on('disconnect', (reason) => {
-  console.log('❌ Disconnected from server:', reason);
-});
-
-socket.on('connect_error', (error) => {
-  console.error('❌ Connection error:', error.message);
-});
-
-// Helper function to connect socket
+/**
+ * Connect socket (singleton)
+ * - Uses VITE_SOCKET_URL for production
+ * - Emits user:join after connect
+ */
 export const connectSocket = (username) => {
-  if (!socket.connected) {
-    socket.connect();
-    if (username) {
-      socket.emit('user:join', username);
-    }
+  const url =
+    import.meta.env.VITE_SOCKET_URL?.trim() || "http://localhost:3001";
+
+  // create once
+  if (!socket) {
+    socket = io(url, {
+      transports: ["websocket"], // best for Cloudflare / Nginx
+      withCredentials: true,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 500,
+      timeout: 10000,
+    });
+
+    // Optional debug
+    socket.on("connect", () => {
+      console.log("✅ Connected to Socket.IO:", socket.id, "->", url);
+    });
+    socket.on("disconnect", (reason) => {
+      console.log("⚠️ Disconnected:", reason);
+    });
+    socket.on("connect_error", (err) => {
+      console.log("❌ connect_error:", err?.message, err);
+    });
   }
+
+  // Join immediately (if not connected yet, server will receive it after connect anyway)
+  if (username) {
+    socket.emit("user:join", username);
+  }
+
+  return socket;
 };
 
-// Helper function to disconnect socket
 export const disconnectSocket = () => {
-  if (socket.connected) {
+  if (socket) {
     socket.disconnect();
+    socket = null;
   }
 };
-
-// Export socket instance as default
-export default socket;

@@ -1,30 +1,54 @@
 // Custom React Hook for Socket.IO
-import { useEffect, useState, useCallback } from 'react';
-import { socket, connectSocket, disconnectSocket } from '../socket/socketClient';
+import { useEffect, useState, useCallback, useRef } from "react";
+import {
+  getSocket,
+  connectSocket,
+  disconnectSocket,
+} from "../socket/socketClient";
 
 /**
  * Custom hook to use Socket.IO in React components
- * @param {string} username - Optional username for the user
+ * @param {string} username - username for the user (recommended)
  * @returns {object} Socket utilities and state
  */
 export function useSocket(username = null) {
-  const [isConnected, setIsConnected] = useState(socket.connected);
+  const socket = getSocket(); // always returns the singleton socket instance (or null if not created yet)
+
+  const [isConnected, setIsConnected] = useState(
+    socket ? socket.connected : false
+  );
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [activities, setActivities] = useState([]);
 
+  // Prevent double connect spam
+  const joinedRef = useRef(false);
+
   useEffect(() => {
-    // Connect socket when component mounts
+    // If we have a username, ensure connection exists
     if (username) {
       connectSocket(username);
     }
 
-    // Socket event listeners
+    const s = getSocket();
+    if (!s) return;
+
     function onConnect() {
       setIsConnected(true);
+
+      // ✅ join once after connect (and request initial data)
+      if (username && !joinedRef.current) {
+        s.emit("user:join", username);
+        s.emit("activities:request");
+        joinedRef.current = true;
+      } else {
+        // still request activities if you want
+        s.emit("activities:request");
+      }
     }
 
     function onDisconnect() {
       setIsConnected(false);
+      joinedRef.current = false; // allow re-join after reconnect
     }
 
     function onUsersOnline(users) {
@@ -32,57 +56,57 @@ export function useSocket(username = null) {
     }
 
     function onActivityNew(activity) {
-      setActivities((prev) => [activity, ...prev].slice(0, 50)); // Keep last 50
+      setActivities((prev) => [activity, ...prev].slice(0, 50));
     }
 
     function onActivitiesList(activityList) {
-      setActivities(activityList);
+      setActivities(activityList || []);
     }
 
-    // Register event listeners
-    socket.on('connect', onConnect);
-    socket.on('disconnect', onDisconnect);
-    socket.on('users:online', onUsersOnline);
-    socket.on('activity:new', onActivityNew);
-    socket.on('activities:list', onActivitiesList);
+    s.on("connect", onConnect);
+    s.on("disconnect", onDisconnect);
+    s.on("users:online", onUsersOnline);
+    s.on("activity:new", onActivityNew);
+    s.on("activities:list", onActivitiesList);
 
-    // Request initial data
-    if (socket.connected) {
-      socket.emit('activities:request');
-    }
+    // If already connected, run connect flow
+    if (s.connected) onConnect();
 
-    // Cleanup on unmount
     return () => {
-      socket.off('connect', onConnect);
-      socket.off('disconnect', onDisconnect);
-      socket.off('users:online', onUsersOnline);
-      socket.off('activity:new', onActivityNew);
-      socket.off('activities:list', onActivitiesList);
+      s.off("connect", onConnect);
+      s.off("disconnect", onDisconnect);
+      s.off("users:online", onUsersOnline);
+      s.off("activity:new", onActivityNew);
+      s.off("activities:list", onActivitiesList);
     };
   }, [username]);
 
-  // Emit cart add event
   const emitCartAdd = useCallback((productName) => {
-    socket.emit('cart:add', { productName });
+    const s = getSocket();
+    if (!s) return;
+    s.emit("cart:add", { productName });
   }, []);
 
-  // Emit product add event
   const emitProductNew = useCallback((product) => {
-    socket.emit('product:new', product);
+    const s = getSocket();
+    if (!s) return;
+    s.emit("product:new", product);
   }, []);
 
-  // Emit trade create event
   const emitTradeCreate = useCallback((tradeData) => {
-    socket.emit('trade:create', tradeData);
+    const s = getSocket();
+    if (!s) return;
+    s.emit("trade:create", tradeData);
   }, []);
 
-  // Emit chat message
   const emitChatMessage = useCallback((message) => {
-    socket.emit('chat:message', message);
+    const s = getSocket();
+    if (!s) return;
+    s.emit("chat:message", message);
   }, []);
 
   return {
-    socket,
+    socket: getSocket(),
     isConnected,
     onlineUsers,
     activities,
@@ -91,6 +115,6 @@ export function useSocket(username = null) {
     emitTradeCreate,
     emitChatMessage,
     connect: connectSocket,
-    disconnect: disconnectSocket
+    disconnect: disconnectSocket,
   };
 }
