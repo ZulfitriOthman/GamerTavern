@@ -1,15 +1,41 @@
 // App.jsx
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { Routes, Route, Link } from "react-router-dom";
 
 import ShopPage from "./pages/ShopPage";
 import CartPage from "./pages/CartPage";
 import TradePage from "./pages/TradePage";
 import NewsPage from "./pages/NewsPage";
+import SocketDemo from "./pages/SocketDemo";
+import SignUpPage from "./pages/SignUpPage";
+import LoginPage from "./pages/LoginPage";
+import ChatPage from "./pages/ChatPage";
+
+// ✅ Socket.IO (no direct `socket` export anymore)
+import { connectSocket, disconnectSocket, getSocket } from "./socket/socketClient";
 
 function App() {
   const [cart, setCart] = useState([]);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const [username] = useState(() => {
+    const stored = localStorage.getItem("tavern_username");
+    if (stored) return stored;
+
+    const newUsername = `Traveler${Math.floor(Math.random() * 1000)}`;
+    localStorage.setItem("tavern_username", newUsername);
+    return newUsername;
+  });
+
+  // ✅ Connect to Socket.IO on mount
+  useEffect(() => {
+    connectSocket(username);
+    console.log("🎮 Connecting to Socket.IO as:", username);
+
+    return () => {
+      disconnectSocket();
+    };
+  }, [username]);
 
   const cartTotalItems = useMemo(
     () => cart.reduce((sum, item) => sum + item.quantity, 0),
@@ -31,6 +57,12 @@ function App() {
       }
       return [...prev, { ...product, quantity: 1 }];
     });
+
+    // 🔴 Emit socket event - Broadcast to all users!
+    const s = getSocket();
+    if (s?.connected) {
+      s.emit("cart:add", { productName: product.name });
+    }
   };
 
   const removeFromCart = (id) => {
@@ -52,10 +84,9 @@ function App() {
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(139,92,246,0.3),transparent_50%)]" />
       </div>
 
-      {/* NAVBAR - Fantasy Style (Responsive + Animated Mobile Menu) */}
+      {/* NAVBAR */}
       <header className="sticky top-0 z-50 border-b border-amber-900/30 bg-slate-950/95 backdrop-blur-xl shadow-2xl shadow-purple-900/20">
         <div className="relative">
-          {/* Ornate top border */}
           <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-500/50 to-transparent" />
 
           <div className="mx-auto flex max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8 py-4 sm:py-5">
@@ -91,6 +122,7 @@ function App() {
               {[
                 { to: "/shop", label: "Shop" },
                 { to: "/trade", label: "Trade" },
+                { to: "/chat", label: "Chat" },
                 { to: "/news", label: "News" },
               ].map((item) => (
                 <Link
@@ -103,6 +135,15 @@ function App() {
                   <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber-500 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
                 </Link>
               ))}
+
+              <Link
+                to="/login"
+                className="group relative px-5 lg:px-6 py-2.5 font-serif text-sm font-medium tracking-wide text-amber-100 transition-all hover:text-amber-300"
+              >
+                <span className="relative z-10">Login</span>
+                <div className="absolute inset-0 scale-x-0 rounded-lg bg-gradient-to-r from-amber-950/50 to-purple-950/50 transition-transform group-hover:scale-x-100" />
+                <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber-500 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+              </Link>
 
               <Link
                 to="/cart"
@@ -137,7 +178,7 @@ function App() {
             </div>
           </div>
 
-          {/* Mobile menu panel (Animated) */}
+          {/* Mobile menu panel */}
           <div
             className={`md:hidden overflow-hidden transition-all duration-300 ease-out
               ${
@@ -152,7 +193,10 @@ function App() {
                 {[
                   { to: "/shop", label: "Shop" },
                   { to: "/trade", label: "Trade" },
+                  { to: "/chat", label: "Chat" },
                   { to: "/news", label: "News" },
+                  { to: "/login", label: "Login" },
+                  { to: "/signup", label: "Sign Up" },
                 ].map((item) => (
                   <Link
                     key={item.to}
@@ -172,7 +216,6 @@ function App() {
             </div>
           </div>
 
-          {/* Ornate bottom border */}
           <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-amber-500/50 to-transparent" />
         </div>
       </header>
@@ -212,6 +255,10 @@ function App() {
 
           <Route path="/trade" element={<TradePage />} />
           <Route path="/news" element={<NewsPage />} />
+          <Route path="/chat" element={<ChatPage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/signup" element={<SignUpPage />} />
+          <Route path="/socket-demo" element={<SocketDemo />} />
 
           <Route
             path="/cart"
