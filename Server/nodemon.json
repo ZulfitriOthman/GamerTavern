@@ -1,8 +1,8 @@
 {
-  "watch": ["server"],
+  "watch": ["."],
   "ext": "js,json",
-  "ignore": ["node_modules", "client/src"],
-  "exec": "node server/server.js",
+  "ignore": ["node_modules"],
+  "exec": "node server.js",
   "env": {
     "NODE_ENV": "development"
   },

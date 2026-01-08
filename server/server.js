@@ -32,7 +32,12 @@ const EXTRA_ORIGINS = (process.env.EXTRA_ORIGINS || "")
   .filter(Boolean);
 
 const allowlist = Array.from(
-  new Set([CLIENT_URL, "http://localhost:5173", ...EXTRA_ORIGINS])
+  new Set([
+    CLIENT_URL,
+    "http://localhost:5173", // Main NanashiCollectibles site
+    "http://localhost:5174", // Merchant portal
+    ...EXTRA_ORIGINS,
+  ])
 );
 
 /* ============================================================
@@ -78,6 +83,20 @@ const onlineUsers = new Map(); // socketId -> { username, socketId }
 const activeTrades = new Map(); // tradeId -> trade object
 const recentActivities = []; // newest first
 
+// Merchant stores
+const merchants = new Map(); // email -> { id, email, password, name, role }
+const products = new Map(); // productId -> product object
+const orders = new Map(); // orderId -> order object
+
+// Demo merchant account (in production, use proper password hashing)
+merchants.set("merchant@nanashi.com", {
+  id: "merchant-1",
+  email: "merchant@nanashi.com",
+  password: "merchant123", // In production: use bcrypt
+  name: "Nanashi Merchant",
+  role: "merchant",
+});
+
 const pushActivity = (activity) => {
   recentActivities.unshift(activity);
   if (recentActivities.length > 20) recentActivities.pop();
@@ -89,7 +108,7 @@ const pushActivity = (activity) => {
    ============================================================ */
 
 app.get("/", (req, res) => {
-  res.status(200).send("✅ GamerTavern Socket.IO server is running.");
+  res.status(200).send("✅ Nanashi Collectibles Socket.IO server is running.");
 });
 
 app.get("/api/health", (req, res) => {
@@ -108,6 +127,166 @@ app.get("/api/stats", (req, res) => {
     activeTrades: activeTrades.size,
     recentActivities: recentActivities.slice(0, 10),
   });
+});
+
+/* ============================================================
+   Merchant API Routes
+   ============================================================ */
+
+// Simple auth middleware
+const authMerchant = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith("Bearer ")) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  const token = authHeader.substring(7);
+  // In production, verify JWT. For now, token = email
+  const merchant = merchants.get(token);
+  if (!merchant) {
+    return res.status(401).json({ message: "Invalid token" });
+  }
+
+  req.merchant = merchant;
+  next();
+};
+
+// Login
+app.post("/api/auth/login", (req, res) => {
+  const { email, password } = req.body;
+
+  const merchant = merchants.get(email);
+  if (!merchant || merchant.password !== password) {
+    return res.status(401).json({ message: "Invalid credentials" });
+  }
+
+  // In production, generate JWT. For now, return email as token
+  res.json({
+    token: merchant.email,
+    user: {
+      id: merchant.id,
+      email: merchant.email,
+      name: merchant.name,
+      role: merchant.role,
+    },
+  });
+});
+
+// List products
+app.get("/api/merchant/products", authMerchant, (req, res) => {
+  const productList = Array.from(products.values());
+  res.json(productList);
+});
+
+// Create/Update product
+app.post("/api/merchant/products", authMerchant, (req, res) => {
+  const { id, name, price, stock, image, description, category } = req.body;
+
+  const productId = id || `prod-${Date.now()}`;
+  const product = {
+    id: productId,
+    name,
+    price: Number(price),
+    stock: Number(stock),
+    image,
+    description,
+    category,
+    merchantId: req.merchant.id,
+    createdAt: products.get(productId)?.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  products.set(productId, product);
+
+  // Broadcast to main website
+  io.emit("product:added", product);
+
+  const activity = {
+    id: Date.now(),
+    type: "product",
+    message: `${product.name} ${id ? "updated" : "added"} by merchant`,
+    timestamp: new Date().toISOString(),
+  };
+  pushActivity(activity);
+
+  res.json(product);
+});
+
+// Update product
+app.patch("/api/merchant/products/:id", authMerchant, (req, res) => {
+  const { id } = req.params;
+  const product = products.get(id);
+
+  if (!product) {
+    return res.status(404).json({ message: "Product not found" });
+  }
+
+  const updated = {
+    ...product,
+    ...req.body,
+    id,
+    updatedAt: new Date().toISOString(),
+  };
+
+  products.set(id, updated);
+
+  // Broadcast price/stock changes
+  if (req.body.price !== undefined) {
+    io.emit("price:changed", {
+      productId: id,
+      productName: updated.name,
+      newPrice: updated.price,
+    });
+  }
+
+  if (req.body.stock !== undefined) {
+    io.emit("stock:changed", {
+      productId: id,
+      productName: updated.name,
+      stock: updated.stock,
+    });
+  }
+
+  res.json(updated);
+});
+
+// Delete product
+app.delete("/api/merchant/products/:id", authMerchant, (req, res) => {
+  const { id } = req.params;
+
+  if (!products.has(id)) {
+    return res.status(404).json({ message: "Product not found" });
+  }
+
+  products.delete(id);
+  io.emit("product:removed", { productId: id });
+
+  res.json({ message: "Product deleted" });
+});
+
+// List orders
+app.get("/api/merchant/orders", authMerchant, (req, res) => {
+  const orderList = Array.from(orders.values());
+  res.json(orderList);
+});
+
+// Update order status
+app.patch("/api/merchant/orders/:id", authMerchant, (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  const order = orders.get(id);
+  if (!order) {
+    return res.status(404).json({ message: "Order not found" });
+  }
+
+  order.status = status;
+  order.updatedAt = new Date().toISOString();
+
+  orders.set(id, order);
+  io.emit("order:updated", order);
+
+  res.json(order);
 });
 
 /* ============================================================
@@ -287,7 +466,7 @@ io.on("connection", (socket) => {
 
 httpServer.listen(PORT, () => {
   console.log("\n" + "=".repeat(60));
-  console.log("🎮 GamerTavern Socket.IO Server Started!");
+  console.log("🎮 Nanashi Collectibles Socket.IO Server Started!");
   console.log("=".repeat(60));
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`🌐 Allowed origins: ${allowlist.join(", ")}`);
