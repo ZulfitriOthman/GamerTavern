@@ -1,17 +1,8 @@
+// socketClient.js
 import { io } from "socket.io-client";
 
 let socket = null;
-
-/**
- * Get current socket instance (may be null before connect)
- */
 export const getSocket = () => socket;
-
-/**
- * Connect socket (singleton)
- * - Uses VITE_SOCKET_URL for production
- * - Emits user:join after connect
- */
 export const connectSocket = (username) => {
   const url =
     import.meta.env.VITE_SOCKET_URL?.trim() || "http://localhost:3001";
