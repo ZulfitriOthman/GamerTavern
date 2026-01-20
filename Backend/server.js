@@ -12,14 +12,17 @@ import { Server } from "socket.io";
 
 import { initDB, dbPing } from "./modules/db.module.js";
 
-// ✅ modular routes (factories)
+// modular routes (factories)
 import createHealthRoutes from "./routes/api/health.routes.js";
 import createMerchantRoutes from "./routes/api/merchant.routes.js";
 
-// ✅ modular sockets (factories)
+// modular sockets (factories)
 import shopSocketController from "./sockets/shop.socket.js";
 import tradeSocketController from "./sockets/trade.socket.js";
 import chatSocketController from "./sockets/chat.socket.js";
+
+import createAuthRoutes from "./routes/api/auth.routes.js";
+
 
 dotenv.config({ path: ".env.dev", override: true }); // switch to ".env" in production
 
@@ -77,7 +80,7 @@ app.use(
 );
 
 // Preflight
-app.options("*", cors());
+app.options("/", cors());
 
 // Static
 app.use("/public", express.static(publicPath));
@@ -240,6 +243,15 @@ app.use(
     stores,
   })
 );
+
+// Auth routes
+app.use(
+  "/api",
+  createAuthRoutes({
+    db,
+  })
+);
+
 
 app.use(
   "/api",
