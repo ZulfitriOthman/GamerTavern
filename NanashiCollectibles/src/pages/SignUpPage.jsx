@@ -2,12 +2,17 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useSocket } from "../hooks/useSocket";
+import { register } from "../api/auth";
+import { tokenStore } from "../api/token";
 
 const emailRegex = /\S+@\S+\.\S+/;
 
 export default function SignUpPage() {
   const navigate = useNavigate();
+  /* "is emitAccountCreate and connect unused????" - Zb
   const { isConnected, emitAccountCreate, connect } = useSocket(null);
+  */
+  const { isConnected } = useSocket(null);
 
   const [formData, setFormData] = useState({
     username: "",
@@ -88,20 +93,26 @@ export default function SignUpPage() {
         password: formData.password,
       };
 
-      const res = await emitAccountCreate(payload);
+      const res = await register(payload); // HTTP call
+      
+      // const res = await emitAccountCreate(payload);
 
+      // Save JWT + user locally
+      tokenStore.set(res.token);
+      localStorage.setItem("tavern_current_user", JSON.stringify(res.user));
+      localStorage.setItem("tavern_username", res.user?.NAME || payload.name);
+      
+      /* Testing
       if (!res?.success) {
         setServerError(res?.message || "Failed to create account.");
         return;
       }
-
-      // store logged-in user data locally (optional)
-      const account = res.data;
-      localStorage.setItem("tavern_current_user", JSON.stringify(account));
-      localStorage.setItem("tavern_username", account?.name || payload.name);
+      */
 
       // move user to login or home
-      navigate("/login");
+      navigate("/");
+    } catch (err) {
+      setServerError(err.message || "Failed to create account.");
     } finally {
       setIsSubmitting(false);
     }
