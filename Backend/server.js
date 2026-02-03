@@ -21,11 +21,14 @@ import shopSocketController from "./sockets/shop.socket.js";
 import tradeSocketController from "./sockets/trade.socket.js";
 import chatSocketController from "./sockets/chat.socket.js";
 
-dotenv.config({ path: ".env.dev", override: true }); // switch to ".env" in production
-
-/* ------------------------------ Paths ------------------------------ */
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+dotenv.config({
+  path: path.join(__dirname, ".env.dev"),
+  override: true,
+});
+
 
 const publicPath = path.join(process.cwd(), "public");
 const tmpDir = path.join(process.cwd(), "tmp");
@@ -63,21 +66,23 @@ const allowlist = Array.from(new Set([...DEFAULT_ORIGINS, ...EXTRA_ORIGINS]));
 app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: true, limit: "5mb" }));
 
-app.use(
-  cors({
-    origin: (origin, cb) => {
-      if (!origin) return cb(null, true); // Postman / server-to-server
-      if (allowlist.includes(origin)) return cb(null, true);
-      return cb(new Error(`CORS blocked: ${origin}`));
-    },
-    credentials: true,
-    methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  })
-);
+// ✅ Build corsOptions once so it is consistent everywhere (including preflight)
+const corsOptions = {
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true); // Postman / server-to-server
+    if (allowlist.includes(origin)) return cb(null, true);
+    return cb(new Error(`CORS blocked: ${origin}`));
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+};
 
-// Preflight
-app.options("*", cors());
+app.use(cors(corsOptions));
+
+// ✅ Preflight (fix path-to-regexp crash)
+// DO NOT use "*" here. Use a regex or "/*".
+app.options(/.*/, cors(corsOptions));
 
 // Static
 app.use("/public", express.static(publicPath));
@@ -283,9 +288,7 @@ app.use((err, _req, res, _next) => {
   if (String(err?.message || "").startsWith("CORS blocked:")) {
     return res.status(403).json({ message: err.message });
   }
-  if (
-    String(err?.message || "").startsWith("Not allowed by CORS (socket.io):")
-  ) {
+  if (String(err?.message || "").startsWith("Not allowed by CORS (socket.io):")) {
     return res.status(403).json({ message: err.message });
   }
   console.error("[SERVER ERROR]", err);
@@ -303,7 +306,7 @@ async function start() {
       isHealthy = Boolean(ok);
     } catch (e) {
       console.warn("[DB] ping failed:", e.message);
-      isHealthy = false; // optional: mark unhealthy if DB is critical
+      isHealthy = false;
     }
 
     httpServer.listen(PORT, () => {
@@ -313,9 +316,7 @@ async function start() {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`🌐 Allowed origins: ${allowlist.join(", ")}`);
       console.log(
-        `🗄️  DB products mode: ${
-          useDbForProducts ? "ON" : "OFF"
-        } (USE_DB_PRODUCTS)`
+        `🗄️  DB products mode: ${useDbForProducts ? "ON" : "OFF"} (USE_DB_PRODUCTS)`
       );
       console.log("📡 WebSocket ready for connections");
       console.log("=".repeat(60) + "\n");
