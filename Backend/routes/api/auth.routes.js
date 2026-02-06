@@ -1,18 +1,25 @@
+// routes/auth.routes.js
 import express from "express";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 
 /**
- * Factory route (B-JAUR style)
- * Mounts at /api, so endpoints become:
+ * Factory route
+ * Mounted at /api/auth, so endpoints become:
  * POST /api/auth/register
  * POST /api/auth/login
  * GET  /api/auth/me
  */
-export default function createAuthRoutes({ db }) {
+export default function createAuthRoutes({ db, io } = {}) {
   const router = express.Router();
 
+  // -------------------------
+  // Helpers
+  // -------------------------
   function signToken(user) {
+    if (!process.env.JWT_SECRET) {
+      throw new Error("JWT_SECRET is not set in environment variables");
+    }
     return jwt.sign(
       { sub: user.ID, email: user.EMAIL, name: user.NAME },
       process.env.JWT_SECRET,
@@ -26,6 +33,9 @@ export default function createAuthRoutes({ db }) {
     if (!token) return res.status(401).json({ message: "missing token" });
 
     try {
+      if (!process.env.JWT_SECRET) {
+        return res.status(500).json({ message: "server misconfigured (JWT_SECRET missing)" });
+      }
       req.user = jwt.verify(token, process.env.JWT_SECRET);
       return next();
     } catch {
@@ -33,15 +43,17 @@ export default function createAuthRoutes({ db }) {
     }
   }
 
+  // -------------------------
   // POST /api/auth/register
-  router.post("/auth/register", async (req, res) => {
+  // -------------------------
+  router.post("/register", async (req, res) => {
     try {
+      if (!db) return res.status(500).json({ message: "DB is not configured" });
+
       const { name, email, phone, password } = req.body || {};
 
       if (!name || !email || !password) {
-        return res
-          .status(400)
-          .json({ message: "name, email, password are required" });
+        return res.status(400).json({ message: "name, email, password are required" });
       }
 
       const normalizedEmail = String(email).trim().toLowerCase();
@@ -67,6 +79,9 @@ export default function createAuthRoutes({ db }) {
       const user = rows?.[0];
       const token = signToken(user);
 
+      // optional socket event
+      io?.emit?.("auth:registered", { userId: user?.ID, email: user?.EMAIL });
+
       return res.status(201).json({ ok: true, user, token });
     } catch (err) {
       if (err?.code === "ER_DUP_ENTRY") {
@@ -77,14 +92,16 @@ export default function createAuthRoutes({ db }) {
     }
   });
 
+  // -------------------------
   // POST /api/auth/login
-  router.post("/auth/login", async (req, res) => {
+  // -------------------------
+  router.post("/login", async (req, res) => {
     try {
+      if (!db) return res.status(500).json({ message: "DB is not configured" });
+
       const { email, password } = req.body || {};
       if (!email || !password) {
-        return res
-          .status(400)
-          .json({ message: "email and password are required" });
+        return res.status(400).json({ message: "email and password are required" });
       }
 
       const normalizedEmail = String(email).trim().toLowerCase();
@@ -113,6 +130,9 @@ export default function createAuthRoutes({ db }) {
 
       const token = signToken(user);
 
+      // optional socket event
+      io?.emit?.("auth:login", { userId: user?.ID, email: user?.EMAIL });
+
       return res.json({ ok: true, user, token });
     } catch (err) {
       console.error("[auth/login] error:", err);
@@ -120,8 +140,10 @@ export default function createAuthRoutes({ db }) {
     }
   });
 
+  // -------------------------
   // GET /api/auth/me (protected)
-  router.get("/auth/me", requireAuth, async (req, res) => {
+  // -------------------------
+  router.get("/me", requireAuth, async (req, res) => {
     return res.json({ ok: true, user: req.user });
   });
 

@@ -15,6 +15,7 @@ import { initDB, dbPing } from "./modules/db.module.js";
 // modular routes (factories)
 import createHealthRoutes from "./routes/api/health.routes.js";
 import createMerchantRoutes from "./routes/api/merchant.routes.js";
+import createAuthRoutes from "./routes/api/auth.routes.js";
 
 // modular sockets (factories)
 import shopSocketController from "./sockets/shop.socket.js";
@@ -28,7 +29,6 @@ dotenv.config({
   path: path.join(__dirname, ".env.dev"),
   override: true,
 });
-
 
 const publicPath = path.join(process.cwd(), "public");
 const tmpDir = path.join(process.cwd(), "tmp");
@@ -54,12 +54,7 @@ const EXTRA_ORIGINS = (process.env.EXTRA_ORIGINS || "")
   .map((s) => s.trim())
   .filter(Boolean);
 
-const DEFAULT_ORIGINS = [
-  CLIENT_URL,
-  "http://localhost:5173",
-  "http://localhost:5174",
-];
-
+const DEFAULT_ORIGINS = [CLIENT_URL, "http://localhost:5173", "http://localhost:5174"];
 const allowlist = Array.from(new Set([...DEFAULT_ORIGINS, ...EXTRA_ORIGINS]));
 
 /* ------------------------------ Middleware ------------------------------ */
@@ -80,8 +75,7 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
-// ✅ Preflight (fix path-to-regexp crash)
-// DO NOT use "*" here. Use a regex or "/*".
+// ✅ Preflight
 app.options(/.*/, cors(corsOptions));
 
 // Static
@@ -150,8 +144,7 @@ app.get("/api/db-test", async (_req, res) => {
 });
 
 // Feature flags
-const useDbForProducts =
-  String(process.env.USE_DB_PRODUCTS || "false").toLowerCase() === "true";
+const useDbForProducts = String(process.env.USE_DB_PRODUCTS || "false").toLowerCase() === "true";
 
 /* ------------------------------
    Optional schema bootstrap
@@ -207,7 +200,7 @@ async function ensureSchema() {
 }
 
 /* ------------------------------
-   Shared stores (kept like your current)
+   Shared stores
 -------------------------------- */
 const stores = {
   onlineUsers: new Map(),
@@ -246,14 +239,8 @@ app.use(
   })
 );
 
-// Auth routes
-app.use(
-  "/api",
-  createAuthRoutes({
-    db,
-  })
-);
-
+// ✅ Auth routes (fixed)
+app.use("/api/auth", createAuthRoutes({ db, io }));
 
 app.use(
   "/api",
@@ -324,9 +311,7 @@ async function start() {
       console.log("=".repeat(60));
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`🌐 Allowed origins: ${allowlist.join(", ")}`);
-      console.log(
-        `🗄️  DB products mode: ${useDbForProducts ? "ON" : "OFF"} (USE_DB_PRODUCTS)`
-      );
+      console.log(`🗄️  DB products mode: ${useDbForProducts ? "ON" : "OFF"} (USE_DB_PRODUCTS)`);
       console.log("📡 WebSocket ready for connections");
       console.log("=".repeat(60) + "\n");
     });
