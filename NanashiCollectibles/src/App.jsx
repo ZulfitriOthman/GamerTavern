@@ -1,6 +1,7 @@
 // App.jsx
-import { useMemo, useState, useEffect } from "react";
-import { Routes, Route, Link } from "react-router-dom";
+import { useMemo, useState, useEffect, useRef } from "react";
+import { Routes, Route, Link, NavLink, useLocation } from "react-router-dom";
+import { AnimatePresence, motion } from "framer-motion";
 
 import ShopPage from "./pages/ShopPage";
 import CartPage from "./pages/CartPage";
@@ -12,9 +13,35 @@ import LoginPage from "./pages/LoginPage";
 import ChatPage from "./pages/ChatPage";
 
 // ✅ Socket.IO (no direct `socket` export anymore)
-import { connectSocket, disconnectSocket, getSocket } from "./socket/socketClient";
+import {
+  connectSocket,
+  disconnectSocket,
+  getSocket,
+} from "./socket/socketClient";
+
+const pageVariants = {
+  initial: { opacity: 0, y: 16, filter: "blur(8px)" },
+  animate: { opacity: 1, y: 0, filter: "blur(0px)" },
+  exit: { opacity: 0, y: -16, filter: "blur(8px)" },
+};
+
+function PageWrap({ children }) {
+  return (
+    <motion.div
+      variants={pageVariants}
+      initial="initial"
+      animate="animate"
+      exit="exit"
+      transition={{ duration: 0.35, ease: "easeOut" }}
+    >
+      {children}
+    </motion.div>
+  );
+}
 
 function App() {
+  const location = useLocation();
+
   const [cart, setCart] = useState([]);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -27,24 +54,30 @@ function App() {
     return newUsername;
   });
 
-  // ✅ Connect to Socket.IO on mount
+  const didConnectRef = useRef(false);
+
   useEffect(() => {
+    if (didConnectRef.current) return;
+    didConnectRef.current = true;
+
     connectSocket(username);
     console.log("🎮 Connecting to Socket.IO as:", username);
-
-    return () => {
-      disconnectSocket();
-    };
   }, [username]);
+
+  useEffect(() => {
+    const onUnload = () => disconnectSocket();
+    window.addEventListener("beforeunload", onUnload);
+    return () => window.removeEventListener("beforeunload", onUnload);
+  }, []);
 
   const cartTotalItems = useMemo(
     () => cart.reduce((sum, item) => sum + item.quantity, 0),
-    [cart]
+    [cart],
   );
 
   const cartTotalPrice = useMemo(
     () => cart.reduce((sum, item) => sum + item.quantity * item.price, 0),
-    [cart]
+    [cart],
   );
 
   const addToCart = (product) => {
@@ -52,7 +85,7 @@ function App() {
       const existing = prev.find((i) => i.id === product.id);
       if (existing) {
         return prev.map((i) =>
-          i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i
+          i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i,
         );
       }
       return [...prev, { ...product, quantity: 1 }];
@@ -73,7 +106,7 @@ function App() {
     setCart((prev) =>
       prev
         .map((i) => (i.id === id ? { ...i, quantity: Math.max(1, qty) } : i))
-        .filter((i) => i.quantity > 0)
+        .filter((i) => i.quantity > 0),
     );
   };
 
@@ -124,34 +157,26 @@ function App() {
                 { to: "/trade", label: "Trade" },
                 { to: "/chat", label: "Chat" },
                 { to: "/news", label: "News" },
+                { to: "/login", label: "Login" },
+                { to: "/cart", label: `Cart (${cartTotalItems})` },
               ].map((item) => (
-                <Link
+                <NavLink
                   key={item.to}
                   to={item.to}
-                  className="group relative px-5 lg:px-6 py-2.5 font-serif text-sm font-medium tracking-wide text-amber-100 transition-all hover:text-amber-300"
+                  className={({ isActive }) =>
+                    `group relative px-5 lg:px-6 py-2.5 font-serif text-sm font-medium tracking-wide transition-all
+                    ${
+                      isActive
+                        ? "text-amber-400"
+                        : "text-amber-100 hover:text-amber-300"
+                    }`
+                  }
                 >
                   <span className="relative z-10">{item.label}</span>
                   <div className="absolute inset-0 scale-x-0 rounded-lg bg-gradient-to-r from-amber-950/50 to-purple-950/50 transition-transform group-hover:scale-x-100" />
                   <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber-500 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
-                </Link>
+                </NavLink>
               ))}
-
-              <Link
-                to="/login"
-                className="group relative px-5 lg:px-6 py-2.5 font-serif text-sm font-medium tracking-wide text-amber-100 transition-all hover:text-amber-300"
-              >
-                <span className="relative z-10">Login</span>
-                <div className="absolute inset-0 scale-x-0 rounded-lg bg-gradient-to-r from-amber-950/50 to-purple-950/50 transition-transform group-hover:scale-x-100" />
-                <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber-500 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
-              </Link>
-
-              <Link
-                to="/cart"
-                className="group relative ml-3 lg:ml-4 overflow-hidden rounded-lg border border-amber-600/50 bg-gradient-to-r from-amber-950/50 to-purple-950/50 px-5 lg:px-6 py-2.5 font-serif text-sm font-semibold tracking-wide text-amber-100 shadow-lg shadow-amber-900/30 transition-all hover:border-amber-500 hover:shadow-amber-500/40"
-              >
-                <div className="absolute inset-0 bg-gradient-to-r from-amber-600/0 via-amber-600/10 to-amber-600/0 opacity-0 transition-opacity group-hover:opacity-100" />
-                <span className="relative">Cart ({cartTotalItems})</span>
-              </Link>
             </nav>
 
             {/* Mobile controls */}
@@ -196,7 +221,7 @@ function App() {
                   { to: "/chat", label: "Chat" },
                   { to: "/news", label: "News" },
                   { to: "/login", label: "Login" },
-                  { to: "/signup", label: "Sign Up" },
+                  { to: "/cart", label: `Cart (${cartTotalItems})` },
                 ].map((item) => (
                   <Link
                     key={item.to}
@@ -222,56 +247,113 @@ function App() {
 
       {/* ROUTES */}
       <main className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 sm:py-10">
-        <Routes>
-          <Route path="/" element={<NewsPage />} />
+        <AnimatePresence mode="wait">
+          <Routes location={location} key={location.pathname}>
+            <Route
+              path="/"
+              element={
+                <PageWrap>
+                  <NewsPage />
+                </PageWrap>
+              }
+            />
 
-          <Route
-            path="/shop"
-            element={
-              <ShopPage
-                cart={cart}
-                addToCart={addToCart}
-                removeFromCart={removeFromCart}
-                updateQuantity={updateQuantity}
-                cartTotalItems={cartTotalItems}
-                cartTotalPrice={cartTotalPrice}
-              />
-            }
-          />
+            <Route
+              path="/shop"
+              element={
+                <PageWrap>
+                  <ShopPage
+                    cart={cart}
+                    addToCart={addToCart}
+                    removeFromCart={removeFromCart}
+                    updateQuantity={updateQuantity}
+                    cartTotalItems={cartTotalItems}
+                    cartTotalPrice={cartTotalPrice}
+                  />
+                </PageWrap>
+              }
+            />
 
-          <Route
-            path="/tcg/:cardId"
-            element={
-              <ShopPage
-                cart={cart}
-                addToCart={addToCart}
-                removeFromCart={removeFromCart}
-                updateQuantity={updateQuantity}
-                cartTotalItems={cartTotalItems}
-                cartTotalPrice={cartTotalPrice}
-              />
-            }
-          />
+            <Route
+              path="/tcg/:cardId"
+              element={
+                <PageWrap>
+                  <ShopPage
+                    cart={cart}
+                    addToCart={addToCart}
+                    removeFromCart={removeFromCart}
+                    updateQuantity={updateQuantity}
+                    cartTotalItems={cartTotalItems}
+                    cartTotalPrice={cartTotalPrice}
+                  />
+                </PageWrap>
+              }
+            />
 
-          <Route path="/trade" element={<TradePage />} />
-          <Route path="/news" element={<NewsPage />} />
-          <Route path="/chat" element={<ChatPage />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/signup" element={<SignUpPage />} />
-          <Route path="/socket-demo" element={<SocketDemo />} />
+            <Route
+              path="/trade"
+              element={
+                <PageWrap>
+                  <TradePage />
+                </PageWrap>
+              }
+            />
+            <Route
+              path="/news"
+              element={
+                <PageWrap>
+                  <NewsPage />
+                </PageWrap>
+              }
+            />
+            <Route
+              path="/chat"
+              element={
+                <PageWrap>
+                  <ChatPage />
+                </PageWrap>
+              }
+            />
+            <Route
+              path="/login"
+              element={
+                <PageWrap>
+                  <LoginPage />
+                </PageWrap>
+              }
+            />
+            <Route
+              path="/signup"
+              element={
+                <PageWrap>
+                  <SignUpPage />
+                </PageWrap>
+              }
+            />
+            <Route
+              path="/socket-demo"
+              element={
+                <PageWrap>
+                  <SocketDemo />
+                </PageWrap>
+              }
+            />
 
-          <Route
-            path="/cart"
-            element={
-              <CartPage
-                cart={cart}
-                removeFromCart={removeFromCart}
-                updateQuantity={updateQuantity}
-                cartTotalPrice={cartTotalPrice}
-              />
-            }
-          />
-        </Routes>
+            <Route
+              path="/cart"
+              element={
+                <PageWrap>
+                  <CartPage
+                    cart={cart}
+                    removeFromCart={removeFromCart}
+                    updateQuantity={updateQuantity}
+                    cartTotalPrice={cartTotalPrice}
+                  />
+                </PageWrap>
+              }
+            />
+          </Routes>
+        </AnimatePresence>
       </main>
     </div>
   );

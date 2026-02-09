@@ -2,35 +2,32 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { getSocket, connectSocket, disconnectSocket } from "../socket/socketClient";
 
-/**
- * Custom hook to use Socket.IO in React components
- * @param {string|null} username - optional username for join presence
- */
 export function useSocket(username = null) {
-  const socket = getSocket();
+  const [isConnected, setIsConnected] = useState(() => {
+    const s = getSocket();
+    return !!s?.connected;
+  });
 
-  const [isConnected, setIsConnected] = useState(socket ? socket.connected : false);
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [activities, setActivities] = useState([]);
 
   const joinedRef = useRef(false);
 
   useEffect(() => {
-    if (username) connectSocket(username);
-
     const s = getSocket();
     if (!s) return;
 
     function onConnect() {
       setIsConnected(true);
 
+      // Join presence once per connection
       if (username && !joinedRef.current) {
         s.emit("user:join", username);
-        s.emit("activities:request");
         joinedRef.current = true;
-      } else {
-        s.emit("activities:request");
       }
+
+      // Always request activities on connect
+      s.emit("activities:request");
     }
 
     function onDisconnect() {
@@ -56,6 +53,7 @@ export function useSocket(username = null) {
     s.on("activity:new", onActivityNew);
     s.on("activities:list", onActivitiesList);
 
+    // If already connected when hook mounts
     if (s.connected) onConnect();
 
     return () => {
@@ -92,11 +90,7 @@ export function useSocket(username = null) {
     isConnected,
     onlineUsers,
     activities,
-
     emitAccountCreate,
     emitAccountLogin,
-
-    connect: connectSocket,
-    disconnect: disconnectSocket,
   };
 }
