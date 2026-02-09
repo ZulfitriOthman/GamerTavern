@@ -5,14 +5,16 @@ import { db } from "../modules/mysql.module.js";
 
 const toStr = (v) => (v == null ? "" : String(v)).trim();
 
-function safePublicPersonaRow(row) {
+function safePublicUserRow(row) {
   if (!row) return null;
   return {
-    id: row.id,
-    name: row.name,
-    email: row.email,
-    phone: row.phone,
-    created_at: row.created_at,
+    id: row.ID,
+    name: row.NAME,
+    email: row.EMAIL,
+    phone: row.PHONE,
+    profile_icon: row.PROFILE_ICON,
+    created_at: row.CREATED_AT,
+    updated_at: row.UPDATED_AT,
   };
 }
 
@@ -31,7 +33,10 @@ export default function accountSocketController({
     const password = toStr(payload.password);
 
     if (!name || !email || !password) {
-      return cb({ success: false, message: "name, email, password are required." });
+      return cb({
+        success: false,
+        message: "name, email, password are required.",
+      });
     }
 
     try {
@@ -39,35 +44,37 @@ export default function accountSocketController({
       const passwordHash = await bcrypt.hash(password, rounds);
 
       const [result] = await db.execute(
-        `INSERT INTO persona (name, email, phone, password)
-         VALUES (?, ?, ?, ?)`,
-        [name, email, phone, passwordHash]
+        `INSERT INTO PERSONAL_USER (NAME, EMAIL, PHONE, PASSWORD, PROFILE_ICON)
+         VALUES (?, ?, ?, ?, ?)`,
+        [name, email, phone, passwordHash, payload.profileIcon || null],
       );
 
-      const personaId = result.insertId;
+      const userId = result.insertId;
 
       const [rows] = await db.execute(
-        `SELECT id, name, email, phone, created_at
-         FROM persona
-         WHERE id = ?`,
-        [personaId]
+        `SELECT ID, NAME, EMAIL, PHONE, PROFILE_ICON, CREATED_AT, UPDATED_AT
+         FROM PERSONAL_USER
+         WHERE ID = ?`,
+        [userId],
       );
 
-      const account = safePublicPersonaRow(rows?.[0]);
+      const account = safePublicUserRow(rows?.[0]);
 
       io.emit("account:created", account);
       pushActivity({
         id: Date.now(),
         type: "account",
-        message: `New account created (ID ${personaId})`,
+        message: `New account created (ID ${userId})`,
         timestamp: new Date().toISOString(),
       });
 
       return cb({ success: true, data: account });
     } catch (err) {
-      // Handle duplicate email/phone
       if (err?.code === "ER_DUP_ENTRY") {
-        return cb({ success: false, message: "Email or phone already exists." });
+        return cb({
+          success: false,
+          message: "Email or phone already exists.",
+        });
       }
       console.error("[socket][account:create] error:", err);
       return cb({ success: false, message: "Failed to create account." });
@@ -81,33 +88,37 @@ export default function accountSocketController({
     const id = Number(payload.id);
     if (!id) return cb({ success: false, message: "id is required." });
 
-    // Allow updating only safe fields
     const name = payload.name != null ? toStr(payload.name) : null;
     const phone = payload.phone != null ? toStr(payload.phone) : null;
+    const profileIcon =
+      payload.profileIcon != null ? toStr(payload.profileIcon) : null;
 
     const fields = [];
     const params = [];
 
     if (name !== null) {
-      fields.push("name = ?");
+      fields.push("NAME = ?");
       params.push(name);
     }
     if (phone !== null) {
-      fields.push("phone = ?");
+      fields.push("PHONE = ?");
       params.push(phone);
     }
-
-    if (fields.length === 0) {
-      return cb({ success: false, message: "No fields to update." });
+    if (profileIcon !== null) {
+      fields.push("PROFILE_ICON = ?");
+      params.push(profileIcon);
     }
+
+    // Keep UPDATED_AT current
+    fields.push("UPDATED_AT = NOW()");
 
     try {
       params.push(id);
 
       const [result] = await db.execute(
-        `UPDATE persona SET ${fields.join(", ")}
-         WHERE id = ?`,
-        params
+        `UPDATE PERSONAL_USER SET ${fields.join(", ")}
+         WHERE ID = ?`,
+        params,
       );
 
       if (result.affectedRows === 0) {
@@ -115,13 +126,13 @@ export default function accountSocketController({
       }
 
       const [rows] = await db.execute(
-        `SELECT id, name, email, phone, created_at
-         FROM persona
-         WHERE id = ?`,
-        [id]
+        `SELECT ID, NAME, EMAIL, PHONE, PROFILE_ICON, CREATED_AT, UPDATED_AT
+         FROM PERSONAL_USER
+         WHERE ID = ?`,
+        [id],
       );
 
-      const account = safePublicPersonaRow(rows?.[0]);
+      const account = safePublicUserRow(rows?.[0]);
 
       io.emit("account:updated", account);
       pushActivity({
@@ -142,36 +153,35 @@ export default function accountSocketController({
   });
 
   /* =========================================================
-     LOGIN (OPTIONAL BUT COMMON)
+     LOGIN
      ========================================================= */
   socket.on("account:login", async (payload = {}, cb = () => {}) => {
     const email = toStr(payload.email).toLowerCase();
     const password = toStr(payload.password);
 
     if (!email || !password) {
-      return cb({ success: false, message: "email and password are required." });
+      return cb({
+        success: false,
+        message: "email and password are required.",
+      });
     }
 
     try {
       const [rows] = await db.execute(
-        `SELECT id, name, email, phone, password, created_at
-         FROM persona
-         WHERE email = ?
+        `SELECT ID, NAME, EMAIL, PHONE, PROFILE_ICON, PASSWORD, CREATED_AT, UPDATED_AT
+         FROM PERSONAL_USER
+         WHERE EMAIL = ?
          LIMIT 1`,
-        [email]
+        [email],
       );
 
       const row = rows?.[0];
       if (!row) return cb({ success: false, message: "Invalid credentials." });
 
-      const ok = await bcrypt.compare(password, row.password);
+      const ok = await bcrypt.compare(password, row.PASSWORD);
       if (!ok) return cb({ success: false, message: "Invalid credentials." });
 
-      const account = safePublicPersonaRow(row);
-
-      // You can emit a user-specific event if you want:
-      // socket.emit("account:loggedIn", account);
-
+      const account = safePublicUserRow(row);
       return cb({ success: true, data: account });
     } catch (err) {
       console.error("[socket][account:login] error:", err);
@@ -180,46 +190,53 @@ export default function accountSocketController({
   });
 
   /* =========================================================
-     REQUEST RESET (GENERATE TOKEN)
+     REQUEST RESET (NO TOKEN IN YOUR TABLE)
+     Creates a record indicating a reset request.
      ========================================================= */
   socket.on("account:requestReset", async (payload = {}, cb = () => {}) => {
     const email = toStr(payload.email).toLowerCase();
     if (!email) return cb({ success: false, message: "email is required." });
 
     try {
-      const [pRows] = await db.execute(
-        `SELECT id, email FROM persona WHERE email = ? LIMIT 1`,
-        [email]
+      const [uRows] = await db.execute(
+        `SELECT ID, EMAIL FROM PERSONAL_USER WHERE EMAIL = ? LIMIT 1`,
+        [email],
       );
 
-      // Do not reveal whether email exists (security)
-      const persona = pRows?.[0];
-      if (!persona) {
-        return cb({ success: true, message: "If the account exists, a reset will be issued." });
+      // Security: don't reveal if email exists
+      const user = uRows?.[0];
+      if (!user) {
+        return cb({
+          success: true,
+          message: "If the account exists, a reset will be issued.",
+        });
       }
 
       const ttlMin = Number(process.env.RESET_TOKEN_TTL_MIN || 15);
 
-      // raw token for URL
-      const rawToken = crypto.randomBytes(32).toString("hex");
+      // raw token (send via email in real app)
+      const rawToken = crypto.randomBytes(32).toString("hex"); // 64 chars
 
-      // store hash of token (recommended)
-      const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+      // store hash
+      const tokenHash = crypto
+        .createHash("sha256")
+        .update(rawToken)
+        .digest("hex"); // 64 hex -> fits CHAR(64)
 
       await db.execute(
-        `INSERT INTO reset_password (persona_id, token, expires_at, used)
-         VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE), 0)`,
-        [persona.id, tokenHash, ttlMin]
+        `INSERT INTO RESET_PASSWORD (USER_ID, TOKEN_HASH, EXPIRES_AT, USED)
+       VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE), 0)`,
+        [user.ID, tokenHash, ttlMin],
       );
 
       pushActivity({
         id: Date.now(),
         type: "account",
-        message: `Password reset requested (persona_id ${persona.id})`,
+        message: `Password reset requested (USER_ID ${user.ID})`,
         timestamp: new Date().toISOString(),
       });
 
-      // Return raw token to client (in real app you email it)
+      // For dev: return token to client. Production: email this token.
       return cb({
         success: true,
         message: "Reset token generated.",
@@ -232,53 +249,72 @@ export default function accountSocketController({
   });
 
   /* =========================================================
-     RESET PASSWORD (CONSUME TOKEN)
+     RESET PASSWORD (BY USER_ID since no token)
      ========================================================= */
   socket.on("account:resetPassword", async (payload = {}, cb = () => {}) => {
     const rawToken = toStr(payload.token);
     const newPassword = toStr(payload.newPassword);
+    const confirmPassword = toStr(payload.confirmPassword);
 
-    if (!rawToken || !newPassword) {
-      return cb({ success: false, message: "token and newPassword are required." });
+    if (!rawToken || !newPassword || !confirmPassword) {
+      return cb({
+        success: false,
+        message: "token, newPassword, confirmPassword are required.",
+      });
+    }
+    if (newPassword !== confirmPassword) {
+      return cb({ success: false, message: "Passwords do not match." });
     }
 
     try {
-      const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+      const tokenHash = crypto
+        .createHash("sha256")
+        .update(rawToken)
+        .digest("hex");
 
-      // Find valid token
       const [rows] = await db.execute(
-        `SELECT id, persona_id, expires_at, used
-         FROM reset_password
-         WHERE token = ?
-         LIMIT 1`,
-        [tokenHash]
+        `SELECT ID, USER_ID, EXPIRES_AT, USED
+       FROM RESET_PASSWORD
+       WHERE TOKEN_HASH = ?
+       LIMIT 1`,
+        [tokenHash],
       );
 
       const rp = rows?.[0];
       if (!rp) return cb({ success: false, message: "Invalid token." });
-      if (rp.used) return cb({ success: false, message: "Token already used." });
+      if (rp.USED)
+        return cb({ success: false, message: "Token already used." });
 
-      // expires_at is a Date object or string depending on mysql2 config
       const now = new Date();
-      const exp = new Date(rp.expires_at);
+      const exp = new Date(rp.EXPIRES_AT);
       if (now > exp) return cb({ success: false, message: "Token expired." });
 
       const rounds = Number(process.env.BCRYPT_ROUNDS || 10);
       const passwordHash = await bcrypt.hash(newPassword, rounds);
 
-      // Use transaction for correctness
       const conn = await db.getConnection();
       try {
         await conn.beginTransaction();
 
-        await conn.execute(
-          `UPDATE persona SET password = ? WHERE id = ?`,
-          [passwordHash, rp.persona_id]
+        // Update user password
+        const [uRes] = await conn.execute(
+          `UPDATE PERSONAL_USER
+         SET PASSWORD = ?, UPDATED_AT = NOW()
+         WHERE ID = ?`,
+          [passwordHash, rp.USER_ID],
         );
 
+        if (uRes.affectedRows === 0) {
+          await conn.rollback();
+          return cb({ success: false, message: "User not found." });
+        }
+
+        // Mark token used
         await conn.execute(
-          `UPDATE reset_password SET used = 1 WHERE id = ?`,
-          [rp.id]
+          `UPDATE RESET_PASSWORD
+         SET USED = 1, UPDATED_AT = NOW()
+         WHERE ID = ?`,
+          [rp.ID],
         );
 
         await conn.commit();
@@ -292,7 +328,7 @@ export default function accountSocketController({
       pushActivity({
         id: Date.now(),
         type: "account",
-        message: `Password reset completed (persona_id ${rp.persona_id})`,
+        message: `Password reset completed (USER_ID ${rp.USER_ID})`,
         timestamp: new Date().toISOString(),
       });
 

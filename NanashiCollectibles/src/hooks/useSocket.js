@@ -1,6 +1,10 @@
-// src/hooks/useSocket.js
-import { useEffect, useState, useCallback, useRef } from "react";
-import { getSocket, connectSocket, disconnectSocket } from "../socket/socketClient";
+// NanashiCollectibles/src/hooks/useSocket.js
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import {
+  getSocket,
+  connectSocket,
+  disconnectSocket,
+} from "../socket/socketClient";
 
 export function useSocket(username = null) {
   const [isConnected, setIsConnected] = useState(() => {
@@ -12,6 +16,29 @@ export function useSocket(username = null) {
   const [activities, setActivities] = useState([]);
 
   const joinedRef = useRef(false);
+
+  // ✅ Public connect/disconnect for pages (SignUp/Login)
+  const connect = useCallback(
+    (joinName = username) => {
+      // connectSocket should create socket if not exists, and connect
+      connectSocket();
+
+      const s = getSocket();
+      if (s && joinName && !joinedRef.current) {
+        // If already connected, join immediately; else join when "connect" fires
+        if (s.connected) {
+          s.emit("user:join", joinName);
+          joinedRef.current = true;
+        }
+      }
+    },
+    [username]
+  );
+
+  const disconnect = useCallback(() => {
+    joinedRef.current = false;
+    disconnectSocket();
+  }, []);
 
   useEffect(() => {
     const s = getSocket();
@@ -65,32 +92,73 @@ export function useSocket(username = null) {
     };
   }, [username]);
 
-  /* ---------------- Account helpers ---------------- */
+  /* ---------------- Socket emit helpers ---------------- */
 
-  const emitAccountCreate = useCallback((payload) => {
-    const s = getSocket();
-    if (!s) return Promise.resolve({ success: false, message: "Socket not ready." });
+  const emitWithAck = useCallback((eventName, payload, timeoutMs = 8000) => {
+  const s = getSocket();
+  if (!s) return Promise.resolve({ success: false, message: "Socket not ready." });
 
-    return new Promise((resolve) => {
-      s.emit("account:create", payload, (res) => resolve(res));
+  // 🔍 debug
+  console.log("[socket][emit]", eventName, { connected: s.connected, payload });
+
+  return new Promise((resolve) => {
+    if (!s.connected) {
+      return resolve({ success: false, message: "Socket is not connected." });
+    }
+
+    // Socket.IO v4 ack timeout
+    s.timeout(timeoutMs).emit(eventName, payload, (err, res) => {
+      if (err) {
+        // err is usually: "operation has timed out"
+        console.error("[socket][ack-timeout]", eventName, err);
+        return resolve({ success: false, message: `Request timed out (${timeoutMs}ms).` });
+      }
+
+      console.log("[socket][ack]", eventName, res);
+      resolve(res);
     });
-  }, []);
+  });
+}, []);
 
-  const emitAccountLogin = useCallback((payload) => {
-    const s = getSocket();
-    if (!s) return Promise.resolve({ success: false, message: "Socket not ready." });
 
-    return new Promise((resolve) => {
-      s.emit("account:login", payload, (res) => resolve(res));
-    });
-  }, []);
+  const emitAccountCreate = useCallback(
+  (payload) => emitWithAck("account:create", payload),
+  [emitWithAck]
+);
+
+
+  const emitAccountLogin = useCallback(
+    (payload) => emitWithAck("account:login", payload),
+    [emitWithAck]
+  );
+
+  const emitAccountRequestReset = useCallback(
+    (payload) => emitWithAck("account:requestReset", payload),
+    [emitWithAck]
+  );
+
+  const emitAccountResetPassword = useCallback(
+    (payload) => emitWithAck("account:resetPassword", payload),
+    [emitWithAck]
+  );
+
+  // optional: expose current socket instance for debugging
+  const socket = useMemo(() => getSocket(), [isConnected]);
 
   return {
-    socket: getSocket(),
+    socket,
     isConnected,
     onlineUsers,
     activities,
+
+    // ✅ now your pages can call connect()
+    connect,
+    disconnect,
+
+    // ✅ account helpers
     emitAccountCreate,
     emitAccountLogin,
+    emitAccountRequestReset,
+    emitAccountResetPassword,
   };
 }

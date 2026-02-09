@@ -1,18 +1,15 @@
-// src/pages/SignUpPage.jsx
+// NanashiCollectibles/src/pages/SignUpPage.jsx
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useSocket } from "../hooks/useSocket";
-import { register } from "../api/auth";
-import { tokenStore } from "../api/token";
 
 const emailRegex = /\S+@\S+\.\S+/;
 
 export default function SignUpPage() {
   const navigate = useNavigate();
-  /* "is emitAccountCreate and connect unused????" - Zb
-  const { isConnected, emitAccountCreate, connect } = useSocket(null);
-  */
-  const { isConnected } = useSocket(null);
+
+  // ✅ Use socket only
+  const { isConnected, connect, emitAccountCreate } = useSocket(null);
 
   const [formData, setFormData] = useState({
     username: "",
@@ -54,7 +51,6 @@ export default function SignUpPage() {
     else if (!emailRegex.test(formData.email.trim()))
       newErrors.email = "Email is invalid";
 
-    // phone optional, but keep it reasonable
     if (formData.phone && !/^\+\d{6,15}$/.test(formData.phone.trim())) {
       newErrors.phone =
         "Phone must be in international format e.g. +673xxxxxxx";
@@ -83,36 +79,36 @@ export default function SignUpPage() {
     setServerError("");
 
     try {
-      // Ensure socket is connected (optional but helpful)
-      connect(formData.username.trim());
+      // ✅ ensure socket join/connection (if your hook uses username for presence)
+      connect?.(formData.username.trim());
 
       const payload = {
-        name: formData.username.trim(), // backend expects "name"
+        name: formData.username.trim(),
         email: formData.email.trim().toLowerCase(),
         phone: (formData.phone || "+673").trim(),
         password: formData.password,
+        // profileIcon: null, // optional if you support it
       };
 
-      const res = await register(payload); // HTTP call
-      
-      // const res = await emitAccountCreate(payload);
+      const res = await emitAccountCreate(payload);
+      console.log("register res:", res);
 
-      // Save JWT + user locally
-      tokenStore.set(res.token);
-      localStorage.setItem("tavern_current_user", JSON.stringify(res.user));
-      localStorage.setItem("tavern_username", res.user?.NAME || payload.name);
-      
-      /* Testing
       if (!res?.success) {
         setServerError(res?.message || "Failed to create account.");
         return;
       }
-      */
 
-      // move user to login or home
+      // `res.data` should be the user row returned by backend
+      const user = res.data;
+
+      localStorage.setItem("tavern_current_user", JSON.stringify(user));
+      localStorage.setItem("tavern_username", user?.name || payload.name);
+
+      // If you want after register -> login page:
+      // navigate("/login");
       navigate("/");
     } catch (err) {
-      setServerError(err.message || "Failed to create account.");
+      setServerError(err?.message || "Failed to create account.");
     } finally {
       setIsSubmitting(false);
     }
@@ -202,7 +198,7 @@ export default function SignUpPage() {
             ) : null}
           </div>
 
-          {/* Phone (optional) */}
+          {/* Phone */}
           <div>
             <label className="mb-2 block font-serif text-sm font-semibold text-amber-100">
               Phone <span className="text-amber-100/50">(optional)</span>

@@ -1,5 +1,5 @@
-// server.js - NanashiCollectibles (B-JAUR style structure)
-// Express + CORS allowlist + Socket.IO + MySQL pool + modular routes + modular sockets
+// server.js - NanashiCollectibles
+// ✅ Only sockets kept: account:create, account:login, account:requestReset, account:resetPassword
 
 import express from "express";
 import { createServer } from "http";
@@ -12,15 +12,12 @@ import { Server } from "socket.io";
 
 import { initDB, dbPing } from "./modules/db.module.js";
 
-// modular routes (factories)
+// routes (keep if you still need them)
 import createHealthRoutes from "./routes/api/health.routes.js";
-import createMerchantRoutes from "./routes/api/merchant.routes.js";
 import createAuthRoutes from "./routes/api/auth.routes.js";
 
-// modular sockets (factories)
-import shopSocketController from "./sockets/shop.socket.js";
-import tradeSocketController from "./sockets/trade.socket.js";
-import chatSocketController from "./sockets/chat.socket.js";
+// ✅ only socket controller kept
+import accountSocketController from "./sockets/account.socket.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -44,11 +41,8 @@ const httpServer = createServer(app);
 
 /* ------------------------------ Environment ------------------------------ */
 const PORT = process.env.PORT || 3001;
-
-// Your frontend URL (production). Example: https://tcg.nanashicollectibles.com
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
 
-// Optional: add more allowed origins via comma-separated env var
 const EXTRA_ORIGINS = (process.env.EXTRA_ORIGINS || "")
   .split(",")
   .map((s) => s.trim())
@@ -61,10 +55,9 @@ const allowlist = Array.from(new Set([...DEFAULT_ORIGINS, ...EXTRA_ORIGINS]));
 app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: true, limit: "5mb" }));
 
-// ✅ Build corsOptions once so it is consistent everywhere (including preflight)
 const corsOptions = {
   origin: (origin, cb) => {
-    if (!origin) return cb(null, true); // Postman / server-to-server
+    if (!origin) return cb(null, true);
     if (allowlist.includes(origin)) return cb(null, true);
     return cb(new Error(`CORS blocked: ${origin}`));
   },
@@ -74,16 +67,10 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-
-// ✅ Preflight
 app.options(/.*/, cors(corsOptions));
-
-// Static
 app.use("/public", express.static(publicPath));
 
-/* ------------------------------
-   Health + home page (B-JAUR style)
--------------------------------- */
+/* ------------------------------ Health/Home ------------------------------ */
 let isHealthy = true;
 
 app.get("/", (_req, res) => {
@@ -125,7 +112,7 @@ const io = new Server(httpServer, {
   maxHttpBufferSize: 1e8,
 });
 
-// attach io to req (useful for routes)
+// attach io to req (optional; keep if your routes use req.io)
 app.use((req, _res, next) => {
   req.io = io;
   next();
@@ -143,120 +130,21 @@ app.get("/api/db-test", async (_req, res) => {
   }
 });
 
-// Feature flags
-const useDbForProducts = String(process.env.USE_DB_PRODUCTS || "false").toLowerCase() === "true";
-
-/* ------------------------------
-   Optional schema bootstrap
--------------------------------- */
-async function ensureSchema() {
-  if (String(process.env.DB_BOOTSTRAP || "").toLowerCase() !== "true") return;
-
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS merchants (
-      id VARCHAR(64) PRIMARY KEY,
-      email VARCHAR(190) NOT NULL UNIQUE,
-      password_hash VARCHAR(255) NOT NULL,
-      name VARCHAR(190) NOT NULL,
-      role VARCHAR(32) NOT NULL DEFAULT 'merchant',
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    ) ENGINE=InnoDB;
-  `);
-
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS products (
-      id VARCHAR(64) PRIMARY KEY,
-      merchant_id VARCHAR(64) NOT NULL,
-      name VARCHAR(190) NOT NULL,
-      price DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-      stock INT NOT NULL DEFAULT 0,
-      image TEXT NULL,
-      description TEXT NULL,
-      category VARCHAR(64) NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      INDEX (merchant_id),
-      CONSTRAINT fk_products_merchant
-        FOREIGN KEY (merchant_id) REFERENCES merchants(id)
-        ON DELETE CASCADE
-    ) ENGINE=InnoDB;
-  `);
-
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS orders (
-      id VARCHAR(64) PRIMARY KEY,
-      merchant_id VARCHAR(64) NOT NULL,
-      status VARCHAR(32) NOT NULL DEFAULT 'pending',
-      total DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-      payload JSON NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      INDEX (merchant_id),
-      CONSTRAINT fk_orders_merchant
-        FOREIGN KEY (merchant_id) REFERENCES merchants(id)
-        ON DELETE CASCADE
-    ) ENGINE=InnoDB;
-  `);
-}
-
-/* ------------------------------
-   Shared stores
--------------------------------- */
-const stores = {
-  onlineUsers: new Map(),
-  activeTrades: new Map(),
-  recentActivities: [],
-  merchants: new Map(),
-  products: new Map(),
-  orders: new Map(),
-};
-
-function pushActivity(activity) {
-  stores.recentActivities.unshift(activity);
-  if (stores.recentActivities.length > 20) stores.recentActivities.pop();
-  io.emit("activity:new", activity);
-}
-
-/* ------------------------------
-   Seed (DEV ONLY)
--------------------------------- */
-stores.merchants.set("merchant@nanashi.com", {
-  id: "merchant-1",
-  email: "merchant@nanashi.com",
-  password: "merchant123", // DEV ONLY
-  name: "Nanashi Merchant",
-  role: "merchant",
-});
-
-/* ------------------------------
-   Routes Mounting (B-JAUR style: factories)
--------------------------------- */
+/* ------------------------------ Routes ------------------------------ */
 app.use(
   "/api",
   createHealthRoutes({
     dbPing,
-    stores,
+    stores: {}, // not used anymore but your health routes might expect it
   })
 );
 
-// ✅ Auth routes (fixed)
+// keep if you still use HTTP auth endpoints
 app.use("/api/auth", createAuthRoutes({ db, io }));
 
-app.use(
-  "/api",
-  createMerchantRoutes({
-    db,
-    io,
-    stores,
-    pushActivity,
-    useDbForProducts,
-  })
-);
-
-/* ------------------------------
-   Socket Wiring (B-JAUR style: controller factories)
--------------------------------- */
+/* ------------------------------ Socket Wiring ------------------------------ */
 io.on("connection", (socket) => {
+  // Debug: shows events reaching server
   socket.onAny((event, ...args) => {
     const first = args?.[0];
     const summary =
@@ -266,17 +154,13 @@ io.on("connection", (socket) => {
     console.log(`[socket] ${event} payloadKeys=${summary}`);
   });
 
-  // mount socket controllers
-  shopSocketController({
+  // ✅ ONLY account sockets
+  accountSocketController({
     socket,
     io,
-    stores,
-    pushActivity,
-    db,
-    useDbForProducts,
+    db, // IMPORTANT: pass same db pool
+    pushActivity: () => {}, // no activity system now
   });
-  tradeSocketController({ socket, io, stores, pushActivity });
-  chatSocketController({ socket, io, stores, pushActivity });
 });
 
 /* ------------------------------ Error handler ------------------------------ */
@@ -294,8 +178,6 @@ app.use((err, _req, res, _next) => {
 /* ------------------------------ Start ------------------------------ */
 async function start() {
   try {
-    await ensureSchema();
-
     try {
       const ok = await dbPing();
       console.log(`[DB] connected: ${ok ? "YES" : "NO"}`);
@@ -311,8 +193,7 @@ async function start() {
       console.log("=".repeat(60));
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`🌐 Allowed origins: ${allowlist.join(", ")}`);
-      console.log(`🗄️  DB products mode: ${useDbForProducts ? "ON" : "OFF"} (USE_DB_PRODUCTS)`);
-      console.log("📡 WebSocket ready for connections");
+      console.log("📡 WebSocket ready for connections (account only)");
       console.log("=".repeat(60) + "\n");
     });
   } catch (e) {

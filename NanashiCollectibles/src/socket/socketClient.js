@@ -1,4 +1,4 @@
-// socketClient.js
+// NanashiCollectibles/src/socket/socketClient.js
 import { io } from "socket.io-client";
 
 let socket = null;
