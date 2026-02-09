@@ -1,6 +1,4 @@
-// server.js - NanashiCollectibles
-// ✅ Only sockets kept: account:create, account:login, account:requestReset, account:resetPassword
-
+// Backend/server.js
 import express from "express";
 import { createServer } from "http";
 import cors from "cors";
@@ -12,11 +10,11 @@ import { Server } from "socket.io";
 
 import { initDB, dbPing } from "./modules/db.module.js";
 
-// routes (keep if you still need them)
+// routes (optional)
 import createHealthRoutes from "./routes/api/health.routes.js";
 import createAuthRoutes from "./routes/api/auth.routes.js";
 
-// ✅ only socket controller kept
+// sockets
 import accountSocketController from "./sockets/account.socket.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -112,7 +110,7 @@ const io = new Server(httpServer, {
   maxHttpBufferSize: 1e8,
 });
 
-// attach io to req (optional; keep if your routes use req.io)
+// attach io to req (optional)
 app.use((req, _res, next) => {
   req.io = io;
   next();
@@ -135,31 +133,30 @@ app.use(
   "/api",
   createHealthRoutes({
     dbPing,
-    stores: {}, // not used anymore but your health routes might expect it
+    stores: {},
   })
 );
 
-// keep if you still use HTTP auth endpoints
+// optional http auth endpoints
 app.use("/api/auth", createAuthRoutes({ db, io }));
 
 /* ------------------------------ Socket Wiring ------------------------------ */
 io.on("connection", (socket) => {
-  // Debug: shows events reaching server
+  // Debug: show incoming events
   socket.onAny((event, ...args) => {
     const first = args?.[0];
     const summary =
       typeof first === "object" && first !== null
-        ? Object.keys(first).slice(0, 6).join(",")
+        ? Object.keys(first).slice(0, 8).join(",")
         : typeof first;
     console.log(`[socket] ${event} payloadKeys=${summary}`);
   });
 
-  // ✅ ONLY account sockets
   accountSocketController({
     socket,
     io,
-    db, // IMPORTANT: pass same db pool
-    pushActivity: () => {}, // no activity system now
+    db, // ✅ SAME pool instance everywhere
+    pushActivity: () => {},
   });
 });
 

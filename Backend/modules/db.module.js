@@ -1,17 +1,6 @@
 // Backend/modules/db.module.js
 import mysql from "mysql2/promise";
 
-export const db = mysql.createPool({
-  host: process.env.MYSQL_HOST || "127.0.0.1",
-  port: Number(process.env.MYSQL_PORT || 3306),
-  user: process.env.MYSQL_USER || "root",
-  password: process.env.MYSQL_PASSWORD || "",
-  database: process.env.MYSQL_DATABASE || "bjaur_accounts",
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
-});
-
 let pool;
 
 function must(name) {
@@ -28,16 +17,31 @@ export function initDB() {
   const user = must("MYSQL_USER");
   const password = must("MYSQL_PASSWORD");
   const database = must("MYSQL_DATABASE");
+
   pool = mysql.createPool({
     host,
     port,
     user,
     password,
     database,
+
     waitForConnections: true,
     connectionLimit: Number(process.env.MYSQL_CONN_LIMIT || 10),
     queueLimit: 0,
+
+    // ✅ Prevent "hang forever" behavior on bad routes / dead host
+    connectTimeout: Number(process.env.MYSQL_CONNECT_TIMEOUT || 10000),
+
+    // ✅ Keep connections healthy (helps some proxy/idle issues)
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 0,
+
     timezone: "Z",
+  });
+
+  // Optional: pool error logging
+  pool.on?.("error", (err) => {
+    console.error("[DB] pool error:", err);
   });
 
   return pool;
