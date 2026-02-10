@@ -181,39 +181,57 @@ export default function accountSocketController({
   /* =========================================================
      LOGIN
      ========================================================= */
-  /* =========================================================
-   LOGIN (BY NAME)
-   ========================================================= */
   socket.on("account:login", async (payload = {}, cb = () => {}) => {
     const ack = typeof cb === "function" ? cb : () => {};
     const t0 = Date.now();
 
-    const name = toStr(payload.name);
+    // allow either: { name, password } OR { email, password } OR { identifier, password }
+    const identifierRaw =
+      payload.identifier ?? payload.name ?? payload.email ?? "";
+
+    const identifier = toStr(identifierRaw);
     const password = toStr(payload.password);
 
-    if (!name || !password) {
+    if (!identifier || !password) {
       return ack({
         success: false,
-        message: "name and password are required.",
+        message: "name/email and password are required.",
       });
     }
 
+    const isEmail = identifier.includes("@");
+
     try {
-      // Case-insensitive match (recommended)
-      const [rows] = await db.execute(
-        `SELECT ID, NAME, EMAIL, PHONE, PROFILE_ICON, PASSWORD, CREATED_AT, UPDATED_AT
-       FROM PERSONAL_USER
-       WHERE LOWER(NAME) = LOWER(?)
-       LIMIT 1`,
-        [name],
-      );
+      const sql = isEmail
+        ? `SELECT ID, NAME, EMAIL, PHONE, PROFILE_ICON, PASSWORD, CREATED_AT, UPDATED_AT
+         FROM PERSONAL_USER
+         WHERE LOWER(EMAIL) = LOWER(?)
+         LIMIT 1`
+        : `SELECT ID, NAME, EMAIL, PHONE, PROFILE_ICON, PASSWORD, CREATED_AT, UPDATED_AT
+         FROM PERSONAL_USER
+         WHERE LOWER(TRIM(NAME)) = LOWER(TRIM(?))
+         LIMIT 1`;
+
+      const [rows] = await db.execute(sql, [identifier]);
 
       const row = rows?.[0];
+
+      // ✅ DEBUG (temporary): helps you see if it's not found vs wrong password
+      console.log("[account:login] lookup", {
+        identifier,
+        isEmail,
+        found: !!row,
+        dbName: row?.NAME,
+        dbEmail: row?.EMAIL,
+      });
+
       if (!row) {
         return ack({ success: false, message: "Invalid credentials." });
       }
 
       const ok = await bcrypt.compare(password, row.PASSWORD);
+      console.log("[account:login] passwordCheck", { ok });
+
       if (!ok) {
         return ack({ success: false, message: "Invalid credentials." });
       }
