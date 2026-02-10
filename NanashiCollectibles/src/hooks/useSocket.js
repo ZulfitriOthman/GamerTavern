@@ -1,6 +1,68 @@
 // NanashiCollectibles/src/hooks/useSocket.js
-import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { getSocket, connectSocket, disconnectSocket } from "../socket/socketClient";
+
+/**
+ * Module-level (global) store so multiple components don't attach duplicate listeners.
+ */
+let listenersAttached = false;
+
+let globalState = {
+  isConnected: false,
+  onlineUsers: [],
+  activities: [],
+};
+
+const subscribers = new Set();
+
+function notify() {
+  for (const fn of subscribers) fn(globalState);
+}
+
+function attachListenersOnce() {
+  const s = getSocket();
+  if (!s || listenersAttached) return;
+
+  listenersAttached = true;
+
+  const onConnect = () => {
+    globalState = { ...globalState, isConnected: true };
+    notify();
+  };
+
+  const onDisconnect = () => {
+    globalState = { ...globalState, isConnected: false };
+    notify();
+  };
+
+  const onUsersOnline = (users) => {
+    globalState = { ...globalState, onlineUsers: Array.isArray(users) ? users : [] };
+    notify();
+  };
+
+  const onActivityNew = (activity) => {
+    const next = [activity, ...(globalState.activities || [])].slice(0, 50);
+    globalState = { ...globalState, activities: next };
+    notify();
+  };
+
+  const onActivitiesList = (activityList) => {
+    globalState = {
+      ...globalState,
+      activities: Array.isArray(activityList) ? activityList : [],
+    };
+    notify();
+  };
+
+  s.on("connect", onConnect);
+  s.on("disconnect", onDisconnect);
+  s.on("users:online", onUsersOnline);
+  s.on("activity:new", onActivityNew);
+  s.on("activities:list", onActivitiesList);
+
+  // initialize if already connected
+  if (s.connected) onConnect();
+}
 
 export function useSocket(username = null) {
   const [isConnected, setIsConnected] = useState(() => {
@@ -11,78 +73,59 @@ export function useSocket(username = null) {
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [activities, setActivities] = useState([]);
 
-  const joinedRef = useRef(false);
-
-  // ✅ Public connect/disconnect for pages (SignUp/Login)
+  /**
+   * Public connect/disconnect for pages (SignUp/Login/Chat/OnlineUsers)
+   * - This does NOT attach duplicate listeners.
+   * - This updates username join safely via socketClient.
+   */
   const connect = useCallback(
     (joinName = username) => {
-      // ✅ pass the joinName so socketClient stores lastUsername
       connectSocket(joinName);
-
-      const s = getSocket();
-      if (s && joinName && !joinedRef.current) {
-        if (s.connected) {
-          s.emit("user:join", joinName);
-          joinedRef.current = true;
-        }
-      }
+      attachListenersOnce();
     },
-    [username]
+    [username],
   );
 
   const disconnect = useCallback(() => {
-    joinedRef.current = false;
     disconnectSocket();
+    listenersAttached = false; // allow re-attach if a new socket is created later
+
+    globalState = {
+      isConnected: false,
+      onlineUsers: [],
+      activities: [],
+    };
+    notify();
   }, []);
 
+  // Auto-connect if username is provided (ChatPage / OnlineUsers usage)
   useEffect(() => {
-    const s = getSocket();
-    if (!s) return;
-
-    function onConnect() {
-      setIsConnected(true);
-
-      if (username && !joinedRef.current) {
-        s.emit("user:join", username);
-        joinedRef.current = true;
-      }
-
-      s.emit("activities:request");
+    if (username) {
+      connect(username);
+    } else {
+      // still ensure listeners if socket already exists
+      const s = getSocket();
+      if (s) attachListenersOnce();
     }
+  }, [username, connect]);
 
-    function onDisconnect() {
-      setIsConnected(false);
-      joinedRef.current = false;
-    }
+  // Subscribe this hook instance to global store updates
+  useEffect(() => {
+    const handler = (state) => {
+      setIsConnected(!!state.isConnected);
+      setOnlineUsers(state.onlineUsers || []);
+      setActivities(state.activities || []);
+    };
 
-    function onUsersOnline(users) {
-      setOnlineUsers(users || []);
-    }
+    subscribers.add(handler);
 
-    function onActivityNew(activity) {
-      setActivities((prev) => [activity, ...prev].slice(0, 50));
-    }
-
-    function onActivitiesList(activityList) {
-      setActivities(activityList || []);
-    }
-
-    s.on("connect", onConnect);
-    s.on("disconnect", onDisconnect);
-    s.on("users:online", onUsersOnline);
-    s.on("activity:new", onActivityNew);
-    s.on("activities:list", onActivitiesList);
-
-    if (s.connected) onConnect();
+    // push latest immediately
+    handler(globalState);
 
     return () => {
-      s.off("connect", onConnect);
-      s.off("disconnect", onDisconnect);
-      s.off("users:online", onUsersOnline);
-      s.off("activity:new", onActivityNew);
-      s.off("activities:list", onActivitiesList);
+      subscribers.delete(handler);
     };
-  }, [username]);
+  }, []);
 
   /* ---------------- Socket emit helpers ---------------- */
 
@@ -114,22 +157,22 @@ export function useSocket(username = null) {
 
   const emitAccountCreate = useCallback(
     (payload) => emitWithAck("account:create", payload),
-    [emitWithAck]
+    [emitWithAck],
   );
 
   const emitAccountLogin = useCallback(
     (payload) => emitWithAck("account:login", payload),
-    [emitWithAck]
+    [emitWithAck],
   );
 
   const emitAccountRequestReset = useCallback(
     (payload) => emitWithAck("account:requestReset", payload),
-    [emitWithAck]
+    [emitWithAck],
   );
 
   const emitAccountResetPassword = useCallback(
     (payload) => emitWithAck("account:resetPassword", payload),
-    [emitWithAck]
+    [emitWithAck],
   );
 
   const socket = useMemo(() => getSocket(), [isConnected]);

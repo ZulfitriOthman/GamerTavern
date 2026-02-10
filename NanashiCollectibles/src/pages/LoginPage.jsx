@@ -37,13 +37,11 @@ export default function LoginPage() {
   const validate = () => {
     const newErrors = {};
 
-    if (!formData.name.trim())
-      newErrors.name = "Name is required";
+    if (!formData.name.trim()) newErrors.name = "Name is required";
     else if (formData.name.trim().length < 3)
       newErrors.name = "Name must be at least 3 characters";
 
-    if (!formData.password)
-      newErrors.password = "Password is required";
+    if (!formData.password) newErrors.password = "Password is required";
 
     return newErrors;
   };
@@ -80,14 +78,11 @@ export default function LoginPage() {
       const user = res.data;
 
       // ✅ store user
-      localStorage.setItem(
-        "tavern_current_user",
-        JSON.stringify(user)
-      );
-      localStorage.setItem(
-        "tavern_username",
-        user?.name || "Traveler"
-      );
+      localStorage.setItem("tavern_current_user", JSON.stringify(user));
+      localStorage.setItem("tavern_username", user?.name || "Traveler");
+
+      // ✅ notify App.jsx (same tab) so navbar updates without refresh
+      window.dispatchEvent(new Event("tavern:authChanged"));
 
       navigate("/shop");
     } catch (err) {
@@ -111,11 +106,7 @@ export default function LoginPage() {
 
         <div className="mt-4 text-xs text-amber-100/60">
           Socket:{" "}
-          <span
-            className={
-              isConnected ? "text-emerald-300" : "text-red-300"
-            }
-          >
+          <span className={isConnected ? "text-emerald-300" : "text-red-300"}>
             {isConnected ? "Connected" : "Disconnected"}
           </span>
         </div>
@@ -145,9 +136,7 @@ export default function LoginPage() {
               className={`w-full rounded-lg border ${
                 errors.name ? "border-red-500" : "border-amber-900/30"
               } bg-slate-950 px-4 py-3 font-serif text-sm text-amber-100 placeholder-amber-100/40 focus:outline-none focus:ring-2 ${
-                errors.name
-                  ? "focus:ring-red-500"
-                  : "focus:ring-amber-600"
+                errors.name ? "focus:ring-red-500" : "focus:ring-amber-600"
               }`}
             />
             {errors.name && (
@@ -170,13 +159,9 @@ export default function LoginPage() {
               placeholder="Enter your password"
               autoComplete="current-password"
               className={`w-full rounded-lg border ${
-                errors.password
-                  ? "border-red-500"
-                  : "border-amber-900/30"
+                errors.password ? "border-red-500" : "border-amber-900/30"
               } bg-slate-950 px-4 py-3 font-serif text-sm text-amber-100 placeholder-amber-100/40 focus:outline-none focus:ring-2 ${
-                errors.password
-                  ? "focus:ring-red-500"
-                  : "focus:ring-amber-600"
+                errors.password ? "focus:ring-red-500" : "focus:ring-amber-600"
               }`}
             />
             {errors.password && (
@@ -210,9 +195,7 @@ export default function LoginPage() {
             type="submit"
             disabled={!canSubmit}
             className={`w-full rounded-xl border border-amber-600/50 bg-gradient-to-r from-amber-950/50 to-purple-950/50 py-3 font-serif text-base font-bold text-amber-100 transition-all ${
-              !canSubmit
-                ? "cursor-not-allowed opacity-60"
-                : "hover:border-amber-500"
+              !canSubmit ? "cursor-not-allowed opacity-60" : "hover:border-amber-500"
             }`}
           >
             {isSubmitting ? "Signing in..." : "Sign In"}

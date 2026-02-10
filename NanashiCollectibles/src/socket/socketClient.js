@@ -9,12 +9,11 @@ export const getSocket = () => socket;
 export const connectSocket = (username) => {
   const url = (import.meta.env.VITE_SOCKET_URL || "http://localhost:3001").trim();
 
-  lastUsername = username || lastUsername;
+  // update remembered username (used for join on connect/reconnect)
+  if (username) lastUsername = String(username).trim();
 
-  // ✅ create once
   if (!socket) {
     socket = io(url, {
-      // ✅ allow fallback (fixes most Cloudflare/Nginx/proxy setups)
       transports: ["polling", "websocket"],
       withCredentials: true,
 
@@ -27,10 +26,13 @@ export const connectSocket = (username) => {
     socket.on("connect", () => {
       console.log("✅ Connected to Socket.IO:", socket.id, "->", url);
 
-      // ✅ join on connect (and on every reconnect)
+      // join on every connect/reconnect
       if (lastUsername) {
         socket.emit("user:join", lastUsername);
       }
+
+      // request activities once per connection
+      socket.emit("activities:request");
     });
 
     socket.on("disconnect", (reason) => {
@@ -41,7 +43,7 @@ export const connectSocket = (username) => {
       console.log("❌ connect_error:", err?.message, err);
     });
   } else {
-    // If socket already exists + connected, ensure username join is applied
+    // socket exists: if connected, apply username join immediately
     if (socket.connected && lastUsername) {
       socket.emit("user:join", lastUsername);
     }
@@ -52,7 +54,7 @@ export const connectSocket = (username) => {
 
 export const disconnectSocket = () => {
   if (socket) {
-    socket.off(); // remove listeners
+    socket.off();
     socket.disconnect();
     socket = null;
   }

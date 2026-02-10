@@ -1,6 +1,6 @@
 // App.jsx
 import { useMemo, useState, useEffect, useRef } from "react";
-import { Routes, Route, Link, NavLink, useLocation } from "react-router-dom";
+import { Routes, Route, Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 
 import ShopPage from "./pages/ShopPage";
@@ -13,11 +13,7 @@ import LoginPage from "./pages/LoginPage";
 import ChatPage from "./pages/ChatPage";
 
 // ✅ Socket.IO (no direct `socket` export anymore)
-import {
-  connectSocket,
-  disconnectSocket,
-  getSocket,
-} from "./socket/socketClient";
+import { connectSocket, disconnectSocket, getSocket } from "./socket/socketClient";
 
 const pageVariants = {
   initial: { opacity: 0, y: 16, filter: "blur(8px)" },
@@ -39,12 +35,26 @@ function PageWrap({ children }) {
   );
 }
 
+function readCurrentUser() {
+  try {
+    const raw = localStorage.getItem("tavern_current_user");
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
 function App() {
   const location = useLocation();
+  const navigate = useNavigate();
 
   const [cart, setCart] = useState([]);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  // ✅ Logged-in user state (reads from localStorage)
+  const [currentUser, setCurrentUser] = useState(() => readCurrentUser());
+
+  // ✅ Username for socket presence (fallback to Traveler###)
   const [username] = useState(() => {
     const stored = localStorage.getItem("tavern_username");
     if (stored) return stored;
@@ -56,6 +66,34 @@ function App() {
 
   const didConnectRef = useRef(false);
 
+  // ✅ Show name in navbar
+  const displayName = useMemo(() => {
+    return currentUser?.name || localStorage.getItem("tavern_username") || "Traveler";
+  }, [currentUser]);
+
+  const isLoggedIn = !!currentUser?.id;
+
+  // ✅ Keep currentUser synced (same tab + other tabs)
+  useEffect(() => {
+    const syncAuth = () => setCurrentUser(readCurrentUser());
+
+    window.addEventListener("storage", syncAuth);
+    window.addEventListener("tavern:authChanged", syncAuth);
+
+    return () => {
+      window.removeEventListener("storage", syncAuth);
+      window.removeEventListener("tavern:authChanged", syncAuth);
+    };
+  }, []);
+
+  const handleLogout = () => {
+    localStorage.removeItem("tavern_current_user");
+    window.dispatchEvent(new Event("tavern:authChanged"));
+    setMobileMenuOpen(false);
+    navigate("/login");
+  };
+
+  // ✅ Socket connect once
   useEffect(() => {
     if (didConnectRef.current) return;
     didConnectRef.current = true;
@@ -91,7 +129,6 @@ function App() {
       return [...prev, { ...product, quantity: 1 }];
     });
 
-    // 🔴 Emit socket event - Broadcast to all users!
     const s = getSocket();
     if (s?.connected) {
       s.emit("cart:add", { productName: product.name });
@@ -109,6 +146,34 @@ function App() {
         .filter((i) => i.quantity > 0),
     );
   };
+
+  const desktopNavItems = useMemo(
+    () => [
+      { to: "/shop", label: "Shop" },
+      { to: "/trade", label: "Trade" },
+      { to: "/chat", label: "Chat" },
+      { to: "/news", label: "News" },
+      isLoggedIn
+        ? { to: "/account", label: displayName } // change route if you want
+        : { to: "/login", label: "Login" },
+      { to: "/cart", label: `Cart (${cartTotalItems})` },
+    ],
+    [isLoggedIn, displayName, cartTotalItems],
+  );
+
+  const mobileNavItems = useMemo(
+    () => [
+      { to: "/shop", label: "Shop" },
+      { to: "/trade", label: "Trade" },
+      { to: "/chat", label: "Chat" },
+      { to: "/news", label: "News" },
+      isLoggedIn
+        ? { to: "/account", label: displayName }
+        : { to: "/login", label: "Login" },
+      { to: "/cart", label: `Cart (${cartTotalItems})` },
+    ],
+    [isLoggedIn, displayName, cartTotalItems],
+  );
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-950 via-purple-950/30 to-slate-950 text-amber-50">
@@ -151,33 +216,38 @@ function App() {
             </Link>
 
             {/* Desktop nav */}
-            <nav className="hidden md:flex items-center gap-1">
-              {[
-                { to: "/shop", label: "Shop" },
-                { to: "/trade", label: "Trade" },
-                { to: "/chat", label: "Chat" },
-                { to: "/news", label: "News" },
-                { to: "/login", label: "Login" },
-                { to: "/cart", label: `Cart (${cartTotalItems})` },
-              ].map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  className={({ isActive }) =>
-                    `group relative px-5 lg:px-6 py-2.5 font-serif text-sm font-medium tracking-wide transition-all
-                    ${
-                      isActive
-                        ? "text-amber-400"
-                        : "text-amber-100 hover:text-amber-300"
-                    }`
-                  }
+            <div className="hidden md:flex items-center gap-2">
+              <nav className="flex items-center gap-1">
+                {desktopNavItems.map((item) => (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    className={({ isActive }) =>
+                      `group relative px-5 lg:px-6 py-2.5 font-serif text-sm font-medium tracking-wide transition-all
+                      ${
+                        isActive
+                          ? "text-amber-400"
+                          : "text-amber-100 hover:text-amber-300"
+                      }`
+                    }
+                  >
+                    <span className="relative z-10">{item.label}</span>
+                    <div className="absolute inset-0 scale-x-0 rounded-lg bg-gradient-to-r from-amber-950/50 to-purple-950/50 transition-transform group-hover:scale-x-100" />
+                    <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber-500 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+                  </NavLink>
+                ))}
+              </nav>
+
+              {/* ✅ Logout */}
+              {isLoggedIn ? (
+                <button
+                  onClick={handleLogout}
+                  className="inline-flex items-center rounded-lg border border-amber-600/40 bg-amber-950/20 px-4 py-2 font-serif text-sm text-amber-100 hover:border-amber-500 hover:bg-amber-950/30 transition"
                 >
-                  <span className="relative z-10">{item.label}</span>
-                  <div className="absolute inset-0 scale-x-0 rounded-lg bg-gradient-to-r from-amber-950/50 to-purple-950/50 transition-transform group-hover:scale-x-100" />
-                  <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber-500 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
-                </NavLink>
-              ))}
-            </nav>
+                  Logout
+                </button>
+              ) : null}
+            </div>
 
             {/* Mobile controls */}
             <div className="flex items-center gap-2 md:hidden">
@@ -206,23 +276,12 @@ function App() {
           {/* Mobile menu panel */}
           <div
             className={`md:hidden overflow-hidden transition-all duration-300 ease-out
-              ${
-                mobileMenuOpen
-                  ? "max-h-96 opacity-100 translate-y-0"
-                  : "max-h-0 opacity-0 -translate-y-2"
-              }
+              ${mobileMenuOpen ? "max-h-[520px] opacity-100 translate-y-0" : "max-h-0 opacity-0 -translate-y-2"}
             `}
           >
             <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pb-4 pt-2">
               <div className="rounded-xl border border-amber-900/30 bg-slate-950/70 backdrop-blur-xl overflow-hidden shadow-2xl shadow-purple-900/20">
-                {[
-                  { to: "/shop", label: "Shop" },
-                  { to: "/trade", label: "Trade" },
-                  { to: "/chat", label: "Chat" },
-                  { to: "/news", label: "News" },
-                  { to: "/login", label: "Login" },
-                  { to: "/cart", label: `Cart (${cartTotalItems})` },
-                ].map((item) => (
+                {mobileNavItems.map((item) => (
                   <Link
                     key={item.to}
                     to={item.to}
@@ -237,6 +296,21 @@ function App() {
                     </div>
                   </Link>
                 ))}
+
+                {/* ✅ Mobile Logout */}
+                {isLoggedIn ? (
+                  <button
+                    onClick={handleLogout}
+                    className="w-full text-left group block px-4 py-3 font-serif text-sm text-amber-100 hover:bg-amber-950/30 transition-colors"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span>Logout</span>
+                      <span className="opacity-0 translate-x-1 transition-all duration-200 group-hover:opacity-100 group-hover:translate-x-0">
+                        →
+                      </span>
+                    </div>
+                  </button>
+                ) : null}
               </div>
             </div>
           </div>
@@ -298,6 +372,7 @@ function App() {
                 </PageWrap>
               }
             />
+
             <Route
               path="/news"
               element={
@@ -306,6 +381,7 @@ function App() {
                 </PageWrap>
               }
             />
+
             <Route
               path="/chat"
               element={
@@ -314,6 +390,7 @@ function App() {
                 </PageWrap>
               }
             />
+
             <Route
               path="/login"
               element={
@@ -322,6 +399,7 @@ function App() {
                 </PageWrap>
               }
             />
+
             <Route
               path="/signup"
               element={
@@ -330,6 +408,7 @@ function App() {
                 </PageWrap>
               }
             />
+
             <Route
               path="/socket-demo"
               element={
@@ -349,6 +428,29 @@ function App() {
                     updateQuantity={updateQuantity}
                     cartTotalPrice={cartTotalPrice}
                   />
+                </PageWrap>
+              }
+            />
+
+            {/* ✅ Optional placeholder route so "name" link doesn't 404 */}
+            <Route
+              path="/account"
+              element={
+                <PageWrap>
+                  <div className="rounded-2xl border border-amber-900/30 bg-slate-950/60 p-8">
+                    <h2 className="font-serif text-2xl font-bold text-amber-100">
+                      Account
+                    </h2>
+                    <p className="mt-2 font-serif text-amber-100/70">
+                      Logged in as <span className="text-amber-300">{displayName}</span>
+                    </p>
+                    <button
+                      onClick={handleLogout}
+                      className="mt-6 rounded-xl border border-amber-600/40 bg-amber-950/20 px-4 py-2 font-serif text-sm text-amber-100 hover:border-amber-500 hover:bg-amber-950/30 transition"
+                    >
+                      Logout
+                    </button>
+                  </div>
                 </PageWrap>
               }
             />

@@ -3,37 +3,61 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { useSocket } from "../hooks/useSocket";
 import OnlineUsers from "../components/OnlineUsers";
 
+function readCurrentUser() {
+  try {
+    const raw = localStorage.getItem("tavern_current_user");
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
 function ChatPage() {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState("");
-  const [currentUser, setCurrentUser] = useState(null);
+  const [currentUser, setCurrentUser] = useState(() => {
+    const u = readCurrentUser();
+    const fallback = localStorage.getItem("tavern_username") || "Guest";
+    // normalize so we always have { username }
+    return u ? { ...u, username: u?.name || u?.username || fallback } : { username: fallback };
+  });
+
   const messagesEndRef = useRef(null);
 
-  // ✅ Get username once (stable)
+  // ✅ username should reflect login changes (without refresh)
   const username = useMemo(() => {
-    return localStorage.getItem("tavern_username") || "Guest";
-  }, []);
+    return currentUser?.username || localStorage.getItem("tavern_username") || "Guest";
+  }, [currentUser]);
 
-  // ✅ Pass username so the hook actually connects
+  // ✅ Pass username so the hook joins presence correctly
   const { isConnected, socket } = useSocket(username);
 
-  // Set current user (for UI + own-message detection)
+  // ✅ Keep current user synced when login/logout happens (same tab + other tabs)
   useEffect(() => {
-    const user = JSON.parse(
-      localStorage.getItem("tavern_current_user") || "null"
-    );
-    setCurrentUser(user || { username });
-  }, [username]);
+    const syncAuth = () => {
+      const u = readCurrentUser();
+      const fallback = localStorage.getItem("tavern_username") || "Guest";
+      setCurrentUser(
+        u ? { ...u, username: u?.name || u?.username || fallback } : { username: fallback },
+      );
+    };
+
+    window.addEventListener("storage", syncAuth);
+    window.addEventListener("tavern:authChanged", syncAuth);
+
+    return () => {
+      window.removeEventListener("storage", syncAuth);
+      window.removeEventListener("tavern:authChanged", syncAuth);
+    };
+  }, []);
 
   // ✅ Debug connection (remove later if you want)
   useEffect(() => {
     if (!socket) return;
 
     const onConnect = () => console.log("✅ socket connected:", socket.id);
-    const onDisconnect = (reason) =>
-      console.log("⚠️ socket disconnected:", reason);
-    const onConnectError = (err) =>
-      console.log("❌ connect_error:", err?.message, err);
+    const onDisconnect = (reason) => console.log("⚠️ socket disconnected:", reason);
+    const onConnectError = (err) => console.log("❌ connect_error:", err?.message, err);
 
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
@@ -46,7 +70,7 @@ function ChatPage() {
     };
   }, [socket]);
 
-  // Listen for chat messages
+  // ✅ Listen for chat messages
   useEffect(() => {
     if (!socket) return;
 
@@ -61,7 +85,7 @@ function ChatPage() {
     };
   }, [socket]);
 
-  // Auto-scroll to bottom
+  // ✅ Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -70,7 +94,12 @@ function ChatPage() {
     e.preventDefault();
     if (!newMessage.trim() || !isConnected || !socket) return;
 
-    socket.emit("chat:message", newMessage.trim());
+    // ✅ send as object (preferred) but keep backward compatibility if server expects string
+    socket.emit("chat:message", {
+      message: newMessage.trim(),
+      username: currentUser?.username || username,
+    });
+
     setNewMessage("");
   };
 
@@ -100,6 +129,12 @@ function ChatPage() {
                   </h1>
                   <p className="font-serif text-sm italic text-amber-100/70">
                     Discuss trades, strategies, and connect with collectors
+                  </p>
+                  <p className="mt-1 font-serif text-xs text-amber-100/50">
+                    Signed in as:{" "}
+                    <span className="text-amber-300 font-semibold">
+                      {currentUser?.username || "Guest"}
+                    </span>
                   </p>
                 </div>
               </div>
@@ -133,11 +168,16 @@ function ChatPage() {
                 </div>
               ) : (
                 messages.map((msg) => {
-                  const isOwnMessage = msg.username === currentUser?.username;
+                  // support both shapes: {username, message} OR {message, user} etc.
+                  const msgUsername = msg?.username || msg?.user || "Unknown";
+                  const msgText = msg?.message ?? msg?.text ?? "";
+                  const msgTime = msg?.timestamp || msg?.created_at || Date.now();
+
+                  const isOwnMessage = msgUsername === (currentUser?.username || username);
 
                   return (
                     <div
-                      key={msg.id}
+                      key={msg.id || `${msgUsername}-${msgTime}-${msgText.slice(0, 8)}`}
                       className={`flex ${
                         isOwnMessage ? "justify-end" : "justify-start"
                       }`}
@@ -151,14 +191,14 @@ function ChatPage() {
                       >
                         <div className="flex items-center gap-2 mb-1">
                           <span className="font-serif text-xs font-semibold text-amber-400">
-                            {msg.username}
+                            {msgUsername}
                           </span>
                           <span className="font-serif text-[10px] text-amber-100/40">
-                            {formatTime(msg.timestamp)}
+                            {formatTime(msgTime)}
                           </span>
                         </div>
                         <p className="font-serif text-sm text-amber-100/90">
-                          {msg.message}
+                          {msgText}
                         </p>
                       </div>
                     </div>

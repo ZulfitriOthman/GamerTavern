@@ -104,6 +104,8 @@ export default function SignUpPage() {
       localStorage.setItem("tavern_current_user", JSON.stringify(user));
       localStorage.setItem("tavern_username", user?.name || payload.name);
 
+      window.dispatchEvent(new Event("tavern:authChanged"));
+
       // If you want after register -> login page:
       // navigate("/login");
       navigate("/");
