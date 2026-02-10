@@ -40,13 +40,19 @@ export default function accountSocketController({
     const name = toStr(payload.name);
     const email = toStr(payload.email).toLowerCase();
     const phone = toStr(payload.phone) || "+673";
-    const password = toStr(payload.password);
+    const password = payload.password == null ? "" : String(payload.password);
+    const confirmPassword =
+      payload.confirmPassword == null ? "" : String(payload.confirmPassword);
 
-    if (!name || !email || !password) {
+    if (!name || !email || !password || !confirmPassword) {
       return ack({
         success: false,
-        message: "name, email, password are required.",
+        message: "name, email, password, confirmPassword are required.",
       });
+    }
+
+    if (password !== confirmPassword) {
+      return ack({ success: false, message: "Passwords do not match." });
     }
 
     try {
@@ -190,7 +196,7 @@ export default function accountSocketController({
       payload.identifier ?? payload.name ?? payload.email ?? "";
 
     const identifier = toStr(identifierRaw);
-    const password = toStr(payload.password);
+    const password = payload.password == null ? "" : String(payload.password);
 
     if (!identifier || !password) {
       return ack({
@@ -325,8 +331,10 @@ export default function accountSocketController({
     const t0 = Date.now();
 
     const rawToken = toStr(payload.token);
-    const newPassword = toStr(payload.newPassword);
-    const confirmPassword = toStr(payload.confirmPassword);
+    const newPassword =
+      payload.newPassword == null ? "" : String(payload.newPassword);
+    const confirmPassword =
+      payload.confirmPassword == null ? "" : String(payload.confirmPassword);
 
     if (!rawToken || !newPassword || !confirmPassword) {
       return ack({

@@ -87,7 +87,7 @@ export default function SignUpPage() {
         email: formData.email.trim().toLowerCase(),
         phone: (formData.phone || "+673").trim(),
         password: formData.password,
-        // profileIcon: null, // optional if you support it
+        confirmPassword: formData.confirmPassword,
       };
 
       const res = await emitAccountCreate(payload);
