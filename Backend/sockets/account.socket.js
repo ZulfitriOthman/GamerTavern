@@ -181,34 +181,42 @@ export default function accountSocketController({
   /* =========================================================
      LOGIN
      ========================================================= */
+  /* =========================================================
+   LOGIN (BY NAME)
+   ========================================================= */
   socket.on("account:login", async (payload = {}, cb = () => {}) => {
     const ack = typeof cb === "function" ? cb : () => {};
     const t0 = Date.now();
 
-    const email = toStr(payload.email).toLowerCase();
+    const name = toStr(payload.name);
     const password = toStr(payload.password);
 
-    if (!email || !password) {
+    if (!name || !password) {
       return ack({
         success: false,
-        message: "email and password are required.",
+        message: "name and password are required.",
       });
     }
 
     try {
+      // Case-insensitive match (recommended)
       const [rows] = await db.execute(
         `SELECT ID, NAME, EMAIL, PHONE, PROFILE_ICON, PASSWORD, CREATED_AT, UPDATED_AT
-         FROM PERSONAL_USER
-         WHERE EMAIL = ?
-         LIMIT 1`,
-        [email],
+       FROM PERSONAL_USER
+       WHERE LOWER(NAME) = LOWER(?)
+       LIMIT 1`,
+        [name],
       );
 
       const row = rows?.[0];
-      if (!row) return ack({ success: false, message: "Invalid credentials." });
+      if (!row) {
+        return ack({ success: false, message: "Invalid credentials." });
+      }
 
       const ok = await bcrypt.compare(password, row.PASSWORD);
-      if (!ok) return ack({ success: false, message: "Invalid credentials." });
+      if (!ok) {
+        return ack({ success: false, message: "Invalid credentials." });
+      }
 
       const account = safePublicUserRow(row);
 
