@@ -4,6 +4,9 @@ import crypto from "crypto";
 
 const toStr = (v) => (v == null ? "" : String(v)).trim();
 
+// ❗ Never trim passwords
+const toPassword = (v) => (v == null ? "" : String(v));
+
 function safePublicUserRow(row) {
   if (!row) return null;
   return {
@@ -20,29 +23,24 @@ function safePublicUserRow(row) {
 export default function accountSocketController({
   socket,
   io,
-  db, // ✅ MUST come from server.js initDB()
+  db,
   pushActivity = () => {},
 }) {
-  if (!db) {
-    console.error("[account.socket] ❌ db is missing (not passed in)");
-  }
+  if (!db) console.error("[account.socket] ❌ db is missing (not passed in)");
 
   /* =========================================================
      CREATE ACCOUNT (REGISTER)
      ========================================================= */
   socket.on("account:create", async (payload = {}, cb = () => {}) => {
-    console.log("[account:create] HIT", { hasCb: typeof cb === "function" });
-    const t0 = Date.now();
-
-    // safety: ensure cb is callable
     const ack = typeof cb === "function" ? cb : () => {};
+    const t0 = Date.now();
 
     const name = toStr(payload.name);
     const email = toStr(payload.email).toLowerCase();
     const phone = toStr(payload.phone) || "+673";
-    const password = payload.password == null ? "" : String(payload.password);
-    const confirmPassword =
-      payload.confirmPassword == null ? "" : String(payload.confirmPassword);
+
+    const password = toPassword(payload.password);
+    const confirmPassword = toPassword(payload.confirmPassword);
 
     if (!name || !email || !password || !confirmPassword) {
       return ack({
@@ -54,6 +52,15 @@ export default function accountSocketController({
     if (password !== confirmPassword) {
       return ack({ success: false, message: "Passwords do not match." });
     }
+
+    // ✅ TEMP debug (remove later)
+    console.log("[account:create] pw debug", {
+      name,
+      email,
+      passwordLen: password.length,
+      confirmLen: confirmPassword.length,
+      pwEqConfirm: password === confirmPassword,
+    });
 
     try {
       const rounds = Number(process.env.BCRYPT_ROUNDS || 10);
@@ -135,7 +142,6 @@ export default function accountSocketController({
       params.push(profileIcon);
     }
 
-    // Keep UPDATED_AT current
     fields.push("UPDATED_AT = NOW()");
 
     try {
@@ -185,18 +191,15 @@ export default function accountSocketController({
   });
 
   /* =========================================================
-     LOGIN
+     LOGIN (NAME / EMAIL / IDENTIFIER)
      ========================================================= */
   socket.on("account:login", async (payload = {}, cb = () => {}) => {
     const ack = typeof cb === "function" ? cb : () => {};
     const t0 = Date.now();
 
-    // allow either: { name, password } OR { email, password } OR { identifier, password }
-    const identifierRaw =
-      payload.identifier ?? payload.name ?? payload.email ?? "";
-
+    const identifierRaw = payload.identifier ?? payload.name ?? payload.email ?? "";
     const identifier = toStr(identifierRaw);
-    const password = payload.password == null ? "" : String(payload.password);
+    const password = toPassword(payload.password);
 
     if (!identifier || !password) {
       return ack({
@@ -208,39 +211,38 @@ export default function accountSocketController({
     const isEmail = identifier.includes("@");
 
     try {
+      // ✅ IMPORTANT: when logging in by NAME, pick the most recent row (avoid duplicates)
       const sql = isEmail
         ? `SELECT ID, NAME, EMAIL, PHONE, PROFILE_ICON, PASSWORD, CREATED_AT, UPDATED_AT
-         FROM PERSONAL_USER
-         WHERE LOWER(EMAIL) = LOWER(?)
-         LIMIT 1`
+           FROM PERSONAL_USER
+           WHERE LOWER(EMAIL) = LOWER(?)
+           ORDER BY ID DESC
+           LIMIT 1`
         : `SELECT ID, NAME, EMAIL, PHONE, PROFILE_ICON, PASSWORD, CREATED_AT, UPDATED_AT
-         FROM PERSONAL_USER
-         WHERE LOWER(TRIM(NAME)) = LOWER(TRIM(?))
-         LIMIT 1`;
+           FROM PERSONAL_USER
+           WHERE LOWER(TRIM(NAME)) = LOWER(TRIM(?))
+           ORDER BY ID DESC
+           LIMIT 1`;
 
       const [rows] = await db.execute(sql, [identifier]);
-
       const row = rows?.[0];
 
-      // ✅ DEBUG (temporary): helps you see if it's not found vs wrong password
       console.log("[account:login] lookup", {
         identifier,
         isEmail,
         found: !!row,
+        id: row?.ID,
         dbName: row?.NAME,
         dbEmail: row?.EMAIL,
+        incomingPasswordLen: password.length, // ✅ TEMP debug
       });
 
-      if (!row) {
-        return ack({ success: false, message: "Invalid credentials." });
-      }
+      if (!row) return ack({ success: false, message: "Invalid credentials." });
 
       const ok = await bcrypt.compare(password, row.PASSWORD);
-      console.log("[account:login] passwordCheck", { ok });
+      console.log("[account:login] passwordCheck", { ok, id: row.ID });
 
-      if (!ok) {
-        return ack({ success: false, message: "Invalid credentials." });
-      }
+      if (!ok) return ack({ success: false, message: "Invalid credentials." });
 
       const account = safePublicUserRow(row);
 
@@ -267,11 +269,10 @@ export default function accountSocketController({
 
     try {
       const [uRows] = await db.execute(
-        `SELECT ID, EMAIL FROM PERSONAL_USER WHERE EMAIL = ? LIMIT 1`,
+        `SELECT ID, EMAIL FROM PERSONAL_USER WHERE LOWER(EMAIL) = LOWER(?) ORDER BY ID DESC LIMIT 1`,
         [email],
       );
 
-      // Security: don't reveal if email exists
       const user = uRows?.[0];
       if (!user) {
         return ack({
@@ -281,15 +282,8 @@ export default function accountSocketController({
       }
 
       const ttlMin = Number(process.env.RESET_TOKEN_TTL_MIN || 15);
-
-      // raw token (send via email in real app)
       const rawToken = crypto.randomBytes(32).toString("hex");
-
-      // store hash
-      const tokenHash = crypto
-        .createHash("sha256")
-        .update(rawToken)
-        .digest("hex");
+      const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
 
       await db.execute(
         `INSERT INTO RESET_PASSWORD (USER_ID, TOKEN_HASH, EXPIRES_AT, USED)
@@ -304,11 +298,8 @@ export default function accountSocketController({
         timestamp: new Date().toISOString(),
       });
 
-      console.log(
-        `[socket][account:requestReset] ✅ ok in ${Date.now() - t0}ms`,
-      );
+      console.log(`[socket][account:requestReset] ✅ ok in ${Date.now() - t0}ms`);
 
-      // Dev: return token
       return ack({
         success: true,
         message: "Reset token generated.",
@@ -331,10 +322,8 @@ export default function accountSocketController({
     const t0 = Date.now();
 
     const rawToken = toStr(payload.token);
-    const newPassword =
-      payload.newPassword == null ? "" : String(payload.newPassword);
-    const confirmPassword =
-      payload.confirmPassword == null ? "" : String(payload.confirmPassword);
+    const newPassword = toPassword(payload.newPassword);
+    const confirmPassword = toPassword(payload.confirmPassword);
 
     if (!rawToken || !newPassword || !confirmPassword) {
       return ack({
@@ -347,10 +336,7 @@ export default function accountSocketController({
     }
 
     try {
-      const tokenHash = crypto
-        .createHash("sha256")
-        .update(rawToken)
-        .digest("hex");
+      const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
 
       const [rows] = await db.execute(
         `SELECT ID, USER_ID, EXPIRES_AT, USED
@@ -362,8 +348,7 @@ export default function accountSocketController({
 
       const rp = rows?.[0];
       if (!rp) return ack({ success: false, message: "Invalid token." });
-      if (rp.USED)
-        return ack({ success: false, message: "Token already used." });
+      if (rp.USED) return ack({ success: false, message: "Token already used." });
 
       const now = new Date();
       const exp = new Date(rp.EXPIRES_AT);
@@ -410,10 +395,7 @@ export default function accountSocketController({
         timestamp: new Date().toISOString(),
       });
 
-      console.log(
-        `[socket][account:resetPassword] ✅ ok in ${Date.now() - t0}ms`,
-      );
-
+      console.log(`[socket][account:resetPassword] ✅ ok in ${Date.now() - t0}ms`);
       return ack({ success: true, message: "Password updated successfully." });
     } catch (err) {
       console.error(
