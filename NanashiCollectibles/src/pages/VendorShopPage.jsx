@@ -10,6 +10,25 @@ const ROLES = {
   ADMIN: "ADMIN",
 };
 
+const PLACEHOLDER = "/placeholder.png";
+
+function normalizeImageUrl(v) {
+  const s = toStr(v);
+  if (!s) return PLACEHOLDER;
+
+  // allow absolute http(s)
+  if (/^https?:\/\//i.test(s)) return s;
+
+  // allow your backend static: /public/...
+  if (s.startsWith("/public/")) return s;
+
+  // allow local public assets: /images/...
+  if (s.startsWith("/")) return s;
+
+  // fallback
+  return PLACEHOLDER;
+}
+
 const toStr = (v) => (v == null ? "" : String(v)).trim();
 const toInt = (v, d = 0) => {
   const n = Number(v);
@@ -29,7 +48,8 @@ function asText(v) {
   if (v?.type === "Buffer" && Array.isArray(v?.data)) {
     return new TextDecoder().decode(new Uint8Array(v.data));
   }
-  if (v instanceof ArrayBuffer) return new TextDecoder().decode(new Uint8Array(v));
+  if (v instanceof ArrayBuffer)
+    return new TextDecoder().decode(new Uint8Array(v));
   if (v instanceof Uint8Array) return new TextDecoder().decode(v);
   if (Buffer.isBuffer?.(v)) return v.toString("utf8");
   return String(v);
@@ -65,6 +85,50 @@ export default function VendorShopPage({
     description: "",
     tcg: "mtg", // UI only; your DB schema currently has no tcg column
   });
+  // ✅ Manage Inventory UI state (per product)
+  const [stockInput, setStockInput] = useState({}); // { [productId]: string }
+
+  // helper: get number typed for a product
+  const getQty = (productId) => toInt(stockInput[productId], 0);
+
+  // ✅ restock / reduce (delta-based)
+  const applyDeltaStock = async (productId, delta) => {
+    if (!currentUser?.id) return;
+
+    if (!Number.isFinite(delta) || delta === 0) {
+      setServerError("Quantity must be more than 0.");
+      return;
+    }
+
+    setServerError("");
+    const res = await emitAsync("inventory:adjust", {
+      currentUser: { id: currentUser.id, role: currentUser.role },
+      product_id: productId,
+      delta,
+    });
+
+    if (!res?.success) {
+      setServerError(res?.message || "Failed to update inventory.");
+      return;
+    }
+
+    // clear input for that product after success
+    setStockInput((m) => ({ ...m, [productId]: "" }));
+  };
+
+  // ✅ set stock directly (convert to delta)
+  const setExactStock = async (productId, newQty, currentStock) => {
+    const next = Math.max(0, toInt(newQty, 0));
+    const curr = Math.max(0, toInt(currentStock, 0));
+    const delta = next - curr;
+
+    if (delta === 0) {
+      setServerError("Stock is already that value.");
+      return;
+    }
+
+    return applyDeltaStock(productId, delta);
+  };
 
   // ✅ Guard: must be logged in AND vendor/admin
   useEffect(() => {
@@ -113,7 +177,8 @@ export default function VendorShopPage({
   const emitAsync = (event, payload) =>
     new Promise((resolve) => {
       const s = getSocket();
-      if (!s?.connected) return resolve({ success: false, message: "Socket not connected." });
+      if (!s?.connected)
+        return resolve({ success: false, message: "Socket not connected." });
       s.emit(event, payload, (res) => resolve(res));
     });
 
@@ -146,7 +211,7 @@ export default function VendorShopPage({
       price: toInt(r.price),
       stock: toInt(r.stock_quantity),
       // if your DB stores BLOB for image_url/description:
-      image: asText(r.image_url) || "/placeholder.png",
+      image: normalizeImageUrl(asText(r.image_url)),
       description: asText(r.description),
     }));
 
@@ -358,7 +423,9 @@ export default function VendorShopPage({
                   </label>
                   <input
                     value={newProduct.name}
-                    onChange={(e) => setNewProduct((p) => ({ ...p, name: e.target.value }))}
+                    onChange={(e) =>
+                      setNewProduct((p) => ({ ...p, name: e.target.value }))
+                    }
                     className="w-full rounded-lg border border-emerald-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-emerald-50"
                     placeholder="e.g. MTG Booster Pack"
                   />
@@ -370,7 +437,9 @@ export default function VendorShopPage({
                   </label>
                   <input
                     value={newProduct.code}
-                    onChange={(e) => setNewProduct((p) => ({ ...p, code: e.target.value }))}
+                    onChange={(e) =>
+                      setNewProduct((p) => ({ ...p, code: e.target.value }))
+                    }
                     className="w-full rounded-lg border border-emerald-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-emerald-50"
                     placeholder="e.g. MTG-BST-001"
                   />
@@ -382,7 +451,12 @@ export default function VendorShopPage({
                   </label>
                   <select
                     value={newProduct.conditional}
-                    onChange={(e) => setNewProduct((p) => ({ ...p, conditional: e.target.value }))}
+                    onChange={(e) =>
+                      setNewProduct((p) => ({
+                        ...p,
+                        conditional: e.target.value,
+                      }))
+                    }
                     className="w-full rounded-lg border border-emerald-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-emerald-50"
                   >
                     <option value="NEW">NEW</option>
@@ -399,7 +473,9 @@ export default function VendorShopPage({
                     <input
                       type="number"
                       value={newProduct.price}
-                      onChange={(e) => setNewProduct((p) => ({ ...p, price: e.target.value }))}
+                      onChange={(e) =>
+                        setNewProduct((p) => ({ ...p, price: e.target.value }))
+                      }
                       className="w-full rounded-lg border border-emerald-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-emerald-50"
                     />
                   </div>
@@ -412,7 +488,10 @@ export default function VendorShopPage({
                       type="number"
                       value={newProduct.stock_quantity}
                       onChange={(e) =>
-                        setNewProduct((p) => ({ ...p, stock_quantity: e.target.value }))
+                        setNewProduct((p) => ({
+                          ...p,
+                          stock_quantity: e.target.value,
+                        }))
                       }
                       className="w-full rounded-lg border border-emerald-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-emerald-50"
                     />
@@ -421,16 +500,56 @@ export default function VendorShopPage({
 
                 <div className="sm:col-span-2">
                   <label className="mb-1 block font-serif text-xs text-emerald-100/80">
-                    Image URL
+                    Product Image
                   </label>
+
                   <input
-                    value={newProduct.image_url}
-                    onChange={(e) =>
-                      setNewProduct((p) => ({ ...p, image_url: e.target.value }))
-                    }
+                    type="file"
+                    accept="image/*"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+
+                      try {
+                        const fd = new FormData();
+                        fd.append("image", file);
+
+                        const resp = await fetch(
+                          `${import.meta.env.VITE_API_BASE}/api/upload/product-image`,
+                          {
+                            method: "POST",
+                            body: fd,
+                          },
+                        );
+
+                        const json = await resp.json();
+                        if (!json.ok)
+                          throw new Error(json.message || "Upload failed");
+
+                        setNewProduct((p) => ({ ...p, image_url: json.url }));
+                      } catch (err) {
+                        setServerError(
+                          err.message || "Failed to upload image.",
+                        );
+                      }
+                    }}
                     className="w-full rounded-lg border border-emerald-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-emerald-50"
-                    placeholder="https://..."
                   />
+
+                  {newProduct.image_url ? (
+                    <div className="mt-2 flex items-center gap-3">
+                      <img
+                        src={newProduct.image_url}
+                        className="h-14 w-14 rounded-lg object-cover border border-emerald-900/40"
+                        onError={(e) =>
+                          (e.currentTarget.src = "/placeholder.png")
+                        }
+                      />
+                      <span className="font-serif text-[11px] text-emerald-200/70">
+                        Saved: {newProduct.image_url}
+                      </span>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="sm:col-span-2">
@@ -440,7 +559,10 @@ export default function VendorShopPage({
                   <textarea
                     value={newProduct.description}
                     onChange={(e) =>
-                      setNewProduct((p) => ({ ...p, description: e.target.value }))
+                      setNewProduct((p) => ({
+                        ...p,
+                        description: e.target.value,
+                      }))
                     }
                     className="min-h-[90px] w-full rounded-lg border border-emerald-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-emerald-50"
                     placeholder="Short description..."
@@ -520,7 +642,9 @@ export default function VendorShopPage({
             </div>
 
             <p className="font-serif text-xs italic text-amber-500">
-              {loadingProducts ? "Loading..." : `${filteredProducts.length} item(s)`}
+              {loadingProducts
+                ? "Loading..."
+                : `${filteredProducts.length} item(s)`}
             </p>
           </div>
 
@@ -583,38 +707,101 @@ export default function VendorShopPage({
                       {toInt(p.stock) === 0 ? "Out of Stock" : "Add to Cart"}
                     </button>
 
-                    {/* SELL tools */}
-                    <div className="mt-2 grid grid-cols-3 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => adjustStock(p.id, +1)}
-                        className="rounded-lg border border-emerald-500/40 bg-emerald-950/30 px-3 py-2 font-serif text-[11px] font-semibold text-emerald-100 hover:border-emerald-400"
-                        title="Increase stock by 1"
-                      >
-                        +1
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => adjustStock(p.id, -1)}
-                        className="rounded-lg border border-emerald-500/40 bg-emerald-950/30 px-3 py-2 font-serif text-[11px] font-semibold text-emerald-100 hover:border-emerald-400"
-                        title="Decrease stock by 1"
-                        disabled={toInt(p.stock) === 0}
-                      >
-                        -1
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => deleteProduct(p.id)}
-                        className="rounded-lg border border-rose-500/40 bg-rose-950/30 px-3 py-2 font-serif text-[11px] font-semibold text-rose-200 hover:border-rose-400"
-                        title="Delete product"
-                      >
-                        Delete
-                      </button>
+                    {/* ✅ Manage Inventory */}
+                    <div className="mt-3 rounded-xl border border-emerald-900/40 bg-slate-950/40 p-3">
+                      <div className="mb-2 flex items-center justify-between">
+                        <span className="font-serif text-[11px] font-semibold text-emerald-200">
+                          Manage Inventory
+                        </span>
+                        <span className="font-serif text-[10px] text-emerald-200/60">
+                          Current: {toInt(p.stock)}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min={0}
+                          value={stockInput[p.id] ?? ""}
+                          onChange={(e) =>
+                            setStockInput((m) => ({
+                              ...m,
+                              [p.id]: e.target.value,
+                            }))
+                          }
+                          className="w-24 rounded-lg border border-emerald-900/40 bg-slate-950 px-3 py-2 font-serif text-[11px] text-emerald-50"
+                          placeholder="Qty"
+                        />
+
+                        <button
+                          type="button"
+                          onClick={() => applyDeltaStock(p.id, +getQty(p.id))}
+                          className="rounded-lg border border-emerald-500/40 bg-emerald-950/30 px-3 py-2 font-serif text-[11px] font-semibold text-emerald-100 hover:border-emerald-400"
+                          title="Add qty to stock"
+                        >
+                          Restock
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => applyDeltaStock(p.id, -getQty(p.id))}
+                          disabled={toInt(p.stock) === 0}
+                          className="rounded-lg border border-emerald-500/40 bg-emerald-950/30 px-3 py-2 font-serif text-[11px] font-semibold text-emerald-100 hover:border-emerald-400 disabled:opacity-50"
+                          title="Subtract qty from stock"
+                        >
+                          Reduce
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExactStock(p.id, getQty(p.id), p.stock)
+                          }
+                          className="rounded-lg border border-amber-500/40 bg-amber-950/30 px-3 py-2 font-serif text-[11px] font-semibold text-amber-100 hover:border-amber-400"
+                          title="Set stock to this exact qty"
+                        >
+                          Set
+                        </button>
+                      </div>
+
+                      <div className="mt-2 grid grid-cols-3 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => adjustStock(p.id, +1)}
+                          className="rounded-lg border border-emerald-500/40 bg-emerald-950/20 px-3 py-2 font-serif text-[11px] font-semibold text-emerald-100 hover:border-emerald-400"
+                          title="Increase stock by 1"
+                        >
+                          +1
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => adjustStock(p.id, -1)}
+                          disabled={toInt(p.stock) === 0}
+                          className="rounded-lg border border-emerald-500/40 bg-emerald-950/20 px-3 py-2 font-serif text-[11px] font-semibold text-emerald-100 hover:border-emerald-400 disabled:opacity-50"
+                          title="Decrease stock by 1"
+                        >
+                          -1
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => deleteProduct(p.id)}
+                          className="rounded-lg border border-rose-500/40 bg-rose-950/20 px-3 py-2 font-serif text-[11px] font-semibold text-rose-200 hover:border-rose-400"
+                          title="Delete product"
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </div>
 
                     <button
                       type="button"
-                      onClick={() => alert(`Sell / listing flow for: ${p.name} (next step: vendor listing UI)`)}
+                      onClick={() =>
+                        alert(
+                          `Sell / listing flow for: ${p.name} (next step: vendor listing UI)`,
+                        )
+                      }
                       className="mt-2 inline-flex items-center justify-center rounded-lg border border-emerald-500/50 bg-gradient-to-r from-emerald-950/40 to-slate-950 px-3 py-2 font-serif text-[11px] font-semibold uppercase tracking-wide text-emerald-100 hover:border-emerald-400"
                     >
                       Sell / List Item
@@ -703,7 +890,8 @@ export default function VendorShopPage({
                 </Link>
 
                 <p className="mt-2 font-serif text-[10px] italic text-emerald-200/60">
-                  Vendor tip: adjust stock with +1 / -1, and list items using the button.
+                  Vendor tip: adjust stock with +1 / -1, and list items using
+                  the button.
                 </p>
               </div>
             </div>
