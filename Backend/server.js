@@ -54,11 +54,23 @@ const DEFAULT_ORIGINS = [
   "https://www.nanashicollectibles.com",
 ];
 
+const allowlist = Array.from(new Set([...DEFAULT_ORIGINS, ...EXTRA_ORIGINS]));
+
+/* ------------------------------ Socket.IO ------------------------------ */
+const io = new Server(httpServer, {
+  cors: {
+    origin: allowlist,
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
+  transports: ["websocket", "polling"],
+  maxHttpBufferSize: 1e8,
+});
+
+// ✅ keep ONLY this one
 io.engine.on("initial_headers", (headers, req) => {
   console.log("[engine.io] origin:", req.headers.origin);
 });
-
-const allowlist = Array.from(new Set([...DEFAULT_ORIGINS, ...EXTRA_ORIGINS]));
 
 /* ------------------------------ Middleware ------------------------------ */
 app.use(express.json({ limit: "5mb" }));
@@ -104,22 +116,6 @@ app.get("/", (_req, res) => {
       </body>
     </html>
   `);
-});
-
-/* ------------------------------ Socket.IO ------------------------------ */
-const io = new Server(httpServer, {
-  cors: {
-    origin: allowlist,
-    methods: ["GET", "POST"],
-    credentials: true,
-  },
-  transports: ["websocket", "polling"],
-  maxHttpBufferSize: 1e8,
-});
-
-// ✅ MUST be after io is created
-io.engine.on("initial_headers", (headers, req) => {
-  console.log("[engine.io] origin:", req.headers.origin);
 });
 
 /* ------------------------------ DB ------------------------------ */
