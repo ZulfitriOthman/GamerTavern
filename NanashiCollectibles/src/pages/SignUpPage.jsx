@@ -5,6 +5,12 @@ import { useSocket } from "../hooks/useSocket";
 
 const emailRegex = /\S+@\S+\.\S+/;
 
+// ✅ keep roles aligned with backend
+const ROLES = {
+  USER: "USER",
+  VENDOR: "VENDOR",
+};
+
 export default function SignUpPage() {
   const navigate = useNavigate();
 
@@ -15,6 +21,7 @@ export default function SignUpPage() {
     username: "",
     email: "",
     phone: "+673",
+    role: ROLES.USER, // ✅ new
     password: "",
     confirmPassword: "",
   });
@@ -29,13 +36,19 @@ export default function SignUpPage() {
       emailRegex.test(formData.email.trim()) &&
       formData.password.length >= 6 &&
       formData.password === formData.confirmPassword &&
+      (formData.role === ROLES.USER || formData.role === ROLES.VENDOR) && // ✅ ensure valid
       !isSubmitting
     );
   }, [formData, isSubmitting]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+
+    // ✅ normalize role to uppercase (matches backend)
+    const nextValue =
+      name === "role" ? String(value || "").toUpperCase() : value;
+
+    setFormData((prev) => ({ ...prev, [name]: nextValue }));
     setErrors((prev) => ({ ...prev, [name]: "" }));
     setServerError("");
   };
@@ -54,6 +67,11 @@ export default function SignUpPage() {
     if (formData.phone && !/^\+\d{6,15}$/.test(formData.phone.trim())) {
       newErrors.phone =
         "Phone must be in international format e.g. +673xxxxxxx";
+    }
+
+    // ✅ role validation
+    if (![ROLES.USER, ROLES.VENDOR].includes(formData.role)) {
+      newErrors.role = "Please select a valid role";
     }
 
     if (!formData.password) newErrors.password = "Password is required";
@@ -86,6 +104,7 @@ export default function SignUpPage() {
         name: formData.username.trim(),
         email: formData.email.trim().toLowerCase(),
         phone: (formData.phone || "+673").trim(),
+        role: formData.role, // ✅ send role to backend (backend only allows USER/VENDOR)
         password: formData.password,
         confirmPassword: formData.confirmPassword,
       };
@@ -98,7 +117,6 @@ export default function SignUpPage() {
         return;
       }
 
-      // `res.data` should be the user row returned by backend
       const user = res.data;
 
       localStorage.setItem("tavern_current_user", JSON.stringify(user));
@@ -106,8 +124,6 @@ export default function SignUpPage() {
 
       window.dispatchEvent(new Event("tavern:authChanged"));
 
-      // If you want after register -> login page:
-      // navigate("/login");
       navigate("/");
     } catch (err) {
       setServerError(err?.message || "Failed to create account.");
@@ -221,6 +237,63 @@ export default function SignUpPage() {
             {errors.phone ? (
               <p className="mt-1 font-serif text-xs text-red-400">
                 {errors.phone}
+              </p>
+            ) : null}
+          </div>
+
+          {/* ✅ Role */}
+          <div>
+            <label className="mb-2 block font-serif text-sm font-semibold text-amber-100">
+              Account Type
+            </label>
+
+            <div className="grid grid-cols-2 gap-3">
+              <label
+                className={`cursor-pointer rounded-xl border px-4 py-3 text-sm font-serif ${
+                  formData.role === ROLES.USER
+                    ? "border-amber-500/70 bg-amber-950/30 text-amber-100"
+                    : "border-amber-900/30 bg-slate-950 text-amber-100/80 hover:border-amber-600/50"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="role"
+                  value={ROLES.USER}
+                  checked={formData.role === ROLES.USER}
+                  onChange={handleChange}
+                  className="mr-2 accent-amber-500"
+                />
+                User
+                <div className="mt-1 text-xs text-amber-100/60">
+                  Buy, browse, collect
+                </div>
+              </label>
+
+              <label
+                className={`cursor-pointer rounded-xl border px-4 py-3 text-sm font-serif ${
+                  formData.role === ROLES.VENDOR
+                    ? "border-amber-500/70 bg-amber-950/30 text-amber-100"
+                    : "border-amber-900/30 bg-slate-950 text-amber-100/80 hover:border-amber-600/50"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="role"
+                  value={ROLES.VENDOR}
+                  checked={formData.role === ROLES.VENDOR}
+                  onChange={handleChange}
+                  className="mr-2 accent-amber-500"
+                />
+                Vendor
+                <div className="mt-1 text-xs text-amber-100/60">
+                  Sell items & manage listings
+                </div>
+              </label>
+            </div>
+
+            {errors.role ? (
+              <p className="mt-1 font-serif text-xs text-red-400">
+                {errors.role}
               </p>
             ) : null}
           </div>

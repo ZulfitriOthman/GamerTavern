@@ -7,10 +7,33 @@ const toStr = (v) => (v == null ? "" : String(v)).trim();
 // ❗ Never trim passwords
 const toPassword = (v) => (v == null ? "" : String(v));
 
+/** ✅ Roles (string-based because your DB uses VARCHAR(50)) */
+const ROLES = Object.freeze({
+  USER: "USER",
+  VENDOR: "VENDOR",
+  ADMIN: "ADMIN",
+});
+
+const normalizeRole = (v) => toStr(v).toUpperCase();
+const isValidRole = (v) => Object.values(ROLES).includes(v);
+
+/**
+ * ✅ SECURITY POLICY:
+ * - account:create: allow USER / VENDOR only (NO ADMIN self-register)
+ * - account:update: does NOT update role
+ * - account:login: returns role
+ */
+function resolveCreateRole(payload) {
+  const requested = normalizeRole(payload?.role);
+  if (requested === ROLES.VENDOR) return ROLES.VENDOR; // allow vendor if requested
+  return ROLES.USER; // default
+}
+
 function safePublicUserRow(row) {
   if (!row) return null;
   return {
     id: row.ID,
+    role: row.ROLE, // ✅ include role in public user
     name: row.NAME,
     email: row.EMAIL,
     phone: row.PHONE,
@@ -42,6 +65,9 @@ export default function accountSocketController({
     const password = toPassword(payload.password);
     const confirmPassword = toPassword(payload.confirmPassword);
 
+    // ✅ Role resolution (USER/VENDOR only)
+    const role = resolveCreateRole(payload);
+
     if (!name || !email || !password || !confirmPassword) {
       return ack({
         success: false,
@@ -57,6 +83,7 @@ export default function accountSocketController({
     console.log("[account:create] pw debug", {
       name,
       email,
+      role,
       passwordLen: password.length,
       confirmLen: confirmPassword.length,
       pwEqConfirm: password === confirmPassword,
@@ -67,15 +94,15 @@ export default function accountSocketController({
       const passwordHash = await bcrypt.hash(password, rounds);
 
       const [result] = await db.execute(
-        `INSERT INTO PERSONAL_USER (NAME, EMAIL, PHONE, PASSWORD, PROFILE_ICON)
-         VALUES (?, ?, ?, ?, ?)`,
-        [name, email, phone, passwordHash, payload.profileIcon || null],
+        `INSERT INTO PERSONAL_USER (ROLE, NAME, EMAIL, PHONE, PASSWORD, PROFILE_ICON)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [role, name, email, phone, passwordHash, payload.profileIcon || null],
       );
 
       const userId = result.insertId;
 
       const [rows] = await db.execute(
-        `SELECT ID, NAME, EMAIL, PHONE, PROFILE_ICON, CREATED_AT, UPDATED_AT
+        `SELECT ID, ROLE, NAME, EMAIL, PHONE, PROFILE_ICON, CREATED_AT, UPDATED_AT
          FROM PERSONAL_USER
          WHERE ID = ?`,
         [userId],
@@ -88,7 +115,7 @@ export default function accountSocketController({
       pushActivity({
         id: Date.now(),
         type: "account",
-        message: `New account created (ID ${userId})`,
+        message: `New account created (ID ${userId}, ROLE ${role})`,
         timestamp: new Date().toISOString(),
       });
 
@@ -126,6 +153,7 @@ export default function accountSocketController({
     const profileIcon =
       payload.profileIcon != null ? toStr(payload.profileIcon) : null;
 
+    // ✅ SECURITY: do NOT allow role update here
     const fields = [];
     const params = [];
 
@@ -158,7 +186,7 @@ export default function accountSocketController({
       }
 
       const [rows] = await db.execute(
-        `SELECT ID, NAME, EMAIL, PHONE, PROFILE_ICON, CREATED_AT, UPDATED_AT
+        `SELECT ID, ROLE, NAME, EMAIL, PHONE, PROFILE_ICON, CREATED_AT, UPDATED_AT
          FROM PERSONAL_USER
          WHERE ID = ?`,
         [id],
@@ -197,7 +225,8 @@ export default function accountSocketController({
     const ack = typeof cb === "function" ? cb : () => {};
     const t0 = Date.now();
 
-    const identifierRaw = payload.identifier ?? payload.name ?? payload.email ?? "";
+    const identifierRaw =
+      payload.identifier ?? payload.name ?? payload.email ?? "";
     const identifier = toStr(identifierRaw);
     const password = toPassword(payload.password);
 
@@ -213,12 +242,12 @@ export default function accountSocketController({
     try {
       // ✅ IMPORTANT: when logging in by NAME, pick the most recent row (avoid duplicates)
       const sql = isEmail
-        ? `SELECT ID, NAME, EMAIL, PHONE, PROFILE_ICON, PASSWORD, CREATED_AT, UPDATED_AT
+        ? `SELECT ID, ROLE, NAME, EMAIL, PHONE, PROFILE_ICON, PASSWORD, CREATED_AT, UPDATED_AT
            FROM PERSONAL_USER
            WHERE LOWER(EMAIL) = LOWER(?)
            ORDER BY ID DESC
            LIMIT 1`
-        : `SELECT ID, NAME, EMAIL, PHONE, PROFILE_ICON, PASSWORD, CREATED_AT, UPDATED_AT
+        : `SELECT ID, ROLE, NAME, EMAIL, PHONE, PROFILE_ICON, PASSWORD, CREATED_AT, UPDATED_AT
            FROM PERSONAL_USER
            WHERE LOWER(TRIM(NAME)) = LOWER(TRIM(?))
            ORDER BY ID DESC
@@ -234,6 +263,7 @@ export default function accountSocketController({
         id: row?.ID,
         dbName: row?.NAME,
         dbEmail: row?.EMAIL,
+        dbRole: row?.ROLE,
         incomingPasswordLen: password.length, // ✅ TEMP debug
       });
 
@@ -243,6 +273,9 @@ export default function accountSocketController({
       console.log("[account:login] passwordCheck", { ok, id: row.ID });
 
       if (!ok) return ack({ success: false, message: "Invalid credentials." });
+
+      // ✅ Safety: invalid roles fallback to USER
+      if (!isValidRole(row.ROLE)) row.ROLE = ROLES.USER;
 
       const account = safePublicUserRow(row);
 
@@ -283,7 +316,10 @@ export default function accountSocketController({
 
       const ttlMin = Number(process.env.RESET_TOKEN_TTL_MIN || 15);
       const rawToken = crypto.randomBytes(32).toString("hex");
-      const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+      const tokenHash = crypto
+        .createHash("sha256")
+        .update(rawToken)
+        .digest("hex");
 
       await db.execute(
         `INSERT INTO RESET_PASSWORD (USER_ID, TOKEN_HASH, EXPIRES_AT, USED)
@@ -336,7 +372,10 @@ export default function accountSocketController({
     }
 
     try {
-      const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+      const tokenHash = crypto
+        .createHash("sha256")
+        .update(rawToken)
+        .digest("hex");
 
       const [rows] = await db.execute(
         `SELECT ID, USER_ID, EXPIRES_AT, USED
