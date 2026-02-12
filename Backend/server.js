@@ -7,7 +7,6 @@ import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
 import { Server } from "socket.io";
-import multer from "multer";
 
 import { initDB, dbPing } from "./modules/db.module.js";
 
@@ -22,10 +21,22 @@ import productSocketController from "./sockets/product.socket.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// ---- existing ----
 dotenv.config({
   path: path.join(__dirname, ".env.dev"),
   override: true,
 });
+
+const publicPath = path.join(process.cwd(), "public");
+const tmpDir = path.join(process.cwd(), "tmp");
+const uploadsDir = path.join(tmpDir, "uploads");
+
+fs.mkdirSync(publicPath, { recursive: true });
+fs.mkdirSync(tmpDir, { recursive: true });
+fs.mkdirSync(uploadsDir, { recursive: true });
+
+// ✅ NOW you can use publicPath safely
+import multer from "multer"; // put this at the TOP with other imports
 
 const productUploadsDir = path.join(publicPath, "uploads", "products");
 fs.mkdirSync(productUploadsDir, { recursive: true });
@@ -41,24 +52,9 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  limits: { fileSize: 5 * 1024 * 1024 },
 });
 
-app.post("/api/upload/product-image", upload.single("image"), (req, res) => {
-  if (!req.file)
-    return res.status(400).json({ ok: false, message: "No file." });
-
-  // This path is reachable because you serve /public statically
-  const publicUrl = `/public/uploads/products/${req.file.filename}`;
-  return res.json({ ok: true, url: publicUrl });
-});
-
-const publicPath = path.join(process.cwd(), "public");
-const tmpDir = path.join(process.cwd(), "tmp");
-const uploadsDir = path.join(tmpDir, "uploads");
-fs.mkdirSync(publicPath, { recursive: true });
-fs.mkdirSync(tmpDir, { recursive: true });
-fs.mkdirSync(uploadsDir, { recursive: true });
 
 /* ------------------------------ App / Server ------------------------------ */
 const app = express();
