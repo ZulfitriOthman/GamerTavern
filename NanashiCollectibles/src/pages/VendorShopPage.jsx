@@ -1,8 +1,8 @@
 // src/pages/VendorShopPage.jsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { TCG_LIST } from "../data/products";
-import { getSocket } from "../socket/socketClient";
+import { getSocket, connectSocket } from "../socket/socketClient";
 
 const ROLES = {
   USER: "USER",
@@ -12,7 +12,6 @@ const ROLES = {
 
 const PLACEHOLDER = "/placeholder.png";
 
-// ✅ IMPORTANT: define helpers BEFORE any function uses them (no TDZ bugs)
 const toStr = (v) => (v == null ? "" : String(v)).trim();
 const toInt = (v, d = 0) => {
   const n = Number(v);
@@ -28,24 +27,21 @@ function normalizeRole(role) {
 function asText(v) {
   if (v == null) return "";
   if (typeof v === "string") return v;
-  // mysql2 may return Buffer for BLOB
   if (v?.type === "Buffer" && Array.isArray(v?.data)) {
     return new TextDecoder().decode(new Uint8Array(v.data));
   }
-  if (v instanceof ArrayBuffer) return new TextDecoder().decode(new Uint8Array(v));
+  if (v instanceof ArrayBuffer)
+    return new TextDecoder().decode(new Uint8Array(v));
   if (v instanceof Uint8Array) return new TextDecoder().decode(v);
   if (Buffer.isBuffer?.(v)) return v.toString("utf8");
   return String(v);
 }
 
-// ✅ Resolve image URLs correctly for BOTH dev/prod
-// - absolute http(s) stays as-is
-// - backend static "/public/..." should be prefixed with API base (so Vite dev server doesn't try to serve it)
-// - "/placeholder.png" or other local assets remain local
 const API_BASE =
   (import.meta?.env?.VITE_API_BASE && String(import.meta.env.VITE_API_BASE)) ||
   "http://localhost:3001";
 
+// ✅ Resolve image URLs correctly for BOTH dev/prod
 function resolveImageSrc(url) {
   const s = toStr(url);
   if (!s) return PLACEHOLDER;
@@ -62,6 +58,40 @@ function resolveImageSrc(url) {
   return PLACEHOLDER;
 }
 
+// Category helper: supports future DB column, otherwise fallback
+function deriveCategory(row) {
+  const direct =
+    toStr(row?.category) ||
+    toStr(row?.CATEGORY) ||
+    toStr(row?.product_category) ||
+    toStr(row?.PRODUCT_CATEGORY);
+
+  if (direct) return direct;
+
+  const code = toStr(row?.code || row?.CODE);
+  if (code.includes("-")) return code.split("-")[0].toUpperCase();
+
+  return "Uncategorized";
+}
+
+// Date filter buckets
+const DATE_FILTER = {
+  ALL: "ALL",
+  TODAY: "TODAY",
+  DAYS_7: "DAYS_7",
+  DAYS_30: "DAYS_30",
+};
+
+const SORT = {
+  NEWEST: "NEWEST",
+  AZ: "AZ",
+  ZA: "ZA",
+  PRICE_ASC: "PRICE_ASC",
+  PRICE_DESC: "PRICE_DESC",
+  CATEGORY_AZ: "CATEGORY_AZ",
+  CATEGORY_ZA: "CATEGORY_ZA",
+};
+
 export default function VendorShopPage({
   cart,
   addToCart,
@@ -75,10 +105,20 @@ export default function VendorShopPage({
 
   const [currentUser, setCurrentUser] = useState(null);
 
+  // socket + status
+  const [isSocketConnected, setIsSocketConnected] = useState(false);
+  const didInitSocketRef = useRef(false);
+
   // DB products loaded from socket
   const [products, setProducts] = useState([]);
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [serverError, setServerError] = useState("");
+
+  // Search / filter / sort
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("ALL");
+  const [dateFilter, setDateFilter] = useState(DATE_FILTER.ALL);
+  const [sortMode, setSortMode] = useState(SORT.NEWEST);
 
   // Add product UI
   const [showAdd, setShowAdd] = useState(false);
@@ -90,7 +130,7 @@ export default function VendorShopPage({
     stock_quantity: 0,
     image_url: "",
     description: "",
-    tcg: "mtg", // UI only; your DB schema currently has no tcg column
+    tcg: "mtg", // UI only; DB has no tcg column
   });
 
   // ✅ Manage Inventory UI state (per product)
@@ -98,57 +138,8 @@ export default function VendorShopPage({
   const getQty = (productId) => toInt(stockInput[productId], 0);
 
   // ----------------------------
-  // Socket helpers
+  // Guard: must be logged in AND vendor/admin
   // ----------------------------
-  const emitAsync = (event, payload) =>
-    new Promise((resolve) => {
-      const s = getSocket();
-      if (!s?.connected) {
-        return resolve({ success: false, message: "Socket not connected." });
-      }
-      s.emit(event, payload, (res) => resolve(res));
-    });
-
-  // ✅ restock / reduce (delta-based)
-  const applyDeltaStock = async (productId, delta) => {
-    if (!currentUser?.id) return;
-
-    if (!Number.isFinite(delta) || delta === 0) {
-      setServerError("Quantity must be more than 0.");
-      return;
-    }
-
-    setServerError("");
-    const res = await emitAsync("inventory:adjust", {
-      currentUser: { id: currentUser.id, role: currentUser.role },
-      product_id: productId,
-      delta,
-    });
-
-    if (!res?.success) {
-      setServerError(res?.message || "Failed to update inventory.");
-      return;
-    }
-
-    // clear input for that product after success
-    setStockInput((m) => ({ ...m, [productId]: "" }));
-  };
-
-  // ✅ set stock directly (convert to delta)
-  const setExactStock = async (productId, newQty, currentStock) => {
-    const next = Math.max(0, toInt(newQty, 0));
-    const curr = Math.max(0, toInt(currentStock, 0));
-    const delta = next - curr;
-
-    if (delta === 0) {
-      setServerError("Stock is already that value.");
-      return;
-    }
-
-    return applyDeltaStock(productId, delta);
-  };
-
-  // ✅ Guard: must be logged in AND vendor/admin
   useEffect(() => {
     const raw = localStorage.getItem("tavern_current_user");
     const user = raw ? JSON.parse(raw) : null;
@@ -168,7 +159,9 @@ export default function VendorShopPage({
     setCurrentUser(user);
   }, [navigate]);
 
-  // Selected TCG – driven by URL if present
+  // ----------------------------
+  // TCG selection from URL
+  // ----------------------------
   const [selectedTcg, setSelectedTcg] = useState(() => {
     if (tcgId && TCG_LIST.some((t) => t.id === tcgId)) return tcgId;
     return "mtg";
@@ -189,15 +182,25 @@ export default function VendorShopPage({
     navigate(`/vendor/tcg/${id}`);
   };
 
+  // ----------------------------
+  // Socket helpers (wait for connect)
+  // ----------------------------
+  const emitAsync = (event, payload) =>
+    new Promise((resolve) => {
+      const s = getSocket();
+      if (!s?.connected)
+        return resolve({ success: false, message: "Socket not connected." });
+      s.emit(event, payload, (res) => resolve(res));
+    });
+
   const loadProducts = async () => {
     if (!currentUser?.id) return;
+
     setLoadingProducts(true);
     setServerError("");
 
     const res = await emitAsync("product:list", {
-      currentUser: { id: currentUser.id, role: currentUser.role },
-      // optional future filters:
-      // vendorId: currentUser.id,
+      // vendor/admin can list all; optionally: vendorId: currentUser.id
     });
 
     setLoadingProducts(false);
@@ -207,33 +210,71 @@ export default function VendorShopPage({
       return;
     }
 
-    // Map DB rows into UI-friendly objects
     const rows = Array.isArray(res.data) ? res.data : [];
-    const mapped = rows.map((r) => ({
-      id: r.id,
-      vendor_id: r.vendor_id,
-      name: r.name,
-      code: r.code,
-      conditional: r.conditional,
-      price: toInt(r.price),
-      stock: toInt(r.stock_quantity),
-      // ✅ IMPORTANT: resolve "/public/..." using API_BASE so it works in Vite dev
-      image: resolveImageSrc(asText(r.image_url)),
-      description: asText(r.description),
-    }));
+    const mapped = rows.map((r) => {
+      const createdAt = r?.created_at || r?.CREATED_AT || null;
+      return {
+        id: r.id ?? r.ID,
+        vendor_id: r.vendor_id ?? r.VENDOR_ID,
+        name: toStr(r.name ?? r.NAME),
+        code: toStr(r.code ?? r.CODE),
+        conditional: toStr(r.conditional ?? r.CONDITIONAL),
+        price: toInt(r.price ?? r.PRICE),
+        stock: toInt(r.stock_quantity ?? r.STOCK_QUANTITY),
+        image_url: asText(r.image_url ?? r.IMAGE_URL),
+        description: asText(r.description ?? r.DESCRIPTION),
+        category: deriveCategory({
+          category: r.category,
+          CATEGORY: r.CATEGORY,
+          product_category: r.product_category,
+          PRODUCT_CATEGORY: r.PRODUCT_CATEGORY,
+          code: r.code ?? r.CODE,
+        }),
+        created_at: createdAt ? new Date(createdAt) : null,
+      };
+    });
 
     setProducts(mapped);
   };
 
-  // Listen for realtime updates + initial load
+  // ✅ Ensure socket exists (handles refresh timing)
   useEffect(() => {
-    if (!currentUser?.id) return;
+    if (didInitSocketRef.current) return;
+    didInitSocketRef.current = true;
 
+    const username =
+      localStorage.getItem("tavern_username") ||
+      (currentUser?.name ? String(currentUser.name) : null);
+
+    connectSocket(username);
+  }, [currentUser?.name]);
+
+  // ✅ Listen for connect/disconnect and load only after connect
+  useEffect(() => {
     const s = getSocket();
     if (!s) return;
 
-    loadProducts();
+    const onConnect = () => {
+      setIsSocketConnected(true);
+      setServerError(""); // clear stale "Socket not connected"
+      loadProducts();
+    };
 
+    const onDisconnect = () => {
+      setIsSocketConnected(false);
+    };
+
+    s.on("connect", onConnect);
+    s.on("disconnect", onDisconnect);
+
+    // initial status
+    setIsSocketConnected(!!s.connected);
+    if (s.connected) {
+      setServerError("");
+      loadProducts();
+    }
+
+    // realtime updates
     const onCreated = () => loadProducts();
     const onUpdated = () => loadProducts();
     const onDeleted = () => loadProducts();
@@ -245,6 +286,9 @@ export default function VendorShopPage({
     s.on("inventory:updated", onInvUpdated);
 
     return () => {
+      s.off("connect", onConnect);
+      s.off("disconnect", onDisconnect);
+
       s.off("product:created", onCreated);
       s.off("product:updated", onUpdated);
       s.off("product:deleted", onDeleted);
@@ -253,10 +297,50 @@ export default function VendorShopPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.id]);
 
-  const filteredProducts = useMemo(() => products, [products]);
+  // ----------------------------
+  // Inventory actions
+  // ----------------------------
+  const applyDeltaStock = async (productId, delta) => {
+    if (!currentUser?.id) return;
+
+    if (!Number.isFinite(delta) || delta === 0) {
+      setServerError("Quantity must be more than 0.");
+      return;
+    }
+
+    setServerError("");
+    const res = await emitAsync("inventory:adjust", {
+      currentUser: { id: currentUser.id, role: currentUser.role },
+      product_id: productId,
+      delta,
+    });
+
+    if (!res?.success) {
+      setServerError(res?.message || "Failed to update inventory.");
+      return;
+    }
+
+    setStockInput((m) => ({ ...m, [productId]: "" }));
+  };
+
+  const setExactStock = async (productId, newQty, currentStock) => {
+    const next = Math.max(0, toInt(newQty, 0));
+    const curr = Math.max(0, toInt(currentStock, 0));
+    const delta = next - curr;
+
+    if (delta === 0) {
+      setServerError("Stock is already that value.");
+      return;
+    }
+
+    return applyDeltaStock(productId, delta);
+  };
+
+  const adjustStock = async (productId, delta) =>
+    applyDeltaStock(productId, delta);
 
   // ----------------------------
-  // Vendor actions (DB via socket)
+  // Product actions
   // ----------------------------
   const submitAddProduct = async (e) => {
     e.preventDefault();
@@ -271,6 +355,7 @@ export default function VendorShopPage({
       stock_quantity: toInt(newProduct.stock_quantity),
       image_url: toStr(newProduct.image_url),
       description: toStr(newProduct.description),
+      // category / tcg not in DB yet (optional later)
     };
 
     if (!payload.name || !payload.code) {
@@ -280,6 +365,7 @@ export default function VendorShopPage({
 
     setServerError("");
     const res = await emitAsync("product:create", payload);
+
     if (!res?.success) {
       setServerError(res?.message || "Failed to create product.");
       return;
@@ -300,21 +386,6 @@ export default function VendorShopPage({
     loadProducts();
   };
 
-  const adjustStock = async (productId, delta) => {
-    if (!currentUser?.id) return;
-
-    const res = await emitAsync("inventory:adjust", {
-      currentUser: { id: currentUser.id, role: currentUser.role },
-      product_id: productId,
-      delta,
-    });
-
-    if (!res?.success) {
-      setServerError(res?.message || "Failed to adjust inventory.");
-      return;
-    }
-  };
-
   const deleteProduct = async (productId) => {
     if (!currentUser?.id) return;
 
@@ -332,17 +403,107 @@ export default function VendorShopPage({
     }
   };
 
+  // ----------------------------
+  // Filters / Sort
+  // ----------------------------
+  const categories = useMemo(() => {
+    const set = new Set();
+    for (const p of products) set.add(p.category || "Uncategorized");
+    return ["ALL", ...Array.from(set).sort((a, b) => a.localeCompare(b))];
+  }, [products]);
+
+  const filteredProducts = useMemo(() => {
+    const q = search.trim().toLowerCase();
+
+    const now = new Date();
+    const startOfToday = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    );
+
+    const passDate = (p) => {
+      if (dateFilter === DATE_FILTER.ALL) return true;
+      if (!p.created_at) return true;
+
+      const t = p.created_at.getTime();
+
+      if (dateFilter === DATE_FILTER.TODAY) return t >= startOfToday.getTime();
+
+      const days = dateFilter === DATE_FILTER.DAYS_7 ? 7 : 30;
+      const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+      return t >= cutoff;
+    };
+
+    const list = products
+      .filter((p) => passDate(p))
+      .filter((p) => {
+        if (categoryFilter === "ALL") return true;
+        return (p.category || "Uncategorized") === categoryFilter;
+      })
+      .filter((p) => {
+        if (!q) return true;
+        return (
+          p.name.toLowerCase().includes(q) ||
+          p.code.toLowerCase().includes(q) ||
+          (p.category || "").toLowerCase().includes(q)
+        );
+      });
+
+    const byNewest = (a, b) => {
+      const at = a.created_at ? a.created_at.getTime() : 0;
+      const bt = b.created_at ? b.created_at.getTime() : 0;
+      return bt - at;
+    };
+
+    const byName = (a, b) => a.name.localeCompare(b.name);
+    const byPrice = (a, b) => a.price - b.price;
+    const byCategory = (a, b) =>
+      (a.category || "").localeCompare(b.category || "");
+
+    const sorted = [...list];
+    switch (sortMode) {
+      case SORT.AZ:
+        sorted.sort(byName);
+        break;
+      case SORT.ZA:
+        sorted.sort((a, b) => byName(b, a));
+        break;
+      case SORT.PRICE_ASC:
+        sorted.sort((a, b) => byPrice(a, b) || byName(a, b));
+        break;
+      case SORT.PRICE_DESC:
+        sorted.sort((a, b) => byPrice(b, a) || byName(a, b));
+        break;
+      case SORT.CATEGORY_AZ:
+        sorted.sort((a, b) => byCategory(a, b) || byName(a, b));
+        break;
+      case SORT.CATEGORY_ZA:
+        sorted.sort((a, b) => byCategory(b, a) || byName(a, b));
+        break;
+      case SORT.NEWEST:
+      default:
+        sorted.sort((a, b) => byNewest(a, b) || byName(a, b));
+        break;
+    }
+
+    return sorted;
+  }, [products, search, categoryFilter, dateFilter, sortMode]);
+
   if (!currentUser) return null;
+
+  const isVendor =
+    currentUser?.role === ROLES.VENDOR || currentUser?.role === ROLES.ADMIN;
 
   return (
     <div className="relative flex flex-col gap-6 md:flex-row">
-      <div className="pointer-events-none absolute -left-32 top-10 h-64 w-64 rounded-full bg-purple-900/30 blur-3xl" />
+      <div className="pointer-events-none absolute -left-32 top-10 h-64 w-64 rounded-full bg-emerald-900/25 blur-3xl" />
       <div className="pointer-events-none absolute -right-40 bottom-0 h-72 w-72 rounded-full bg-amber-800/25 blur-3xl" />
 
       <section className="relative z-10 flex-1 space-y-6">
         {/* Role banner */}
         <div className="overflow-hidden rounded-2xl border border-emerald-900/40 bg-gradient-to-br from-slate-950 via-emerald-950/20 to-slate-950 p-4 shadow-lg shadow-emerald-900/20">
-          <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="font-serif text-xs text-emerald-100/70">
                 Logged in as{" "}
@@ -355,22 +516,44 @@ export default function VendorShopPage({
               </p>
             </div>
 
-            <span className="rounded-full border border-emerald-600/40 bg-emerald-950/30 px-3 py-1 font-serif text-[10px] uppercase tracking-wide text-emerald-200">
-              Vendor Mode: Buy + Sell
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="rounded-full border border-emerald-600/40 bg-emerald-950/30 px-3 py-1 font-serif text-[10px] uppercase tracking-wide text-emerald-200">
+                Vendor Mode
+              </span>
+
+              <span
+                className={[
+                  "rounded-full border px-3 py-1 font-serif text-[10px] uppercase tracking-wide",
+                  isSocketConnected
+                    ? "border-emerald-600/40 bg-emerald-950/30 text-emerald-200"
+                    : "border-rose-600/40 bg-rose-950/30 text-rose-200",
+                ].join(" ")}
+                title="Socket connection status"
+              >
+                {isSocketConnected ? "Live" : "Offline"}
+              </span>
+
+              <button
+                type="button"
+                onClick={loadProducts}
+                className="rounded-full border border-emerald-700/40 bg-emerald-950/20 px-3 py-1 font-serif text-[10px] uppercase tracking-wide text-emerald-200 hover:border-emerald-500"
+              >
+                Refresh
+              </button>
+            </div>
           </div>
         </div>
 
         {/* Errors */}
         {serverError ? (
-          <div className="rounded-xl border border-red-500/30 bg-red-950/30 px-4 py-3 text-sm text-red-200">
+          <div className="rounded-xl border border-rose-500/30 bg-rose-950/30 px-4 py-3 text-sm text-rose-200">
             {serverError}
           </div>
         ) : null}
 
-        {/* Vendor console */}
-        <div className="rounded-2xl border border-emerald-900/40 bg-gradient-to-br from-slate-950 to-emerald-950/20 p-5 shadow-lg shadow-emerald-900/20">
-          <div className="flex items-start justify-between gap-3">
+        {/* Vendor Console */}
+        <div className="rounded-2xl border border-emerald-900/40 bg-gradient-to-br from-slate-950 via-emerald-950/20 to-slate-950 p-5 shadow-lg shadow-emerald-900/20">
+          <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h3 className="font-serif text-base font-bold text-emerald-100">
                 Vendor Console
@@ -380,26 +563,16 @@ export default function VendorShopPage({
               </p>
             </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setShowAdd(true)}
-                className="rounded-xl border border-emerald-500/50 bg-gradient-to-r from-emerald-950/40 to-slate-950 px-4 py-2 font-serif text-xs font-semibold text-emerald-100 hover:border-emerald-400"
-              >
-                + Add Product
-              </button>
-
-              <button
-                type="button"
-                onClick={loadProducts}
-                className="rounded-xl border border-emerald-500/30 bg-slate-950/40 px-4 py-2 font-serif text-xs text-emerald-100/80 hover:border-emerald-400"
-              >
-                Refresh
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => setShowAdd(true)}
+              className="rounded-xl border border-emerald-500/50 bg-gradient-to-r from-emerald-950/40 to-slate-950 px-4 py-2 font-serif text-xs font-semibold text-emerald-100 hover:border-emerald-400"
+            >
+              + Add Product
+            </button>
           </div>
 
-          {/* Add Product modal/panel */}
+          {/* Add Product panel */}
           {showAdd ? (
             <form
               onSubmit={submitAddProduct}
@@ -500,7 +673,7 @@ export default function VendorShopPage({
                   </div>
                 </div>
 
-                {/* ✅ Product Image Upload */}
+                {/* Image upload */}
                 <div className="sm:col-span-2">
                   <label className="mb-1 block font-serif text-xs text-emerald-100/80">
                     Product Image
@@ -514,7 +687,6 @@ export default function VendorShopPage({
                       if (!file) return;
 
                       try {
-                        // basic validation
                         if (!file.type.startsWith("image/")) {
                           throw new Error("Please select an image file.");
                         }
@@ -535,16 +707,15 @@ export default function VendorShopPage({
                         );
 
                         const json = await resp.json();
-                        if (!json.ok) {
+                        if (!json.ok)
                           throw new Error(json.message || "Upload failed");
-                        }
 
                         setNewProduct((p) => ({ ...p, image_url: json.url }));
-
-                        // allow selecting same file again later
                         e.target.value = "";
                       } catch (err) {
-                        setServerError(err?.message || "Failed to upload image.");
+                        setServerError(
+                          err?.message || "Failed to upload image.",
+                        );
                       }
                     }}
                     className="w-full rounded-lg border border-emerald-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-emerald-50"
@@ -642,185 +813,334 @@ export default function VendorShopPage({
           })}
         </div>
 
-        {/* Products */}
-        <div className="mt-2">
-          <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
+        {/* Marketplace controls */}
+        <div className="rounded-2xl border border-emerald-900/40 bg-gradient-to-br from-slate-950 via-emerald-950/20 to-slate-950 p-5 shadow-lg shadow-emerald-900/20">
+          <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h3 className="font-serif text-xl font-bold text-amber-100">
-                {activeTcg?.name} Products
+              <h3 className="font-serif text-xl font-bold text-emerald-100">
+                {activeTcg?.name} Products (Vendor View)
               </h3>
-              <p className="font-serif text-[11px] italic text-amber-200/70">
-                Vendor view: DB products + stock controls enabled.
+              <p className="mt-1 font-serif text-[11px] italic text-emerald-100/70">
+                Search • Filter • Sort • Stock Control
               </p>
             </div>
 
-            <p className="font-serif text-xs italic text-amber-500">
-              {loadingProducts ? "Loading..." : `${filteredProducts.length} item(s)`}
-            </p>
+            <span className="rounded-full border border-emerald-700/40 bg-emerald-950/20 px-3 py-1 font-serif text-[10px] uppercase tracking-wide text-emerald-200">
+              {loadingProducts
+                ? "Loading..."
+                : `${filteredProducts.length} item(s)`}
+            </span>
           </div>
 
-          {filteredProducts.length === 0 ? (
-            <div className="rounded-xl border border-amber-900/40 bg-gradient-to-br from-slate-950 to-purple-950/40 p-6 text-sm italic text-amber-100/70">
-              No products found in DB yet.
+          <div className="mt-4 grid gap-3 md:grid-cols-12">
+            <div className="md:col-span-6">
+              <div className="flex items-center gap-2 rounded-xl border border-emerald-900/40 bg-slate-950/60 px-3 py-2">
+                <span className="text-emerald-300/80">⌕</span>
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search name / code / category..."
+                  className="w-full bg-transparent font-serif text-sm text-emerald-50 placeholder:text-emerald-200/40 outline-none"
+                />
+              </div>
             </div>
-          ) : (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {filteredProducts.map((p) => (
-                <article
-                  key={p.id}
-                  className="group relative flex flex-col overflow-hidden rounded-xl border border-amber-900/40 bg-gradient-to-br from-slate-950 to-purple-950/40 shadow-lg shadow-purple-900/30"
+
+            <div className="md:col-span-3">
+              <select
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+                className="w-full rounded-xl border border-emerald-900/40 bg-slate-950/60 px-3 py-2 font-serif text-sm text-emerald-50"
+              >
+                {categories.map((c) => (
+                  <option key={c} value={c}>
+                    {c === "ALL" ? "All Categories" : c}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="md:col-span-3">
+              <select
+                value={dateFilter}
+                onChange={(e) => setDateFilter(e.target.value)}
+                className="w-full rounded-xl border border-emerald-900/40 bg-slate-950/60 px-3 py-2 font-serif text-sm text-emerald-50"
+              >
+                <option value={DATE_FILTER.ALL}>All Dates</option>
+                <option value={DATE_FILTER.TODAY}>Today</option>
+                <option value={DATE_FILTER.DAYS_7}>Last 7 days</option>
+                <option value={DATE_FILTER.DAYS_30}>Last 30 days</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            {[
+              { key: SORT.NEWEST, label: "Newest" },
+              { key: SORT.AZ, label: "A–Z" },
+              { key: SORT.ZA, label: "Z–A" },
+              { key: SORT.PRICE_ASC, label: "Price ↑" },
+              { key: SORT.PRICE_DESC, label: "Price ↓" },
+              { key: SORT.CATEGORY_AZ, label: "Category A–Z" },
+              { key: SORT.CATEGORY_ZA, label: "Category Z–A" },
+            ].map((b) => {
+              const active = sortMode === b.key;
+              return (
+                <button
+                  key={b.key}
+                  type="button"
+                  onClick={() => setSortMode(b.key)}
+                  className={[
+                    "rounded-full border px-3 py-1.5 font-serif text-[11px] uppercase tracking-wide transition",
+                    active
+                      ? "border-emerald-400/70 bg-emerald-950/40 text-emerald-100"
+                      : "border-emerald-900/40 bg-slate-950/40 text-emerald-200/70 hover:border-emerald-400/60 hover:text-emerald-100",
+                  ].join(" ")}
                 >
-                  <div className="relative h-40 w-full overflow-hidden">
-                    <img
-                      src={resolveImageSrc(p.image)}
-                      alt={p.name}
-                      className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
-                      onError={(e) => {
-                        e.currentTarget.src = PLACEHOLDER;
-                      }}
-                    />
-                    <div className="absolute bottom-2 right-2 rounded-full border border-emerald-500/60 bg-slate-950/80 px-3 py-1 font-serif text-[11px] font-semibold text-emerald-300">
-                      BND {toInt(p.price).toFixed(2)}
-                    </div>
-                  </div>
-
-                  <div className="flex flex-1 flex-col gap-2 p-4">
-                    <h4 className="line-clamp-2 font-serif text-sm font-semibold text-amber-50">
-                      {p.name}
-                    </h4>
-
-                    <div className="flex items-center justify-between text-[11px] text-amber-100/70">
-                      <span className="italic">
-                        Stock:{" "}
-                        <span className="font-semibold text-amber-300">
-                          {toInt(p.stock)}
-                        </span>
-                      </span>
-                      <span className="rounded-full border border-emerald-700/40 bg-emerald-950/30 px-2 py-0.5 font-serif text-[10px] uppercase tracking-wide text-emerald-200">
-                        CODE: {p.code || "-"}
-                      </span>
-                    </div>
-
-                    {/* BUY */}
-                    <button
-                      onClick={() =>
-                        addToCart({
-                          id: p.id,
-                          name: p.name,
-                          price: toInt(p.price),
-                          image: resolveImageSrc(p.image),
-                          stock: toInt(p.stock),
-                        })
-                      }
-                      disabled={toInt(p.stock) === 0}
-                      className="mt-2 inline-flex items-center justify-center rounded-lg border border-amber-500/60 bg-gradient-to-r from-amber-950/60 to-purple-950/60 px-3 py-2 font-serif text-[11px] font-semibold uppercase tracking-wide text-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {toInt(p.stock) === 0 ? "Out of Stock" : "Add to Cart"}
-                    </button>
-
-                    {/* ✅ Manage Inventory */}
-                    <div className="mt-3 rounded-xl border border-emerald-900/40 bg-slate-950/40 p-3">
-                      <div className="mb-2 flex items-center justify-between">
-                        <span className="font-serif text-[11px] font-semibold text-emerald-200">
-                          Manage Inventory
-                        </span>
-                        <span className="font-serif text-[10px] text-emerald-200/60">
-                          Current: {toInt(p.stock)}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="number"
-                          min={0}
-                          value={stockInput[p.id] ?? ""}
-                          onChange={(e) =>
-                            setStockInput((m) => ({
-                              ...m,
-                              [p.id]: e.target.value,
-                            }))
-                          }
-                          className="w-24 rounded-lg border border-emerald-900/40 bg-slate-950 px-3 py-2 font-serif text-[11px] text-emerald-50"
-                          placeholder="Qty"
-                        />
-
-                        <button
-                          type="button"
-                          onClick={() => applyDeltaStock(p.id, +getQty(p.id))}
-                          className="rounded-lg border border-emerald-500/40 bg-emerald-950/30 px-3 py-2 font-serif text-[11px] font-semibold text-emerald-100 hover:border-emerald-400"
-                          title="Add qty to stock"
-                        >
-                          Restock
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => applyDeltaStock(p.id, -getQty(p.id))}
-                          disabled={toInt(p.stock) === 0}
-                          className="rounded-lg border border-emerald-500/40 bg-emerald-950/30 px-3 py-2 font-serif text-[11px] font-semibold text-emerald-100 hover:border-emerald-400 disabled:opacity-50"
-                          title="Subtract qty from stock"
-                        >
-                          Reduce
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => setExactStock(p.id, getQty(p.id), p.stock)}
-                          className="rounded-lg border border-amber-500/40 bg-amber-950/30 px-3 py-2 font-serif text-[11px] font-semibold text-amber-100 hover:border-amber-400"
-                          title="Set stock to this exact qty"
-                        >
-                          Set
-                        </button>
-                      </div>
-
-                      <div className="mt-2 grid grid-cols-3 gap-2">
-                        <button
-                          type="button"
-                          onClick={() => adjustStock(p.id, +1)}
-                          className="rounded-lg border border-emerald-500/40 bg-emerald-950/20 px-3 py-2 font-serif text-[11px] font-semibold text-emerald-100 hover:border-emerald-400"
-                          title="Increase stock by 1"
-                        >
-                          +1
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => adjustStock(p.id, -1)}
-                          disabled={toInt(p.stock) === 0}
-                          className="rounded-lg border border-emerald-500/40 bg-emerald-950/20 px-3 py-2 font-serif text-[11px] font-semibold text-emerald-100 hover:border-emerald-400 disabled:opacity-50"
-                          title="Decrease stock by 1"
-                        >
-                          -1
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => deleteProduct(p.id)}
-                          className="rounded-lg border border-rose-500/40 bg-rose-950/20 px-3 py-2 font-serif text-[11px] font-semibold text-rose-200 hover:border-rose-400"
-                          title="Delete product"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        alert(
-                          `Sell / listing flow for: ${p.name} (next step: vendor listing UI)`,
-                        )
-                      }
-                      className="mt-2 inline-flex items-center justify-center rounded-lg border border-emerald-500/50 bg-gradient-to-r from-emerald-950/40 to-slate-950 px-3 py-2 font-serif text-[11px] font-semibold uppercase tracking-wide text-emerald-100 hover:border-emerald-400"
-                    >
-                      Sell / List Item
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
+                  {b.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
+
+        {/* Products grid */}
+        {filteredProducts.length === 0 ? (
+          <div className="rounded-xl border border-emerald-900/40 bg-gradient-to-br from-slate-950 to-emerald-950/20 p-6 text-sm italic text-emerald-100/70">
+            No products found in DB yet.
+          </div>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {filteredProducts.map((p) => (
+              <article
+                key={p.id}
+                className="group relative flex flex-col overflow-hidden rounded-2xl border border-emerald-900/40 bg-gradient-to-br from-slate-950 to-emerald-950/15 shadow-lg shadow-emerald-900/20 transition-all duration-200 hover:-translate-y-1 hover:border-emerald-400/60 hover:shadow-2xl"
+              >
+                <div className="relative h-44 w-full overflow-hidden">
+                  <img
+                    src={resolveImageSrc(p.image_url)}
+                    alt={p.name}
+                    className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
+                    onError={(e) => (e.currentTarget.src = PLACEHOLDER)}
+                  />
+
+                  <div className="absolute left-3 top-3 flex items-center gap-2">
+                    <span className="rounded-full border border-emerald-500/60 bg-slate-950/80 px-2.5 py-1 font-serif text-[10px] uppercase tracking-wide text-emerald-200">
+                      {p.category || "Uncategorized"}
+                    </span>
+
+                    {p.conditional ? (
+                      <span className="rounded-full border border-amber-600/40 bg-amber-950/20 px-2.5 py-1 font-serif text-[10px] uppercase tracking-wide text-amber-200">
+                        {p.conditional}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <span className="absolute bottom-3 right-3 rounded-full border border-emerald-500/60 bg-slate-950/80 px-3 py-1 font-serif text-[11px] font-semibold text-emerald-300">
+                    BND {toInt(p.price).toFixed(2)}
+                  </span>
+                </div>
+
+                <div className="flex flex-1 flex-col gap-3 p-4">
+                  {/* Title */}
+                  <h4 className="line-clamp-2 font-serif text-sm font-semibold text-emerald-50">
+                    {p.name}
+                  </h4>
+
+                  {/* Meta row */}
+                  <div className="flex items-center justify-between text-[11px] text-emerald-100/70">
+                    <span className="inline-flex items-center gap-1 italic">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400/70" />
+                      Stock:
+                      <span className="font-semibold text-emerald-200">
+                        {toInt(p.stock)}
+                      </span>
+                    </span>
+
+                    <span className="rounded-full border border-emerald-900/40 bg-slate-950/60 px-2 py-0.5 font-serif text-[10px] uppercase tracking-wide text-emerald-200/80">
+                      {p.code || "-"}
+                    </span>
+                  </div>
+
+                  {/* Divider */}
+                  <div className="h-px w-full bg-gradient-to-r from-transparent via-emerald-700/30 to-transparent" />
+
+                  {/* BUY */}
+                  <button
+                    onClick={() =>
+                      addToCart({
+                        id: p.id,
+                        name: p.name,
+                        price: toInt(p.price),
+                        image: resolveImageSrc(p.image_url),
+                        stock: toInt(p.stock),
+                      })
+                    }
+                    disabled={toInt(p.stock) === 0}
+                    className={[
+                      "mt-1 inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 font-serif text-[11px] font-semibold uppercase tracking-wide transition-all",
+                      "focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:ring-offset-0",
+                      toInt(p.stock) === 0
+                        ? "cursor-not-allowed border-emerald-900/40 bg-slate-950/40 text-emerald-100/40"
+                        : "border-emerald-500/50 bg-gradient-to-r from-emerald-950/40 to-slate-950 text-emerald-100 hover:border-emerald-400 hover:shadow-lg hover:shadow-emerald-900/20 active:translate-y-[1px]",
+                    ].join(" ")}
+                  >
+                    {toInt(p.stock) === 0 ? "Out of Stock" : "Add to Cart"}
+                    <span className="text-emerald-200/70">➜</span>
+                  </button>
+
+                  {/* ✅ Vendor-only Manage Inventory (FIXED: single details, upgraded restock/reduce) */}
+                  {isVendor ? (
+                    <details className="group mt-1 rounded-2xl border border-emerald-900/40 bg-slate-950/35">
+                      <summary className="flex cursor-pointer list-none items-center justify-between px-3 py-3">
+                        <div className="flex flex-col">
+                          <span className="font-serif text-[11px] font-semibold text-emerald-200">
+                            Manage Inventory
+                          </span>
+                          <span className="font-serif text-[10px] text-emerald-200/60">
+                            Current: {toInt(p.stock)}
+                          </span>
+                        </div>
+
+                        <span className="rounded-lg border border-emerald-900/40 bg-slate-950/60 px-2 py-1 font-serif text-[10px] text-emerald-200/80 transition-all group-open:rotate-180">
+                          ▼
+                        </span>
+                      </summary>
+
+                      <div className="px-3 pb-3">
+                        {/* ✅ Qty + Actions (2x2 layout) */}
+                        <div className="rounded-xl border border-emerald-900/40 bg-slate-950/35 p-3">
+                          <div className="mb-2 flex items-center justify-between">
+                            <span className="font-serif text-[10px] uppercase tracking-[0.2em] text-emerald-200/70">
+                              Quantity
+                            </span>
+
+                            <span className="font-serif text-[10px] text-emerald-200/50">
+                              Tip: enter qty → apply
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            {/* Qty input (full width) */}
+                            <div className="col-span-2">
+                              <input
+                                type="number"
+                                min={0}
+                                value={stockInput[p.id] ?? ""}
+                                onChange={(e) =>
+                                  setStockInput((m) => ({
+                                    ...m,
+                                    [p.id]: e.target.value,
+                                  }))
+                                }
+                                className="w-full rounded-lg border border-emerald-900/40 bg-slate-950 px-3 py-2 font-serif text-[11px] text-emerald-50 outline-none focus:ring-2 focus:ring-emerald-500/40"
+                                placeholder="Qty"
+                              />
+                            </div>
+
+                            {/* Restock */}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                applyDeltaStock(p.id, +getQty(p.id))
+                              }
+                              disabled={getQty(p.id) <= 0}
+                              className={[
+                                "inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 font-serif text-[11px] font-semibold transition",
+                                "active:translate-y-[1px]",
+                                getQty(p.id) <= 0
+                                  ? "cursor-not-allowed border-emerald-900/40 bg-slate-950/40 text-emerald-100/30"
+                                  : "border-emerald-500/50 bg-emerald-950/25 text-emerald-100 hover:border-emerald-400 hover:bg-emerald-950/35 hover:shadow-lg hover:shadow-emerald-900/20",
+                              ].join(" ")}
+                              title="Add qty to stock"
+                            >
+                              <span className="text-emerald-200/80">＋</span>
+                              Restock
+                              <span className="text-emerald-200/60">
+                                (+{getQty(p.id)})
+                              </span>
+                            </button>
+
+                            {/* Reduce */}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                applyDeltaStock(p.id, -getQty(p.id))
+                              }
+                              disabled={
+                                getQty(p.id) <= 0 || toInt(p.stock) === 0
+                              }
+                              className={[
+                                "inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 font-serif text-[11px] font-semibold transition",
+                                "active:translate-y-[1px]",
+                                getQty(p.id) <= 0 || toInt(p.stock) === 0
+                                  ? "cursor-not-allowed border-emerald-900/40 bg-slate-950/40 text-emerald-100/30"
+                                  : "border-emerald-500/50 bg-emerald-950/25 text-emerald-100 hover:border-emerald-400 hover:bg-emerald-950/35 hover:shadow-lg hover:shadow-emerald-900/20",
+                              ].join(" ")}
+                              title="Subtract qty from stock"
+                            >
+                              <span className="text-emerald-200/80">－</span>
+                              Reduce
+                              <span className="text-emerald-200/60">
+                                (-{getQty(p.id)})
+                              </span>
+                            </button>
+
+                            {/* Set exact (full width) */}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setExactStock(p.id, getQty(p.id), p.stock)
+                              }
+                              disabled={
+                                getQty(p.id) < 0 ||
+                                (stockInput[p.id] ?? "") === ""
+                              }
+                              className={[
+                                "col-span-2 inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 font-serif text-[11px] font-semibold transition",
+                                "active:translate-y-[1px]",
+                                (stockInput[p.id] ?? "") === ""
+                                  ? "cursor-not-allowed border-amber-900/30 bg-amber-950/10 text-amber-100/30"
+                                  : "border-amber-500/40 bg-amber-950/20 text-amber-100 hover:border-amber-400 hover:bg-amber-950/30",
+                              ].join(" ")}
+                              title="Set stock to this exact qty"
+                            >
+                              Set Exact Stock
+                              <span className="text-amber-200/70">→</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Quick actions (cleaned) */}
+                        <div className="mt-3 grid grid-cols-1 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => deleteProduct(p.id)}
+                            className="rounded-lg border border-rose-500/40 bg-rose-950/15 px-3 py-2 font-serif text-[11px] font-semibold text-rose-200 transition hover:border-rose-400 hover:bg-rose-950/25 active:translate-y-[1px]"
+                            title="Delete product"
+                          >
+                            Delete Product
+                          </button>
+                        </div>
+
+                        {/* Listing CTA */}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            alert(`Sell / listing flow for: ${p.name}`)
+                          }
+                          className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-500/50 bg-gradient-to-r from-emerald-950/25 to-slate-950 px-3 py-2 font-serif text-[11px] font-semibold uppercase tracking-wide text-emerald-100 transition hover:border-emerald-400 hover:shadow-lg hover:shadow-emerald-900/20 active:translate-y-[1px]"
+                        >
+                          Sell / List Item
+                          <span className="text-emerald-200/70">↗</span>
+                        </button>
+                      </div>
+                    </details>
+                  ) : null}
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
       </section>
 
       {/* RIGHT cart */}
@@ -891,6 +1211,7 @@ export default function VendorShopPage({
                     BND {cartTotalPrice.toFixed(2)}
                   </span>
                 </div>
+
                 <Link
                   to="/cart"
                   className="mt-4 block w-full rounded-lg border border-amber-500/70 bg-gradient-to-r from-amber-950/70 via-purple-950/70 to-slate-950 py-2.5 text-center font-serif text-[11px] font-bold uppercase tracking-[0.2em] text-amber-50"
@@ -899,8 +1220,7 @@ export default function VendorShopPage({
                 </Link>
 
                 <p className="mt-2 font-serif text-[10px] italic text-emerald-200/60">
-                  Vendor tip: adjust stock with +1 / -1, and list items using the
-                  button.
+                  Vendor tip: Use Restock/Reduce/Set to control quantity.
                 </p>
               </div>
             </div>
