@@ -35,7 +35,6 @@ fs.mkdirSync(publicPath, { recursive: true });
 fs.mkdirSync(tmpDir, { recursive: true });
 fs.mkdirSync(uploadsDir, { recursive: true });
 
-// ✅ NOW you can use publicPath safely
 import multer from "multer"; // put this at the TOP with other imports
 
 const productUploadsDir = path.join(publicPath, "uploads", "products");
@@ -54,7 +53,6 @@ const upload = multer({
   storage,
   limits: { fileSize: 5 * 1024 * 1024 },
 });
-
 
 /* ------------------------------ App / Server ------------------------------ */
 const app = express();

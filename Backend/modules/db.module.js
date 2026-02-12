@@ -29,19 +29,16 @@ export function initDB() {
     connectionLimit: Number(process.env.MYSQL_CONN_LIMIT || 10),
     queueLimit: 0,
 
-    // ✅ Prevent "hang forever" behavior on bad routes / dead host
-    connectTimeout: Number(process.env.MYSQL_CONNECT_TIMEOUT || 10000),
+    connectTimeout: Number(process.env.MYSQL_CONNECT_TIMEOUT || 15000),
 
-    // ✅ Keep connections healthy (helps some proxy/idle issues)
     enableKeepAlive: true,
-    keepAliveInitialDelay: 0,
+    keepAliveInitialDelay: Number(process.env.MYSQL_KEEPALIVE_DELAY || 10000), 
 
     timezone: "Z",
   });
 
-  // Optional: pool error logging
   pool.on?.("error", (err) => {
-    console.error("[DB] pool error:", err);
+    console.error("[DB] pool error:", err?.code || err?.message || err);
   });
 
   return pool;
@@ -56,4 +53,16 @@ export async function dbPing() {
   } finally {
     conn.release();
   }
+}
+
+export function startDbKeepAlive() {
+  const intervalMs = Number(process.env.MYSQL_KEEPALIVE_INTERVAL || 30000);
+
+  setInterval(async () => {
+    try {
+      await initDB().query("SELECT 1");
+    } catch (err) {
+      console.error("[DB] keepalive failed:", err?.code || err?.message || err);
+    }
+  }, intervalMs).unref?.();
 }

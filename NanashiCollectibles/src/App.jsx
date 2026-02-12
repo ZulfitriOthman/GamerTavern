@@ -10,6 +10,7 @@ import {
   useParams,
 } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
+import { Navigate } from "react-router-dom";
 
 import CartPage from "./pages/CartPage";
 import TradePage from "./pages/TradePage";
@@ -22,11 +23,7 @@ import UserShopPage from "./pages/UserShopPage";
 import VendorShopPage from "./pages/VendorShopPage";
 
 // ✅ Socket.IO (no direct `socket` export anymore)
-import {
-  connectSocket,
-  disconnectSocket,
-  getSocket,
-} from "./socket/socketClient";
+import { connectSocket, disconnectSocket, getSocket } from "./socket/socketClient";
 
 const pageVariants = {
   initial: { opacity: 0, y: 16, filter: "blur(8px)" },
@@ -79,7 +76,8 @@ function ShopEntryRedirect() {
         replace: true,
       });
     } else {
-      navigate(isVendor ? "/vendor/shop" : "/user/shop", { replace: true });
+      // ✅ FIX: you don't have /vendor/shop route, use /vendor (which redirects)
+      navigate(isVendor ? "/vendor" : "/user/shop", { replace: true });
     }
   }, [navigate, tcgId]);
 
@@ -110,9 +108,7 @@ function App() {
 
   // ✅ Show name in navbar
   const displayName = useMemo(() => {
-    return (
-      currentUser?.name || localStorage.getItem("tavern_username") || "Traveler"
-    );
+    return currentUser?.name || localStorage.getItem("tavern_username") || "Traveler";
   }, [currentUser]);
 
   const isLoggedIn = !!currentUser?.id;
@@ -198,7 +194,7 @@ function App() {
       { to: "/chat", label: "Chat" },
       { to: "/news", label: "News" },
       isLoggedIn
-        ? { to: "/account", label: displayName } // change route if you want
+        ? { to: "/account", label: displayName }
         : { to: "/login", label: "Login" },
       { to: "/cart", label: `Cart (${cartTotalItems})` },
     ],
@@ -268,11 +264,7 @@ function App() {
                     to={item.to}
                     className={({ isActive }) =>
                       `group relative px-5 lg:px-6 py-2.5 font-serif text-sm font-medium tracking-wide transition-all
-                      ${
-                        isActive
-                          ? "text-amber-400"
-                          : "text-amber-100 hover:text-amber-300"
-                      }`
+                      ${isActive ? "text-amber-400" : "text-amber-100 hover:text-amber-300"}`
                     }
                   >
                     <span className="relative z-10">{item.label}</span>
@@ -430,21 +422,7 @@ function App() {
             />
 
             {/* ✅ VENDOR SHOP */}
-            <Route
-              path="/vendor/shop"
-              element={
-                <PageWrap>
-                  <VendorShopPage
-                    cart={cart}
-                    addToCart={addToCart}
-                    removeFromCart={removeFromCart}
-                    updateQuantity={updateQuantity}
-                    cartTotalItems={cartTotalItems}
-                    cartTotalPrice={cartTotalPrice}
-                  />
-                </PageWrap>
-              }
-            />
+            <Route path="/vendor" element={<Navigate to="/vendor/tcg/mtg" replace />} />
 
             <Route
               path="/vendor/tcg/:tcgId"

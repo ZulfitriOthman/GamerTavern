@@ -12,23 +12,7 @@ const ROLES = {
 
 const PLACEHOLDER = "/placeholder.png";
 
-function normalizeImageUrl(v) {
-  const s = toStr(v);
-  if (!s) return PLACEHOLDER;
-
-  // allow absolute http(s)
-  if (/^https?:\/\//i.test(s)) return s;
-
-  // allow your backend static: /public/...
-  if (s.startsWith("/public/")) return s;
-
-  // allow local public assets: /images/...
-  if (s.startsWith("/")) return s;
-
-  // fallback
-  return PLACEHOLDER;
-}
-
+// ✅ IMPORTANT: define helpers BEFORE any function uses them (no TDZ bugs)
 const toStr = (v) => (v == null ? "" : String(v)).trim();
 const toInt = (v, d = 0) => {
   const n = Number(v);
@@ -48,11 +32,34 @@ function asText(v) {
   if (v?.type === "Buffer" && Array.isArray(v?.data)) {
     return new TextDecoder().decode(new Uint8Array(v.data));
   }
-  if (v instanceof ArrayBuffer)
-    return new TextDecoder().decode(new Uint8Array(v));
+  if (v instanceof ArrayBuffer) return new TextDecoder().decode(new Uint8Array(v));
   if (v instanceof Uint8Array) return new TextDecoder().decode(v);
   if (Buffer.isBuffer?.(v)) return v.toString("utf8");
   return String(v);
+}
+
+// ✅ Resolve image URLs correctly for BOTH dev/prod
+// - absolute http(s) stays as-is
+// - backend static "/public/..." should be prefixed with API base (so Vite dev server doesn't try to serve it)
+// - "/placeholder.png" or other local assets remain local
+const API_BASE =
+  (import.meta?.env?.VITE_API_BASE && String(import.meta.env.VITE_API_BASE)) ||
+  "http://localhost:3001";
+
+function resolveImageSrc(url) {
+  const s = toStr(url);
+  if (!s) return PLACEHOLDER;
+
+  // absolute http(s)
+  if (/^https?:\/\//i.test(s)) return s;
+
+  // backend static served at /public/...
+  if (s.startsWith("/public/")) return `${API_BASE}${s}`;
+
+  // local public assets like /placeholder.png
+  if (s.startsWith("/")) return s;
+
+  return PLACEHOLDER;
 }
 
 export default function VendorShopPage({
@@ -85,11 +92,22 @@ export default function VendorShopPage({
     description: "",
     tcg: "mtg", // UI only; your DB schema currently has no tcg column
   });
+
   // ✅ Manage Inventory UI state (per product)
   const [stockInput, setStockInput] = useState({}); // { [productId]: string }
-
-  // helper: get number typed for a product
   const getQty = (productId) => toInt(stockInput[productId], 0);
+
+  // ----------------------------
+  // Socket helpers
+  // ----------------------------
+  const emitAsync = (event, payload) =>
+    new Promise((resolve) => {
+      const s = getSocket();
+      if (!s?.connected) {
+        return resolve({ success: false, message: "Socket not connected." });
+      }
+      s.emit(event, payload, (res) => resolve(res));
+    });
 
   // ✅ restock / reduce (delta-based)
   const applyDeltaStock = async (productId, delta) => {
@@ -171,17 +189,6 @@ export default function VendorShopPage({
     navigate(`/vendor/tcg/${id}`);
   };
 
-  // ----------------------------
-  // Socket helpers
-  // ----------------------------
-  const emitAsync = (event, payload) =>
-    new Promise((resolve) => {
-      const s = getSocket();
-      if (!s?.connected)
-        return resolve({ success: false, message: "Socket not connected." });
-      s.emit(event, payload, (res) => resolve(res));
-    });
-
   const loadProducts = async () => {
     if (!currentUser?.id) return;
     setLoadingProducts(true);
@@ -210,8 +217,8 @@ export default function VendorShopPage({
       conditional: r.conditional,
       price: toInt(r.price),
       stock: toInt(r.stock_quantity),
-      // if your DB stores BLOB for image_url/description:
-      image: normalizeImageUrl(asText(r.image_url)),
+      // ✅ IMPORTANT: resolve "/public/..." using API_BASE so it works in Vite dev
+      image: resolveImageSrc(asText(r.image_url)),
       description: asText(r.description),
     }));
 
@@ -246,11 +253,7 @@ export default function VendorShopPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.id]);
 
-  // UI filter by TCG still uses your local TCG mapping (because DB has no tcg column yet)
-  const filteredProducts = useMemo(() => {
-    // If you later add PRODUCTS.TCG, replace this with server-side filter.
-    return products;
-  }, [products]);
+  const filteredProducts = useMemo(() => products, [products]);
 
   // ----------------------------
   // Vendor actions (DB via socket)
@@ -268,7 +271,6 @@ export default function VendorShopPage({
       stock_quantity: toInt(newProduct.stock_quantity),
       image_url: toStr(newProduct.image_url),
       description: toStr(newProduct.description),
-      // tcg: newProduct.tcg, // (DB schema doesn't have this yet)
     };
 
     if (!payload.name || !payload.code) {
@@ -294,7 +296,7 @@ export default function VendorShopPage({
       description: "",
       tcg: "mtg",
     });
-    // loadProducts will be triggered by product:created event, but safe to refresh:
+
     loadProducts();
   };
 
@@ -498,6 +500,7 @@ export default function VendorShopPage({
                   </div>
                 </div>
 
+                {/* ✅ Product Image Upload */}
                 <div className="sm:col-span-2">
                   <label className="mb-1 block font-serif text-xs text-emerald-100/80">
                     Product Image
@@ -511,26 +514,37 @@ export default function VendorShopPage({
                       if (!file) return;
 
                       try {
+                        // basic validation
+                        if (!file.type.startsWith("image/")) {
+                          throw new Error("Please select an image file.");
+                        }
+                        if (file.size > 5 * 1024 * 1024) {
+                          throw new Error("Max image size is 5MB.");
+                        }
+
                         const fd = new FormData();
                         fd.append("image", file);
 
                         const resp = await fetch(
-                          `${import.meta.env.VITE_API_BASE}/api/upload/product-image`,
+                          `${API_BASE}/api/upload/product-image`,
                           {
                             method: "POST",
                             body: fd,
+                            credentials: "include",
                           },
                         );
 
                         const json = await resp.json();
-                        if (!json.ok)
+                        if (!json.ok) {
                           throw new Error(json.message || "Upload failed");
+                        }
 
                         setNewProduct((p) => ({ ...p, image_url: json.url }));
+
+                        // allow selecting same file again later
+                        e.target.value = "";
                       } catch (err) {
-                        setServerError(
-                          err.message || "Failed to upload image.",
-                        );
+                        setServerError(err?.message || "Failed to upload image.");
                       }
                     }}
                     className="w-full rounded-lg border border-emerald-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-emerald-50"
@@ -539,11 +553,10 @@ export default function VendorShopPage({
                   {newProduct.image_url ? (
                     <div className="mt-2 flex items-center gap-3">
                       <img
-                        src={newProduct.image_url}
+                        src={resolveImageSrc(newProduct.image_url)}
+                        alt="Preview"
                         className="h-14 w-14 rounded-lg object-cover border border-emerald-900/40"
-                        onError={(e) =>
-                          (e.currentTarget.src = "/placeholder.png")
-                        }
+                        onError={(e) => (e.currentTarget.src = PLACEHOLDER)}
                       />
                       <span className="font-serif text-[11px] text-emerald-200/70">
                         Saved: {newProduct.image_url}
@@ -642,9 +655,7 @@ export default function VendorShopPage({
             </div>
 
             <p className="font-serif text-xs italic text-amber-500">
-              {loadingProducts
-                ? "Loading..."
-                : `${filteredProducts.length} item(s)`}
+              {loadingProducts ? "Loading..." : `${filteredProducts.length} item(s)`}
             </p>
           </div>
 
@@ -661,11 +672,11 @@ export default function VendorShopPage({
                 >
                   <div className="relative h-40 w-full overflow-hidden">
                     <img
-                      src={p.image}
+                      src={resolveImageSrc(p.image)}
                       alt={p.name}
                       className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
                       onError={(e) => {
-                        e.currentTarget.src = "/placeholder.png";
+                        e.currentTarget.src = PLACEHOLDER;
                       }}
                     />
                     <div className="absolute bottom-2 right-2 rounded-full border border-emerald-500/60 bg-slate-950/80 px-3 py-1 font-serif text-[11px] font-semibold text-emerald-300">
@@ -697,7 +708,7 @@ export default function VendorShopPage({
                           id: p.id,
                           name: p.name,
                           price: toInt(p.price),
-                          image: p.image,
+                          image: resolveImageSrc(p.image),
                           stock: toInt(p.stock),
                         })
                       }
@@ -754,9 +765,7 @@ export default function VendorShopPage({
 
                         <button
                           type="button"
-                          onClick={() =>
-                            setExactStock(p.id, getQty(p.id), p.stock)
-                          }
+                          onClick={() => setExactStock(p.id, getQty(p.id), p.stock)}
                           className="rounded-lg border border-amber-500/40 bg-amber-950/30 px-3 py-2 font-serif text-[11px] font-semibold text-amber-100 hover:border-amber-400"
                           title="Set stock to this exact qty"
                         >
@@ -890,8 +899,8 @@ export default function VendorShopPage({
                 </Link>
 
                 <p className="mt-2 font-serif text-[10px] italic text-emerald-200/60">
-                  Vendor tip: adjust stock with +1 / -1, and list items using
-                  the button.
+                  Vendor tip: adjust stock with +1 / -1, and list items using the
+                  button.
                 </p>
               </div>
             </div>
