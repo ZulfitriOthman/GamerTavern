@@ -16,6 +16,7 @@ import createAuthRoutes from "./routes/api/auth.routes.js";
 
 // sockets
 import accountSocketController from "./sockets/account.socket.js";
+import productSocketController from "./sockets/product.socket.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -157,8 +158,14 @@ io.on("connection", (socket) => {
   accountSocketController({
     socket,
     io,
-    db, // ✅ SAME pool instance everywhere
+    db,
     pushActivity: () => {},
+  });
+
+  productSocketController({
+    socket,
+    io,
+    db,
   });
 });
 

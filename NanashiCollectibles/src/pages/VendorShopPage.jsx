@@ -1,13 +1,39 @@
 // src/pages/VendorShopPage.jsx
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { TCG_LIST, PRODUCTS } from "../data/products";
+import { TCG_LIST } from "../data/products";
+import { getSocket } from "../socket/socketClient";
 
 const ROLES = {
   USER: "USER",
   VENDOR: "VENDOR",
   ADMIN: "ADMIN",
 };
+
+const toStr = (v) => (v == null ? "" : String(v)).trim();
+const toInt = (v, d = 0) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : d;
+};
+
+function normalizeRole(role) {
+  const r = String(role || ROLES.USER).toUpperCase();
+  return Object.values(ROLES).includes(r) ? r : ROLES.USER;
+}
+
+// Buffer-safe (if DB returns Buffer for BLOB/TEXT fields)
+function asText(v) {
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  // mysql2 may return Buffer for BLOB
+  if (v?.type === "Buffer" && Array.isArray(v?.data)) {
+    return new TextDecoder().decode(new Uint8Array(v.data));
+  }
+  if (v instanceof ArrayBuffer) return new TextDecoder().decode(new Uint8Array(v));
+  if (v instanceof Uint8Array) return new TextDecoder().decode(v);
+  if (Buffer.isBuffer?.(v)) return v.toString("utf8");
+  return String(v);
+}
 
 export default function VendorShopPage({
   cart,
@@ -22,6 +48,24 @@ export default function VendorShopPage({
 
   const [currentUser, setCurrentUser] = useState(null);
 
+  // DB products loaded from socket
+  const [products, setProducts] = useState([]);
+  const [loadingProducts, setLoadingProducts] = useState(false);
+  const [serverError, setServerError] = useState("");
+
+  // Add product UI
+  const [showAdd, setShowAdd] = useState(false);
+  const [newProduct, setNewProduct] = useState({
+    name: "",
+    code: "",
+    conditional: "NEW",
+    price: 0,
+    stock_quantity: 0,
+    image_url: "",
+    description: "",
+    tcg: "mtg", // UI only; your DB schema currently has no tcg column
+  });
+
   // ✅ Guard: must be logged in AND vendor/admin
   useEffect(() => {
     const raw = localStorage.getItem("tavern_current_user");
@@ -32,8 +76,7 @@ export default function VendorShopPage({
       return;
     }
 
-    const role = String(user?.role || ROLES.USER).toUpperCase();
-    user.role = Object.values(ROLES).includes(role) ? role : ROLES.USER;
+    user.role = normalizeRole(user?.role);
 
     if (!(user.role === ROLES.VENDOR || user.role === ROLES.ADMIN)) {
       navigate("/user/shop");
@@ -43,8 +86,7 @@ export default function VendorShopPage({
     setCurrentUser(user);
   }, [navigate]);
 
-  const isVendor = currentUser?.role === ROLES.VENDOR || currentUser?.role === ROLES.ADMIN;
-
+  // Selected TCG – driven by URL if present
   const [selectedTcg, setSelectedTcg] = useState(() => {
     if (tcgId && TCG_LIST.some((t) => t.id === tcgId)) return tcgId;
     return "mtg";
@@ -60,22 +102,167 @@ export default function VendorShopPage({
     [selectedTcg],
   );
 
-  const filteredProducts = useMemo(
-    () => PRODUCTS.filter((p) => p.tcg === selectedTcg),
-    [selectedTcg],
-  );
-
   const handleSelectTcg = (id) => {
     setSelectedTcg(id);
     navigate(`/vendor/tcg/${id}`);
   };
 
-  const handleVendorAddProduct = () => {
-    alert("Vendor: Add Product (connect to DB later)");
+  // ----------------------------
+  // Socket helpers
+  // ----------------------------
+  const emitAsync = (event, payload) =>
+    new Promise((resolve) => {
+      const s = getSocket();
+      if (!s?.connected) return resolve({ success: false, message: "Socket not connected." });
+      s.emit(event, payload, (res) => resolve(res));
+    });
+
+  const loadProducts = async () => {
+    if (!currentUser?.id) return;
+    setLoadingProducts(true);
+    setServerError("");
+
+    const res = await emitAsync("product:list", {
+      currentUser: { id: currentUser.id, role: currentUser.role },
+      // optional future filters:
+      // vendorId: currentUser.id,
+    });
+
+    setLoadingProducts(false);
+
+    if (!res?.success) {
+      setServerError(res?.message || "Failed to load products.");
+      return;
+    }
+
+    // Map DB rows into UI-friendly objects
+    const rows = Array.isArray(res.data) ? res.data : [];
+    const mapped = rows.map((r) => ({
+      id: r.id,
+      vendor_id: r.vendor_id,
+      name: r.name,
+      code: r.code,
+      conditional: r.conditional,
+      price: toInt(r.price),
+      stock: toInt(r.stock_quantity),
+      // if your DB stores BLOB for image_url/description:
+      image: asText(r.image_url) || "/placeholder.png",
+      description: asText(r.description),
+    }));
+
+    setProducts(mapped);
   };
 
-  const handleVendorManageInventory = () => {
-    alert("Vendor: Manage Inventory (create a dashboard route)");
+  // Listen for realtime updates + initial load
+  useEffect(() => {
+    if (!currentUser?.id) return;
+
+    const s = getSocket();
+    if (!s) return;
+
+    loadProducts();
+
+    const onCreated = () => loadProducts();
+    const onUpdated = () => loadProducts();
+    const onDeleted = () => loadProducts();
+    const onInvUpdated = () => loadProducts();
+
+    s.on("product:created", onCreated);
+    s.on("product:updated", onUpdated);
+    s.on("product:deleted", onDeleted);
+    s.on("inventory:updated", onInvUpdated);
+
+    return () => {
+      s.off("product:created", onCreated);
+      s.off("product:updated", onUpdated);
+      s.off("product:deleted", onDeleted);
+      s.off("inventory:updated", onInvUpdated);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id]);
+
+  // UI filter by TCG still uses your local TCG mapping (because DB has no tcg column yet)
+  const filteredProducts = useMemo(() => {
+    // If you later add PRODUCTS.TCG, replace this with server-side filter.
+    return products;
+  }, [products]);
+
+  // ----------------------------
+  // Vendor actions (DB via socket)
+  // ----------------------------
+  const submitAddProduct = async (e) => {
+    e.preventDefault();
+    if (!currentUser?.id) return;
+
+    const payload = {
+      currentUser: { id: currentUser.id, role: currentUser.role },
+      name: toStr(newProduct.name),
+      code: toStr(newProduct.code),
+      conditional: toStr(newProduct.conditional),
+      price: toInt(newProduct.price),
+      stock_quantity: toInt(newProduct.stock_quantity),
+      image_url: toStr(newProduct.image_url),
+      description: toStr(newProduct.description),
+      // tcg: newProduct.tcg, // (DB schema doesn't have this yet)
+    };
+
+    if (!payload.name || !payload.code) {
+      setServerError("Product name and code are required.");
+      return;
+    }
+
+    setServerError("");
+    const res = await emitAsync("product:create", payload);
+    if (!res?.success) {
+      setServerError(res?.message || "Failed to create product.");
+      return;
+    }
+
+    setShowAdd(false);
+    setNewProduct({
+      name: "",
+      code: "",
+      conditional: "NEW",
+      price: 0,
+      stock_quantity: 0,
+      image_url: "",
+      description: "",
+      tcg: "mtg",
+    });
+    // loadProducts will be triggered by product:created event, but safe to refresh:
+    loadProducts();
+  };
+
+  const adjustStock = async (productId, delta) => {
+    if (!currentUser?.id) return;
+
+    const res = await emitAsync("inventory:adjust", {
+      currentUser: { id: currentUser.id, role: currentUser.role },
+      product_id: productId,
+      delta,
+    });
+
+    if (!res?.success) {
+      setServerError(res?.message || "Failed to adjust inventory.");
+      return;
+    }
+  };
+
+  const deleteProduct = async (productId) => {
+    if (!currentUser?.id) return;
+
+    const ok = window.confirm("Delete this product? This cannot be undone.");
+    if (!ok) return;
+
+    const res = await emitAsync("product:delete", {
+      currentUser: { id: currentUser.id, role: currentUser.role },
+      id: productId,
+    });
+
+    if (!res?.success) {
+      setServerError(res?.message || "Failed to delete product.");
+      return;
+    }
   };
 
   if (!currentUser) return null;
@@ -107,51 +294,180 @@ export default function VendorShopPage({
           </div>
         </div>
 
-        {/* Vendor console */}
-        {isVendor ? (
-          <div className="rounded-2xl border border-emerald-900/40 bg-gradient-to-br from-slate-950 to-emerald-950/20 p-5 shadow-lg shadow-emerald-900/20">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="font-serif text-base font-bold text-emerald-100">
-                  Vendor Console
-                </h3>
-                <p className="mt-1 font-serif text-[11px] italic text-emerald-100/70">
-                  Sell items, manage stock, and track your listings.
-                </p>
-              </div>
-
-              <span className="rounded-full border border-emerald-600/40 bg-emerald-950/30 px-3 py-1 font-serif text-[10px] uppercase tracking-wide text-emerald-200">
-                SELL ENABLED
-              </span>
-            </div>
-
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={handleVendorAddProduct}
-                className="rounded-xl border border-emerald-500/50 bg-gradient-to-r from-emerald-950/40 to-slate-950 px-4 py-3 text-left font-serif text-xs font-semibold text-emerald-100 transition hover:border-emerald-400"
-              >
-                + Add Product
-                <div className="mt-1 text-[10px] font-normal text-emerald-100/60">
-                  Create a new listing
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleVendorManageInventory}
-                className="rounded-xl border border-emerald-500/50 bg-gradient-to-r from-emerald-950/40 to-slate-950 px-4 py-3 text-left font-serif text-xs font-semibold text-emerald-100 transition hover:border-emerald-400"
-              >
-                Manage Inventory
-                <div className="mt-1 text-[10px] font-normal text-emerald-100/60">
-                  Stock & pricing tools
-                </div>
-              </button>
-            </div>
+        {/* Errors */}
+        {serverError ? (
+          <div className="rounded-xl border border-red-500/30 bg-red-950/30 px-4 py-3 text-sm text-red-200">
+            {serverError}
           </div>
         ) : null}
 
-        {/* TCG selector */}
+        {/* Vendor console */}
+        <div className="rounded-2xl border border-emerald-900/40 bg-gradient-to-br from-slate-950 to-emerald-950/20 p-5 shadow-lg shadow-emerald-900/20">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="font-serif text-base font-bold text-emerald-100">
+                Vendor Console
+              </h3>
+              <p className="mt-1 font-serif text-[11px] italic text-emerald-100/70">
+                Create listings, manage stock, and sell items.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowAdd(true)}
+                className="rounded-xl border border-emerald-500/50 bg-gradient-to-r from-emerald-950/40 to-slate-950 px-4 py-2 font-serif text-xs font-semibold text-emerald-100 hover:border-emerald-400"
+              >
+                + Add Product
+              </button>
+
+              <button
+                type="button"
+                onClick={loadProducts}
+                className="rounded-xl border border-emerald-500/30 bg-slate-950/40 px-4 py-2 font-serif text-xs text-emerald-100/80 hover:border-emerald-400"
+              >
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          {/* Add Product modal/panel */}
+          {showAdd ? (
+            <form
+              onSubmit={submitAddProduct}
+              className="mt-4 rounded-2xl border border-emerald-700/30 bg-slate-950/40 p-4"
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <p className="font-serif text-sm font-semibold text-emerald-100">
+                  New Product
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowAdd(false)}
+                  className="font-serif text-xs text-emerald-200/70 hover:text-emerald-200"
+                >
+                  Close ✕
+                </button>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block font-serif text-xs text-emerald-100/80">
+                    Name
+                  </label>
+                  <input
+                    value={newProduct.name}
+                    onChange={(e) => setNewProduct((p) => ({ ...p, name: e.target.value }))}
+                    className="w-full rounded-lg border border-emerald-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-emerald-50"
+                    placeholder="e.g. MTG Booster Pack"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block font-serif text-xs text-emerald-100/80">
+                    Code
+                  </label>
+                  <input
+                    value={newProduct.code}
+                    onChange={(e) => setNewProduct((p) => ({ ...p, code: e.target.value }))}
+                    className="w-full rounded-lg border border-emerald-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-emerald-50"
+                    placeholder="e.g. MTG-BST-001"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block font-serif text-xs text-emerald-100/80">
+                    Condition
+                  </label>
+                  <select
+                    value={newProduct.conditional}
+                    onChange={(e) => setNewProduct((p) => ({ ...p, conditional: e.target.value }))}
+                    className="w-full rounded-lg border border-emerald-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-emerald-50"
+                  >
+                    <option value="NEW">NEW</option>
+                    <option value="USED">USED</option>
+                    <option value="SEALED">SEALED</option>
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="mb-1 block font-serif text-xs text-emerald-100/80">
+                      Price (BND)
+                    </label>
+                    <input
+                      type="number"
+                      value={newProduct.price}
+                      onChange={(e) => setNewProduct((p) => ({ ...p, price: e.target.value }))}
+                      className="w-full rounded-lg border border-emerald-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-emerald-50"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block font-serif text-xs text-emerald-100/80">
+                      Stock Qty
+                    </label>
+                    <input
+                      type="number"
+                      value={newProduct.stock_quantity}
+                      onChange={(e) =>
+                        setNewProduct((p) => ({ ...p, stock_quantity: e.target.value }))
+                      }
+                      className="w-full rounded-lg border border-emerald-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-emerald-50"
+                    />
+                  </div>
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="mb-1 block font-serif text-xs text-emerald-100/80">
+                    Image URL
+                  </label>
+                  <input
+                    value={newProduct.image_url}
+                    onChange={(e) =>
+                      setNewProduct((p) => ({ ...p, image_url: e.target.value }))
+                    }
+                    className="w-full rounded-lg border border-emerald-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-emerald-50"
+                    placeholder="https://..."
+                  />
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="mb-1 block font-serif text-xs text-emerald-100/80">
+                    Description
+                  </label>
+                  <textarea
+                    value={newProduct.description}
+                    onChange={(e) =>
+                      setNewProduct((p) => ({ ...p, description: e.target.value }))
+                    }
+                    className="min-h-[90px] w-full rounded-lg border border-emerald-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-emerald-50"
+                    placeholder="Short description..."
+                  />
+                </div>
+              </div>
+
+              <div className="mt-4 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAdd(false)}
+                  className="rounded-xl border border-emerald-900/40 bg-slate-950/50 px-4 py-2 font-serif text-xs text-emerald-100/80 hover:border-emerald-400"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-xl border border-emerald-500/50 bg-gradient-to-r from-emerald-950/40 to-slate-950 px-4 py-2 font-serif text-xs font-semibold text-emerald-100 hover:border-emerald-400"
+                >
+                  Create Product
+                </button>
+              </div>
+            </form>
+          ) : null}
+        </div>
+
+        {/* TCG selector (routing only) */}
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           {TCG_LIST.map((tcg) => {
             const isActive = tcg.id === selectedTcg;
@@ -199,57 +515,115 @@ export default function VendorShopPage({
                 {activeTcg?.name} Products
               </h3>
               <p className="font-serif text-[11px] italic text-amber-200/70">
-                Vendor view: Buy + Sell tools enabled.
+                Vendor view: DB products + stock controls enabled.
               </p>
             </div>
+
             <p className="font-serif text-xs italic text-amber-500">
-              {filteredProducts.length} item{filteredProducts.length !== 1 ? "s" : ""} available
+              {loadingProducts ? "Loading..." : `${filteredProducts.length} item(s)`}
             </p>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {filteredProducts.map((p) => (
-              <article
-                key={p.id}
-                className="group relative flex flex-col overflow-hidden rounded-xl border border-amber-900/40 bg-gradient-to-br from-slate-950 to-purple-950/40 shadow-lg shadow-purple-900/30"
-              >
-                <div className="relative h-40 w-full overflow-hidden">
-                  <img
-                    src={p.image}
-                    alt={p.name}
-                    className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
-                  />
-                  <div className="absolute bottom-2 right-2 rounded-full border border-emerald-500/60 bg-slate-950/80 px-3 py-1 font-serif text-[11px] font-semibold text-emerald-300">
-                    BND {p.price.toFixed(2)}
+          {filteredProducts.length === 0 ? (
+            <div className="rounded-xl border border-amber-900/40 bg-gradient-to-br from-slate-950 to-purple-950/40 p-6 text-sm italic text-amber-100/70">
+              No products found in DB yet.
+            </div>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {filteredProducts.map((p) => (
+                <article
+                  key={p.id}
+                  className="group relative flex flex-col overflow-hidden rounded-xl border border-amber-900/40 bg-gradient-to-br from-slate-950 to-purple-950/40 shadow-lg shadow-purple-900/30"
+                >
+                  <div className="relative h-40 w-full overflow-hidden">
+                    <img
+                      src={p.image}
+                      alt={p.name}
+                      className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
+                      onError={(e) => {
+                        e.currentTarget.src = "/placeholder.png";
+                      }}
+                    />
+                    <div className="absolute bottom-2 right-2 rounded-full border border-emerald-500/60 bg-slate-950/80 px-3 py-1 font-serif text-[11px] font-semibold text-emerald-300">
+                      BND {toInt(p.price).toFixed(2)}
+                    </div>
                   </div>
-                </div>
 
-                <div className="flex flex-1 flex-col gap-2 p-4">
-                  <h4 className="line-clamp-2 font-serif text-sm font-semibold text-amber-50">
-                    {p.name}
-                  </h4>
+                  <div className="flex flex-1 flex-col gap-2 p-4">
+                    <h4 className="line-clamp-2 font-serif text-sm font-semibold text-amber-50">
+                      {p.name}
+                    </h4>
 
-                  {/* BUY */}
-                  <button
-                    onClick={() => addToCart(p)}
-                    disabled={p.stock === 0}
-                    className="mt-2 inline-flex items-center justify-center rounded-lg border border-amber-500/60 bg-gradient-to-r from-amber-950/60 to-purple-950/60 px-3 py-2 font-serif text-[11px] font-semibold uppercase tracking-wide text-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {p.stock === 0 ? "Out of Stock" : "Add to Cart"}
-                  </button>
+                    <div className="flex items-center justify-between text-[11px] text-amber-100/70">
+                      <span className="italic">
+                        Stock:{" "}
+                        <span className="font-semibold text-amber-300">
+                          {toInt(p.stock)}
+                        </span>
+                      </span>
+                      <span className="rounded-full border border-emerald-700/40 bg-emerald-950/30 px-2 py-0.5 font-serif text-[10px] uppercase tracking-wide text-emerald-200">
+                        CODE: {p.code || "-"}
+                      </span>
+                    </div>
 
-                  {/* SELL */}
-                  <button
-                    type="button"
-                    onClick={() => alert(`Sell / list flow for: ${p.name}`)}
-                    className="inline-flex items-center justify-center rounded-lg border border-emerald-500/50 bg-gradient-to-r from-emerald-950/40 to-slate-950 px-3 py-2 font-serif text-[11px] font-semibold uppercase tracking-wide text-emerald-100 hover:border-emerald-400"
-                  >
-                    Sell / List Item
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
+                    {/* BUY */}
+                    <button
+                      onClick={() =>
+                        addToCart({
+                          id: p.id,
+                          name: p.name,
+                          price: toInt(p.price),
+                          image: p.image,
+                          stock: toInt(p.stock),
+                        })
+                      }
+                      disabled={toInt(p.stock) === 0}
+                      className="mt-2 inline-flex items-center justify-center rounded-lg border border-amber-500/60 bg-gradient-to-r from-amber-950/60 to-purple-950/60 px-3 py-2 font-serif text-[11px] font-semibold uppercase tracking-wide text-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {toInt(p.stock) === 0 ? "Out of Stock" : "Add to Cart"}
+                    </button>
+
+                    {/* SELL tools */}
+                    <div className="mt-2 grid grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => adjustStock(p.id, +1)}
+                        className="rounded-lg border border-emerald-500/40 bg-emerald-950/30 px-3 py-2 font-serif text-[11px] font-semibold text-emerald-100 hover:border-emerald-400"
+                        title="Increase stock by 1"
+                      >
+                        +1
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => adjustStock(p.id, -1)}
+                        className="rounded-lg border border-emerald-500/40 bg-emerald-950/30 px-3 py-2 font-serif text-[11px] font-semibold text-emerald-100 hover:border-emerald-400"
+                        title="Decrease stock by 1"
+                        disabled={toInt(p.stock) === 0}
+                      >
+                        -1
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteProduct(p.id)}
+                        className="rounded-lg border border-rose-500/40 bg-rose-950/30 px-3 py-2 font-serif text-[11px] font-semibold text-rose-200 hover:border-rose-400"
+                        title="Delete product"
+                      >
+                        Delete
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => alert(`Sell / listing flow for: ${p.name} (next step: vendor listing UI)`)}
+                      className="mt-2 inline-flex items-center justify-center rounded-lg border border-emerald-500/50 bg-gradient-to-r from-emerald-950/40 to-slate-950 px-3 py-2 font-serif text-[11px] font-semibold uppercase tracking-wide text-emerald-100 hover:border-emerald-400"
+                    >
+                      Sell / List Item
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
         </div>
       </section>
 
@@ -294,7 +668,9 @@ export default function VendorShopPage({
                           type="number"
                           min={1}
                           value={item.quantity}
-                          onChange={(e) => updateQuantity(item.id, Number(e.target.value))}
+                          onChange={(e) =>
+                            updateQuantity(item.id, Number(e.target.value))
+                          }
                           className="w-14 rounded-md border border-amber-900/50 bg-slate-950 px-2 py-1 font-serif text-[11px] text-amber-50"
                         />
                         <button
@@ -327,7 +703,7 @@ export default function VendorShopPage({
                 </Link>
 
                 <p className="mt-2 font-serif text-[10px] italic text-emerald-200/60">
-                  Vendor tip: use Vendor Console to list items for sale.
+                  Vendor tip: adjust stock with +1 / -1, and list items using the button.
                 </p>
               </div>
             </div>
