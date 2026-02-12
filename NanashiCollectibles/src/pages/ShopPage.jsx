@@ -3,6 +3,12 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { TCG_LIST, PRODUCTS } from "../data/products";
 
+const ROLES = {
+  USER: "USER",
+  VENDOR: "VENDOR",
+  ADMIN: "ADMIN",
+};
+
 function ShopPage({
   cart,
   addToCart,
@@ -13,6 +19,28 @@ function ShopPage({
 }) {
   const { tcgId } = useParams();
   const navigate = useNavigate();
+
+  // ✅ Auth (role-based view)
+  const [currentUser, setCurrentUser] = useState(null);
+
+  useEffect(() => {
+    const raw = localStorage.getItem("tavern_current_user");
+    const user = raw ? JSON.parse(raw) : null;
+
+    if (!user?.id) {
+      navigate("/login");
+      return;
+    }
+
+    // normalize role
+    const role = String(user?.role || ROLES.USER).toUpperCase();
+    user.role = Object.values(ROLES).includes(role) ? role : ROLES.USER;
+
+    setCurrentUser(user);
+  }, [navigate]);
+
+  const isVendor = currentUser?.role === ROLES.VENDOR || currentUser?.role === ROLES.ADMIN;
+  const isUser = currentUser?.role === ROLES.USER;
 
   // Selected TCG – driven by URL if present
   const [selectedTcg, setSelectedTcg] = useState(() => {
@@ -30,18 +58,30 @@ function ShopPage({
 
   const activeTcg = useMemo(
     () => TCG_LIST.find((t) => t.id === selectedTcg),
-    [selectedTcg]
+    [selectedTcg],
   );
 
   const filteredProducts = useMemo(
     () => PRODUCTS.filter((p) => p.tcg === selectedTcg),
-    [selectedTcg]
+    [selectedTcg],
   );
 
   const handleSelectTcg = (id) => {
     setSelectedTcg(id);
     navigate(`/tcg/${id}`);
   };
+
+  // ✅ Vendor placeholder actions
+  const handleVendorAddProduct = () => {
+    alert("Vendor action: Add Product (hook this to your DB later)");
+  };
+
+  const handleVendorManageInventory = () => {
+    alert("Vendor action: Manage Inventory (create vendor dashboard route)");
+  };
+
+  // ✅ Prevent rendering flicker before user loads
+  if (!currentUser) return null;
 
   return (
     <div className="relative flex flex-col gap-6 md:flex-row">
@@ -51,6 +91,35 @@ function ShopPage({
 
       {/* LEFT: TCG Selector + Product list */}
       <section className="relative z-10 flex-1 space-y-6">
+        {/* ✅ Role Banner */}
+        <div className="overflow-hidden rounded-2xl border border-amber-900/40 bg-gradient-to-br from-slate-950 via-purple-950/45 to-slate-950 p-4 shadow-lg shadow-purple-900/20">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="font-serif text-xs text-amber-100/70">
+                Logged in as{" "}
+                <span className="font-semibold text-amber-200">
+                  {currentUser?.name}
+                </span>
+              </p>
+              <p className="font-serif text-[11px] uppercase tracking-[0.25em] text-amber-500">
+                ROLE: {currentUser?.role}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {isVendor ? (
+                <span className="rounded-full border border-emerald-600/40 bg-emerald-950/30 px-3 py-1 font-serif text-[10px] uppercase tracking-wide text-emerald-200">
+                  Vendor Mode: Buy + Sell
+                </span>
+              ) : (
+                <span className="rounded-full border border-sky-600/40 bg-sky-950/30 px-3 py-1 font-serif text-[10px] uppercase tracking-wide text-sky-200">
+                  User Mode: Buy Only
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
         {/* Intro - Fantasy Style */}
         <div className="relative overflow-hidden rounded-2xl border border-amber-900/40 bg-gradient-to-br from-slate-950 via-purple-950/50 to-slate-950 p-6 md:p-8 shadow-[0_0_40px_rgba(15,23,42,0.9)] ring-1 ring-purple-900/30">
           {/* Decorative corners */}
@@ -61,7 +130,6 @@ function ShopPage({
             <div className="absolute bottom-3 right-3 h-6 w-6 rounded-full border border-purple-500/30" />
           </div>
 
-          {/* Ornate top border */}
           <div className="absolute inset-x-6 top-3 h-px bg-gradient-to-r from-transparent via-amber-500/70 to-transparent opacity-70" />
 
           <p className="mb-2 font-serif text-[11px] uppercase tracking-[0.35em] text-amber-500">
@@ -70,12 +138,13 @@ function ShopPage({
           <h2 className="font-serif text-3xl font-bold text-amber-100 md:text-4xl">
             Pick your game. Forge your deck.
           </h2>
+
           <p className="mt-3 max-w-xl text-sm italic text-amber-100/75">
-            Choose a Trading Card Game to browse curated products. Boosters,
-            singles, and more will appear as your collection grows.
+            {isVendor
+              ? "Vendor access enabled — you can buy products and also list items for sale."
+              : "User access enabled — browse products and purchase items."}
           </p>
 
-          {/* Tagline chips */}
           <div className="mt-4 flex flex-wrap gap-2">
             <span className="rounded-full border border-amber-700/40 bg-amber-950/40 px-3 py-1 font-serif text-[10px] uppercase tracking-wide text-amber-200">
               Singles & Boosters
@@ -83,16 +152,61 @@ function ShopPage({
             <span className="rounded-full border border-purple-700/40 bg-purple-950/40 px-3 py-1 font-serif text-[10px] uppercase tracking-wide text-purple-100">
               Multi-TCG Support
             </span>
-            <span className="rounded-full border border-emerald-700/40 bg-emerald-950/30 px-3 py-1 font-serif text-[10px] uppercase tracking-wide text-emerald-100">
-              Local Store Ready
-            </span>
+            {isVendor ? (
+              <span className="rounded-full border border-emerald-700/40 bg-emerald-950/30 px-3 py-1 font-serif text-[10px] uppercase tracking-wide text-emerald-100">
+                Vendor Console
+              </span>
+            ) : null}
           </div>
 
-          {/* Ornate bottom border */}
           <div className="absolute inset-x-6 bottom-3 h-px bg-gradient-to-r from-transparent via-amber-500/70 to-transparent opacity-70" />
         </div>
 
-        {/* TCG Selector - Fantasy Style */}
+        {/* ✅ Vendor-only panel */}
+        {isVendor ? (
+          <div className="rounded-2xl border border-emerald-900/40 bg-gradient-to-br from-slate-950 to-emerald-950/20 p-5 shadow-lg shadow-emerald-900/20">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="font-serif text-base font-bold text-emerald-100">
+                  Vendor Console
+                </h3>
+                <p className="mt-1 font-serif text-[11px] italic text-emerald-100/70">
+                  Sell items, manage stock, and track your listings.
+                </p>
+              </div>
+
+              <span className="rounded-full border border-emerald-600/40 bg-emerald-950/30 px-3 py-1 font-serif text-[10px] uppercase tracking-wide text-emerald-200">
+                SELL ENABLED
+              </span>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={handleVendorAddProduct}
+                className="rounded-xl border border-emerald-500/50 bg-gradient-to-r from-emerald-950/40 to-slate-950 px-4 py-3 text-left font-serif text-xs font-semibold text-emerald-100 shadow-md shadow-emerald-900/20 transition hover:border-emerald-400"
+              >
+                + Add Product
+                <div className="mt-1 text-[10px] font-normal text-emerald-100/60">
+                  Create a new listing
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleVendorManageInventory}
+                className="rounded-xl border border-emerald-500/50 bg-gradient-to-r from-emerald-950/40 to-slate-950 px-4 py-3 text-left font-serif text-xs font-semibold text-emerald-100 shadow-md shadow-emerald-900/20 transition hover:border-emerald-400"
+              >
+                Manage Inventory
+                <div className="mt-1 text-[10px] font-normal text-emerald-100/60">
+                  Stock & pricing tools
+                </div>
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {/* TCG Selector */}
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           {TCG_LIST.map((tcg) => {
             const isActive = tcg.id === selectedTcg;
@@ -108,7 +222,6 @@ function ShopPage({
                     : "border-amber-900/40 bg-gradient-to-br from-slate-950 to-purple-950/40 hover:border-amber-500/60 hover:shadow-lg hover:shadow-purple-900/30",
                 ].join(" ")}
               >
-                {/* Glow sweep */}
                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(251,191,36,0.15),_transparent_55%)] opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
 
                 <div className="relative flex items-center justify-between gap-3">
@@ -116,7 +229,6 @@ function ShopPage({
                     Trading Card Game
                   </span>
 
-                  {/* Icon orb */}
                   <div className="flex h-8 w-8 items-center justify-center rounded-full border border-amber-500/50 bg-slate-950/80 text-xs font-bold text-amber-200 shadow-inner shadow-amber-900/60">
                     {initial}
                   </div>
@@ -126,7 +238,6 @@ function ShopPage({
                   {tcg.name}
                 </span>
 
-                {/* Bottom accent line */}
                 <div
                   className={[
                     "pointer-events-none absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r opacity-70",
@@ -141,7 +252,7 @@ function ShopPage({
           })}
         </div>
 
-        {/* Product list for selected TCG */}
+        {/* Product list */}
         <div className="mt-2">
           <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
             <div>
@@ -170,30 +281,25 @@ function ShopPage({
                   key={p.id}
                   className="group relative flex flex-col overflow-hidden rounded-xl border border-amber-900/40 bg-gradient-to-br from-slate-950 to-purple-950/40 shadow-lg shadow-purple-900/30 transition-all duration-200 hover:-translate-y-2 hover:border-amber-500/60 hover:shadow-2xl hover:shadow-amber-900/40"
                 >
-                  {/* Ornate top border */}
                   <div className="absolute inset-x-4 top-2 h-px bg-gradient-to-r from-transparent via-amber-400/40 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
 
-                  {/* Image */}
                   <div className="relative h-40 w-full overflow-hidden">
                     <img
                       src={p.image}
                       alt={p.name}
                       className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
                     />
-                    {/* Mystical overlay on hover */}
                     <div className="absolute inset-0 bg-gradient-to-t from-purple-950/70 via-transparent to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
 
                     <span className="absolute left-2 top-2 rounded-full border border-amber-500/50 bg-black/70 px-2 py-0.5 font-serif text-[10px] uppercase tracking-[0.2em] text-amber-100 backdrop-blur-sm">
                       {p.rarity}
                     </span>
 
-                    {/* Price badge floating on image */}
                     <div className="absolute bottom-2 right-2 rounded-full border border-emerald-500/60 bg-slate-950/80 px-3 py-1 font-serif text-[11px] font-semibold text-emerald-300 shadow-lg shadow-emerald-900/50">
                       BND {p.price.toFixed(2)}
                     </div>
                   </div>
 
-                  {/* Body */}
                   <div className="flex flex-1 flex-col gap-2 p-4">
                     <h4 className="line-clamp-2 font-serif text-sm font-semibold text-amber-50">
                       {p.name}
@@ -211,6 +317,7 @@ function ShopPage({
                       </span>
                     </div>
 
+                    {/* ✅ BUY is available to USER and VENDOR */}
                     <button
                       onClick={() => addToCart(p)}
                       className="mt-2 inline-flex items-center justify-center rounded-lg border border-amber-500/60 bg-gradient-to-r from-amber-950/60 to-purple-950/60 px-3 py-2 font-serif text-[11px] font-semibold uppercase tracking-wide text-amber-100 shadow-md shadow-amber-900/40 transition-all hover:-translate-y-0.5 hover:border-amber-400 hover:shadow-lg hover:shadow-amber-500/50 disabled:cursor-not-allowed disabled:border-slate-700 disabled:bg-slate-900 disabled:text-slate-500 disabled:shadow-none"
@@ -218,9 +325,19 @@ function ShopPage({
                     >
                       {p.stock === 0 ? "Out of Stock" : "Add to Cart"}
                     </button>
+
+                    {/* ✅ VENDOR-only "Sell" action (placeholder) */}
+                    {isVendor ? (
+                      <button
+                        type="button"
+                        onClick={() => alert(`Sell flow for: ${p.name}`)}
+                        className="inline-flex items-center justify-center rounded-lg border border-emerald-500/50 bg-gradient-to-r from-emerald-950/40 to-slate-950 px-3 py-2 font-serif text-[11px] font-semibold uppercase tracking-wide text-emerald-100 shadow-md shadow-emerald-900/20 transition-all hover:border-emerald-400"
+                      >
+                        Sell / List Item
+                      </button>
+                    ) : null}
                   </div>
 
-                  {/* Ornate bottom border */}
                   <div className="absolute inset-x-4 bottom-2 h-px bg-gradient-to-r from-transparent via-amber-400/40 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
                 </article>
               ))}
@@ -229,10 +346,9 @@ function ShopPage({
         </div>
       </section>
 
-      {/* RIGHT: Cart summary (sidebar) - Fantasy Style */}
+      {/* RIGHT: Cart summary (sidebar) */}
       <aside className="relative z-10 mt-6 w-full max-w-sm md:mt-0 md:w-80">
         <div className="sticky top-20 overflow-hidden rounded-2xl border border-amber-900/50 bg-gradient-to-br from-slate-950 via-purple-950/45 to-slate-950 p-5 shadow-[0_0_40px_rgba(15,23,42,0.9)] ring-1 ring-purple-900/40">
-          {/* Ornate border lines */}
           <div className="pointer-events-none absolute inset-0">
             <div className="absolute inset-x-5 top-3 h-px bg-gradient-to-r from-transparent via-amber-400/70 to-transparent" />
             <div className="absolute inset-x-5 bottom-3 h-px bg-gradient-to-r from-transparent via-amber-400/70 to-transparent" />
@@ -312,11 +428,17 @@ function ShopPage({
                 >
                   Go to Checkout
                 </Link>
-                <p className="mt-2 font-serif text-[10px] italic text-amber-100/45">
-                  Future upgrade: connect to Stripe or a local gateway, and
-                  record orders in Oracle — same pattern as your B-JAUR
-                  ecosystem.
-                </p>
+
+                {/* ✅ Optional helper copy for vendors */}
+                {isVendor ? (
+                  <p className="mt-2 font-serif text-[10px] italic text-emerald-200/60">
+                    Vendor tip: use the Vendor Console above to list items for sale.
+                  </p>
+                ) : (
+                  <p className="mt-2 font-serif text-[10px] italic text-amber-100/45">
+                    Browse, add to cart, and checkout.
+                  </p>
+                )}
               </div>
             </div>
           )}

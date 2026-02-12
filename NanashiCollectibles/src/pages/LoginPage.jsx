@@ -3,6 +3,11 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useSocket } from "../hooks/useSocket";
 
+const ROLES = {
+  USER: "USER",
+  VENDOR: "VENDOR",
+};
+
 export default function LoginPage() {
   const navigate = useNavigate();
 
@@ -12,6 +17,7 @@ export default function LoginPage() {
   const [formData, setFormData] = useState({
     name: "",
     password: "",
+    role: ROLES.USER, // ✅ new
   });
 
   const [errors, setErrors] = useState({});
@@ -22,14 +28,16 @@ export default function LoginPage() {
     return (
       formData.name.trim().length >= 3 &&
       formData.password.length > 0 &&
+      (formData.role === ROLES.USER || formData.role === ROLES.VENDOR) &&
       !isSubmitting
     );
   }, [formData, isSubmitting]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
+    const nextValue = name === "role" ? String(value || "").toUpperCase() : value;
 
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    setFormData((prev) => ({ ...prev, [name]: nextValue }));
     setErrors((prev) => ({ ...prev, [name]: "" }));
     setServerError("");
   };
@@ -42,6 +50,10 @@ export default function LoginPage() {
       newErrors.name = "Name must be at least 3 characters";
 
     if (!formData.password) newErrors.password = "Password is required";
+
+    if (![ROLES.USER, ROLES.VENDOR].includes(formData.role)) {
+      newErrors.role = "Please select a valid role";
+    }
 
     return newErrors;
   };
@@ -77,6 +89,20 @@ export default function LoginPage() {
 
       const user = res.data;
 
+      // ✅ IMPORTANT: enforce role at login UI level
+      // If user selected VENDOR but account is USER -> reject
+      if (formData.role === ROLES.VENDOR && user?.role !== ROLES.VENDOR) {
+        setServerError("This account is not a Vendor account.");
+        return;
+      }
+
+      // (Optional) if selected USER but account is VENDOR, you may still allow it
+      // If you want strict, uncomment:
+      // if (formData.role === ROLES.USER && user?.role !== ROLES.USER) {
+      //   setServerError("This account is not a User account.");
+      //   return;
+      // }
+
       // ✅ store user
       localStorage.setItem("tavern_current_user", JSON.stringify(user));
       localStorage.setItem("tavern_username", user?.name || "Traveler");
@@ -84,7 +110,9 @@ export default function LoginPage() {
       // ✅ notify App.jsx (same tab) so navbar updates without refresh
       window.dispatchEvent(new Event("tavern:authChanged"));
 
-      navigate("/shop");
+      // ✅ route based on role
+      if (user?.role === ROLES.VENDOR) navigate("/vendor");
+      else navigate("/shop");
     } catch (err) {
       setServerError(err?.message || "Login failed.");
     } finally {
@@ -121,6 +149,61 @@ export default function LoginPage() {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-5">
+          {/* ✅ Role */}
+          <div>
+            <label className="mb-2 block font-serif text-sm font-semibold text-amber-100">
+              Login as
+            </label>
+
+            <div className="grid grid-cols-2 gap-3">
+              <label
+                className={`cursor-pointer rounded-xl border px-4 py-3 text-sm font-serif ${
+                  formData.role === ROLES.USER
+                    ? "border-amber-500/70 bg-amber-950/30 text-amber-100"
+                    : "border-amber-900/30 bg-slate-950 text-amber-100/80 hover:border-amber-600/50"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="role"
+                  value={ROLES.USER}
+                  checked={formData.role === ROLES.USER}
+                  onChange={handleChange}
+                  className="mr-2 accent-amber-500"
+                />
+                User
+                <div className="mt-1 text-xs text-amber-100/60">
+                  Shop & collect
+                </div>
+              </label>
+
+              <label
+                className={`cursor-pointer rounded-xl border px-4 py-3 text-sm font-serif ${
+                  formData.role === ROLES.VENDOR
+                    ? "border-amber-500/70 bg-amber-950/30 text-amber-100"
+                    : "border-amber-900/30 bg-slate-950 text-amber-100/80 hover:border-amber-600/50"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="role"
+                  value={ROLES.VENDOR}
+                  checked={formData.role === ROLES.VENDOR}
+                  onChange={handleChange}
+                  className="mr-2 accent-amber-500"
+                />
+                Vendor
+                <div className="mt-1 text-xs text-amber-100/60">
+                  Manage listings
+                </div>
+              </label>
+            </div>
+
+            {errors.role && (
+              <p className="mt-1 font-serif text-xs text-red-400">{errors.role}</p>
+            )}
+          </div>
+
           {/* Name */}
           <div>
             <label className="mb-2 block font-serif text-sm font-semibold text-amber-100">
@@ -140,9 +223,7 @@ export default function LoginPage() {
               }`}
             />
             {errors.name && (
-              <p className="mt-1 font-serif text-xs text-red-400">
-                {errors.name}
-              </p>
+              <p className="mt-1 font-serif text-xs text-red-400">{errors.name}</p>
             )}
           </div>
 
@@ -195,7 +276,9 @@ export default function LoginPage() {
             type="submit"
             disabled={!canSubmit}
             className={`w-full rounded-xl border border-amber-600/50 bg-gradient-to-r from-amber-950/50 to-purple-950/50 py-3 font-serif text-base font-bold text-amber-100 transition-all ${
-              !canSubmit ? "cursor-not-allowed opacity-60" : "hover:border-amber-500"
+              !canSubmit
+                ? "cursor-not-allowed opacity-60"
+                : "hover:border-amber-500"
             }`}
           >
             {isSubmitting ? "Signing in..." : "Sign In"}

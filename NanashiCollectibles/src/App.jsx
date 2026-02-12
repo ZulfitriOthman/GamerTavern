@@ -1,9 +1,16 @@
 // App.jsx
 import { useMemo, useState, useEffect, useRef } from "react";
-import { Routes, Route, Link, NavLink, useLocation, useNavigate } from "react-router-dom";
+import {
+  Routes,
+  Route,
+  Link,
+  NavLink,
+  useLocation,
+  useNavigate,
+  useParams,
+} from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 
-import ShopPage from "./pages/ShopPage";
 import CartPage from "./pages/CartPage";
 import TradePage from "./pages/TradePage";
 import NewsPage from "./pages/NewsPage";
@@ -11,9 +18,15 @@ import SocketDemo from "./pages/SocketDemo";
 import SignUpPage from "./pages/SignUpPage";
 import LoginPage from "./pages/LoginPage";
 import ChatPage from "./pages/ChatPage";
+import UserShopPage from "./pages/UserShopPage";
+import VendorShopPage from "./pages/VendorShopPage";
 
 // ✅ Socket.IO (no direct `socket` export anymore)
-import { connectSocket, disconnectSocket, getSocket } from "./socket/socketClient";
+import {
+  connectSocket,
+  disconnectSocket,
+  getSocket,
+} from "./socket/socketClient";
 
 const pageVariants = {
   initial: { opacity: 0, y: 16, filter: "blur(8px)" },
@@ -44,6 +57,35 @@ function readCurrentUser() {
   }
 }
 
+function ShopEntryRedirect() {
+  const navigate = useNavigate();
+  const { tcgId } = useParams();
+
+  useEffect(() => {
+    const raw = localStorage.getItem("tavern_current_user");
+    const user = raw ? JSON.parse(raw) : null;
+
+    if (!user?.id) {
+      navigate("/login", { replace: true });
+      return;
+    }
+
+    const role = String(user?.role || "USER").toUpperCase();
+    const isVendor = role === "VENDOR" || role === "ADMIN";
+
+    // preserve tcgId if present
+    if (tcgId) {
+      navigate(isVendor ? `/vendor/tcg/${tcgId}` : `/user/tcg/${tcgId}`, {
+        replace: true,
+      });
+    } else {
+      navigate(isVendor ? "/vendor/shop" : "/user/shop", { replace: true });
+    }
+  }, [navigate, tcgId]);
+
+  return null;
+}
+
 function App() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -68,7 +110,9 @@ function App() {
 
   // ✅ Show name in navbar
   const displayName = useMemo(() => {
-    return currentUser?.name || localStorage.getItem("tavern_username") || "Traveler";
+    return (
+      currentUser?.name || localStorage.getItem("tavern_username") || "Traveler"
+    );
   }, [currentUser]);
 
   const isLoggedIn = !!currentUser?.id;
@@ -332,11 +376,32 @@ function App() {
               }
             />
 
+            {/* ✅ Smart Shop Entry Route */}
             <Route
               path="/shop"
               element={
                 <PageWrap>
-                  <ShopPage
+                  <ShopEntryRedirect />
+                </PageWrap>
+              }
+            />
+
+            {/* ✅ Fix param name (tcgId) */}
+            <Route
+              path="/tcg/:tcgId"
+              element={
+                <PageWrap>
+                  <ShopEntryRedirect />
+                </PageWrap>
+              }
+            />
+
+            {/* ✅ USER SHOP */}
+            <Route
+              path="/user/shop"
+              element={
+                <PageWrap>
+                  <UserShopPage
                     cart={cart}
                     addToCart={addToCart}
                     removeFromCart={removeFromCart}
@@ -349,10 +414,43 @@ function App() {
             />
 
             <Route
-              path="/tcg/:cardId"
+              path="/user/tcg/:tcgId"
               element={
                 <PageWrap>
-                  <ShopPage
+                  <UserShopPage
+                    cart={cart}
+                    addToCart={addToCart}
+                    removeFromCart={removeFromCart}
+                    updateQuantity={updateQuantity}
+                    cartTotalItems={cartTotalItems}
+                    cartTotalPrice={cartTotalPrice}
+                  />
+                </PageWrap>
+              }
+            />
+
+            {/* ✅ VENDOR SHOP */}
+            <Route
+              path="/vendor/shop"
+              element={
+                <PageWrap>
+                  <VendorShopPage
+                    cart={cart}
+                    addToCart={addToCart}
+                    removeFromCart={removeFromCart}
+                    updateQuantity={updateQuantity}
+                    cartTotalItems={cartTotalItems}
+                    cartTotalPrice={cartTotalPrice}
+                  />
+                </PageWrap>
+              }
+            />
+
+            <Route
+              path="/vendor/tcg/:tcgId"
+              element={
+                <PageWrap>
+                  <VendorShopPage
                     cart={cart}
                     addToCart={addToCart}
                     removeFromCart={removeFromCart}
@@ -442,7 +540,8 @@ function App() {
                       Account
                     </h2>
                     <p className="mt-2 font-serif text-amber-100/70">
-                      Logged in as <span className="text-amber-300">{displayName}</span>
+                      Logged in as{" "}
+                      <span className="text-amber-300">{displayName}</span>
                     </p>
                     <button
                       onClick={handleLogout}
