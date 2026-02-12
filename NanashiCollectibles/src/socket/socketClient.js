@@ -9,12 +9,11 @@ export const getSocket = () => socket;
 export const connectSocket = (username) => {
   const url = (import.meta.env.VITE_SOCKET_URL || "http://localhost:3001").trim();
 
-  // update remembered username (used for join on connect/reconnect)
   if (username) lastUsername = String(username).trim();
 
   if (!socket) {
     socket = io(url, {
-      transports: ["polling", "websocket"],
+      transports: ["websocket", "polling"],
       withCredentials: true,
 
       reconnection: true,
@@ -26,12 +25,8 @@ export const connectSocket = (username) => {
     socket.on("connect", () => {
       console.log("✅ Connected to Socket.IO:", socket.id, "->", url);
 
-      // join on every connect/reconnect
-      if (lastUsername) {
-        socket.emit("user:join", lastUsername);
-      }
+      if (lastUsername) socket.emit("user:join", lastUsername);
 
-      // request activities once per connection
       socket.emit("activities:request");
     });
 
@@ -43,7 +38,6 @@ export const connectSocket = (username) => {
       console.log("❌ connect_error:", err?.message, err);
     });
   } else {
-    // socket exists: if connected, apply username join immediately
     if (socket.connected && lastUsername) {
       socket.emit("user:join", lastUsername);
     }
@@ -59,3 +53,34 @@ export const disconnectSocket = () => {
     socket = null;
   }
 };
+
+export const waitForSocketConnected = (timeoutMs = 4000) =>
+  new Promise((resolve) => {
+    const s = connectSocket(lastUsername);
+
+    if (s?.connected) return resolve(true);
+
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve(false);
+    }, timeoutMs);
+
+    const onConnect = () => {
+      cleanup();
+      resolve(true);
+    };
+
+    const onError = () => {
+      cleanup();
+      resolve(false);
+    };
+
+    function cleanup() {
+      clearTimeout(timer);
+      s.off("connect", onConnect);
+      s.off("connect_error", onError);
+    }
+
+    s.on("connect", onConnect);
+    s.on("connect_error", onError);
+  });

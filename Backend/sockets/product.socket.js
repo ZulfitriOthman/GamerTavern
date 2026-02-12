@@ -1,4 +1,9 @@
 // Backend/sockets/product.socket.js
+// ✅ Adds:
+// - safer cb handling
+// - robust MySQL retry on ECONNRESET / transient disconnects
+// - optional filters: search, dateFrom/dateTo, vendorId, category, tcg (only if columns exist)
+// - optional sorting: newest/oldest, name A-Z/Z-A, price, category A-Z/Z-A
 
 const ROLES = {
   USER: "USER",
@@ -24,24 +29,57 @@ function safePublicProductRow(row) {
     vendor_id: row.VENDOR_ID,
     name: row.NAME,
     code: row.CODE,
-    description: row.DESCRIPTION, // may come as Buffer depending on column type
+    // may be Buffer depending on column type (frontend already handles Buffer)
+    description: row.DESCRIPTION,
     conditional: row.CONDITIONAL,
     price: row.PRICE,
     stock_quantity: row.STOCK_QUANTITY,
-    image_url: row.IMAGE_URL, // may come as Buffer depending on column type
+    image_url: row.IMAGE_URL,
+    // OPTIONAL columns (only if you added them to DB)
+    // category: row.CATEGORY,
+    // tcg: row.TCG,
     created_at: row.CREATED_AT,
     updated_at: row.UPDATED_AT,
   };
 }
 
-/**
- * Expecting client to pass:
- * - currentUser in payload OR you can attach from your auth middleware later
- *
- * payload.currentUser example:
- * { id: 10, role: "VENDOR" }
- */
+/** retry wrapper for transient DB resets */
+async function executeWithRetry(dbOrConn, sql, params = [], label = "db.execute") {
+  const max = 2; // 1 retry
+  let lastErr = null;
 
+  for (let attempt = 0; attempt <= max; attempt++) {
+    try {
+      // mysql2 pool has execute; connection has execute too
+      return await dbOrConn.execute(sql, params);
+    } catch (err) {
+      lastErr = err;
+
+      const code = err?.code || "";
+      const msg = String(err?.message || "");
+
+      const transient =
+        code === "ECONNRESET" ||
+        code === "PROTOCOL_CONNECTION_LOST" ||
+        code === "ETIMEDOUT" ||
+        msg.includes("Connection lost") ||
+        msg.includes("read ECONNRESET");
+
+      if (!transient || attempt === max) break;
+
+      // small backoff
+      await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
+    }
+  }
+
+  throw lastErr;
+}
+
+/**
+ * product socket controller
+ * expects: { socket, io, db, pushActivity }
+ * where `db` is mysql2 pool from initDB()
+ */
 export default function productSocketController({
   socket,
   io,
@@ -49,23 +87,32 @@ export default function productSocketController({
   pushActivity = () => {},
 }) {
   if (!db) console.error("[product.socket] ❌ db is missing (not passed in)");
-
   console.log("✅ User connected to product socket:", socket.id);
 
   /* =========================================================
      LIST PRODUCTS (public)
      ========================================================= */
-  socket.on("product:list", async (payload = {}, cb = () => {}) => {
+  socket.on("product:list", async (payload = {}, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
     const t0 = Date.now();
 
-    const tcg = toStr(payload.tcg); // optional filter
+    // optional filters
     const vendorId = payload.vendorId != null ? toInt(payload.vendorId) : null;
+    const search = toStr(payload.search); // name/code/category search
+    const category = toStr(payload.category); // requires PRODUCTS.CATEGORY (optional)
+    const tcg = toStr(payload.tcg); // requires PRODUCTS.TCG (optional)
+
+    // date filtering (CREATED_AT)
+    // accept ISO or yyyy-mm-dd; MySQL will try to parse
+    const dateFrom = toStr(payload.dateFrom);
+    const dateTo = toStr(payload.dateTo);
+
+    // sort preset
+    // allowed values:
+    // "newest" | "oldest" | "az" | "za" | "price_asc" | "price_desc" | "cat_az" | "cat_za"
+    const sort = toStr(payload.sort || "newest").toLowerCase();
 
     try {
-      // NOTE: Your table doesn't have TCG column in schema.
-      // If you want TCG filter, add a column (TCG VARCHAR(30)) in PRODUCTS.
-      // For now, we only filter by vendorId (optional).
       const where = [];
       const params = [];
 
@@ -74,21 +121,65 @@ export default function productSocketController({
         params.push(vendorId);
       }
 
+      // NOTE:
+      // If your PRODUCTS table DOES NOT have CATEGORY / TCG, remove those filters
+      // or add the columns:
+      //   ALTER TABLE PRODUCTS ADD COLUMN CATEGORY VARCHAR(80) NULL;
+      //   ALTER TABLE PRODUCTS ADD COLUMN TCG VARCHAR(30) NULL;
+      if (category) {
+        where.push("CATEGORY = ?");
+        params.push(category);
+      }
+      if (tcg) {
+        where.push("TCG = ?");
+        params.push(tcg);
+      }
+
+      if (dateFrom) {
+        where.push("CREATED_AT >= ?");
+        params.push(dateFrom);
+      }
+      if (dateTo) {
+        where.push("CREATED_AT <= ?");
+        params.push(dateTo);
+      }
+
+      if (search) {
+        where.push("(NAME LIKE ? OR CODE LIKE ? OR CATEGORY LIKE ?)");
+        params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+      }
+
+      // ORDER BY whitelist
+      let orderBy = "ID DESC";
+      if (sort === "oldest") orderBy = "ID ASC";
+      if (sort === "az") orderBy = "NAME ASC";
+      if (sort === "za") orderBy = "NAME DESC";
+      if (sort === "price_asc") orderBy = "PRICE ASC, ID DESC";
+      if (sort === "price_desc") orderBy = "PRICE DESC, ID DESC";
+      if (sort === "cat_az") orderBy = "CATEGORY ASC, NAME ASC";
+      if (sort === "cat_za") orderBy = "CATEGORY DESC, NAME ASC";
+
       const sql = `
-        SELECT ID, VENDOR_ID, NAME, CODE, DESCRIPTION, CONDITIONAL, PRICE, STOCK_QUANTITY, IMAGE_URL, CREATED_AT, UPDATED_AT
+        SELECT
+          ID, VENDOR_ID, NAME, CODE, DESCRIPTION, CONDITIONAL,
+          PRICE, STOCK_QUANTITY, IMAGE_URL, CREATED_AT, UPDATED_AT
+          -- OPTIONAL (uncomment if you added these columns)
+          -- , CATEGORY, TCG
         FROM PRODUCTS
         ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-        ORDER BY ID DESC
+        ORDER BY ${orderBy}
       `;
 
-      const [rows] = await db.execute(sql, params);
-
+      const [rows] = await executeWithRetry(db, sql, params, "product:list");
       const products = (rows || []).map(safePublicProductRow);
 
       console.log(`[socket][product:list] ✅ ok in ${Date.now() - t0}ms`);
       return ack({ success: true, data: products });
     } catch (err) {
-      console.error(`[socket][product:list] ❌ error in ${Date.now() - t0}ms`, err);
+      console.error(
+        `[socket][product:list] ❌ error in ${Date.now() - t0}ms`,
+        err,
+      );
       return ack({ success: false, message: "Failed to load products." });
     }
   });
@@ -96,7 +187,7 @@ export default function productSocketController({
   /* =========================================================
      CREATE PRODUCT (vendor/admin only)
      ========================================================= */
-  socket.on("product:create", async (payload = {}, cb = () => {}) => {
+  socket.on("product:create", async (payload = {}, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
     const t0 = Date.now();
 
@@ -106,80 +197,96 @@ export default function productSocketController({
 
     if (!userId) return ack({ success: false, message: "Unauthorized." });
     if (!(role === ROLES.VENDOR || role === ROLES.ADMIN)) {
-      return ack({ success: false, message: "Only vendors/admin can create products." });
+      return ack({
+        success: false,
+        message: "Only vendors/admin can create products.",
+      });
     }
 
     const name = toStr(payload.name);
     const code = toStr(payload.code);
-    const description = payload.description ?? null; // string or buffer
+    const description = payload.description ?? null;
     const conditional = toStr(payload.conditional);
     const price = toInt(payload.price);
     const stockQty = toInt(payload.stock_quantity ?? payload.stockQty ?? 0);
     const imageUrl = payload.image_url ?? payload.imageUrl ?? null;
 
+    // OPTIONAL:
+    // const category = toStr(payload.category) || null; // requires PRODUCTS.CATEGORY
+    // const tcg = toStr(payload.tcg) || null; // requires PRODUCTS.TCG
+
     if (!name || !code) {
       return ack({ success: false, message: "name and code are required." });
     }
 
+    let conn;
     try {
-      const conn = await db.getConnection();
-      try {
-        await conn.beginTransaction();
+      conn = await db.getConnection();
+      await conn.beginTransaction();
 
-        const [res] = await conn.execute(
-          `INSERT INTO PRODUCTS
-            (VENDOR_ID, NAME, CODE, DESCRIPTION, CONDITIONAL, PRICE, STOCK_QUANTITY, IMAGE_URL)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [userId, name, code, description, conditional, price, stockQty, imageUrl],
-        );
+      const [res] = await executeWithRetry(
+        conn,
+        `INSERT INTO PRODUCTS
+          (VENDOR_ID, NAME, CODE, DESCRIPTION, CONDITIONAL, PRICE, STOCK_QUANTITY, IMAGE_URL)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [userId, name, code, description, conditional, price, stockQty, imageUrl],
+        "product:create.insert",
+      );
 
-        const productId = res.insertId;
+      const productId = res.insertId;
 
-        // create inventory row (optional but aligns to your table)
-        await conn.execute(
-          `INSERT INTO MANAGE_INVENTORY (PRODUCT_ID, QUANTITY, LAST_UPDATED)
-           VALUES (?, ?, NOW())`,
-          [productId, stockQty],
-        );
+      await executeWithRetry(
+        conn,
+        `INSERT INTO MANAGE_INVENTORY (PRODUCT_ID, QUANTITY, LAST_UPDATED)
+         VALUES (?, ?, NOW())
+         ON DUPLICATE KEY UPDATE QUANTITY = VALUES(QUANTITY), LAST_UPDATED = NOW()`,
+        [productId, stockQty],
+        "product:create.inventory",
+      );
 
-        const [rows] = await conn.execute(
-          `SELECT ID, VENDOR_ID, NAME, CODE, DESCRIPTION, CONDITIONAL, PRICE, STOCK_QUANTITY, IMAGE_URL, CREATED_AT, UPDATED_AT
-           FROM PRODUCTS
-           WHERE ID = ?`,
-          [productId],
-        );
+      const [rows] = await executeWithRetry(
+        conn,
+        `SELECT ID, VENDOR_ID, NAME, CODE, DESCRIPTION, CONDITIONAL, PRICE, STOCK_QUANTITY, IMAGE_URL, CREATED_AT, UPDATED_AT
+         FROM PRODUCTS
+         WHERE ID = ?`,
+        [productId],
+        "product:create.select",
+      );
 
-        await conn.commit();
+      await conn.commit();
 
-        const product = safePublicProductRow(rows?.[0]);
+      const product = safePublicProductRow(rows?.[0]);
+      io.emit("product:created", product);
 
-        io.emit("product:created", product);
+      pushActivity({
+        id: Date.now(),
+        type: "product",
+        message: `New product created: ${product?.name || "item"} (ID ${productId})`,
+        timestamp: new Date().toISOString(),
+      });
 
-        pushActivity({
-          id: Date.now(),
-          type: "product",
-          message: `New product created: ${product?.name || "item"} (ID ${productId})`,
-          timestamp: new Date().toISOString(),
-        });
-
-        console.log(`[socket][product:create] ✅ ok in ${Date.now() - t0}ms`);
-        return ack({ success: true, data: product });
-      } catch (e) {
-        await conn.rollback();
-        throw e;
-      } finally {
-        conn.release();
-      }
+      console.log(`[socket][product:create] ✅ ok in ${Date.now() - t0}ms`);
+      return ack({ success: true, data: product });
     } catch (err) {
-      console.error(`[socket][product:create] ❌ error in ${Date.now() - t0}ms`, err);
+      try {
+        await conn?.rollback();
+      } catch {}
+      console.error(
+        `[socket][product:create] ❌ error in ${Date.now() - t0}ms`,
+        err,
+      );
       return ack({ success: false, message: "Failed to create product." });
+    } finally {
+      try {
+        conn?.release();
+      } catch {}
     }
   });
 
   /* =========================================================
      UPDATE PRODUCT (vendor owns product OR admin)
      ========================================================= */
-  socket.on("product:update", async (payload = {}, cb = () => {}) => {
+  socket.on("product:update", async (payload = {}, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
     const t0 = Date.now();
 
@@ -192,9 +299,11 @@ export default function productSocketController({
     if (!productId) return ack({ success: false, message: "Product id is required." });
 
     try {
-      const [pRows] = await db.execute(
+      const [pRows] = await executeWithRetry(
+        db,
         `SELECT ID, VENDOR_ID FROM PRODUCTS WHERE ID = ? LIMIT 1`,
         [productId],
+        "product:update.ownercheck",
       );
       const p = pRows?.[0];
       if (!p) return ack({ success: false, message: "Product not found." });
@@ -233,29 +342,34 @@ export default function productSocketController({
         params.push(payload.image_url ?? payload.imageUrl);
       }
 
-      // If no fields
+      // OPTIONAL:
+      // if (payload.category != null) { fields.push("CATEGORY = ?"); params.push(toStr(payload.category)); }
+      // if (payload.tcg != null) { fields.push("TCG = ?"); params.push(toStr(payload.tcg)); }
+
       if (fields.length === 0) {
         return ack({ success: false, message: "No fields to update." });
       }
 
       fields.push("UPDATED_AT = NOW()");
-
       params.push(productId);
 
-      await db.execute(
+      await executeWithRetry(
+        db,
         `UPDATE PRODUCTS SET ${fields.join(", ")} WHERE ID = ?`,
         params,
+        "product:update.update",
       );
 
-      const [rows] = await db.execute(
+      const [rows] = await executeWithRetry(
+        db,
         `SELECT ID, VENDOR_ID, NAME, CODE, DESCRIPTION, CONDITIONAL, PRICE, STOCK_QUANTITY, IMAGE_URL, CREATED_AT, UPDATED_AT
          FROM PRODUCTS
          WHERE ID = ?`,
         [productId],
+        "product:update.select",
       );
 
       const updated = safePublicProductRow(rows?.[0]);
-
       io.emit("product:updated", updated);
 
       pushActivity({
@@ -268,16 +382,18 @@ export default function productSocketController({
       console.log(`[socket][product:update] ✅ ok in ${Date.now() - t0}ms`);
       return ack({ success: true, data: updated });
     } catch (err) {
-      console.error(`[socket][product:update] ❌ error in ${Date.now() - t0}ms`, err);
+      console.error(
+        `[socket][product:update] ❌ error in ${Date.now() - t0}ms`,
+        err,
+      );
       return ack({ success: false, message: "Failed to update product." });
     }
   });
 
   /* =========================================================
      INVENTORY ADJUST (vendor owns product OR admin)
-     - delta can be + or -
      ========================================================= */
-  socket.on("inventory:adjust", async (payload = {}, cb = () => {}) => {
+  socket.on("inventory:adjust", async (payload = {}, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
     const t0 = Date.now();
 
@@ -294,80 +410,96 @@ export default function productSocketController({
       return ack({ success: false, message: "delta must be a non-zero number." });
     }
 
+    let conn;
     try {
-      const conn = await db.getConnection();
-      try {
-        await conn.beginTransaction();
+      conn = await db.getConnection();
+      await conn.beginTransaction();
 
-        const [pRows] = await conn.execute(
-          `SELECT ID, VENDOR_ID, STOCK_QUANTITY FROM PRODUCTS WHERE ID = ? LIMIT 1`,
-          [productId],
-        );
-        const p = pRows?.[0];
-        if (!p) {
-          await conn.rollback();
-          return ack({ success: false, message: "Product not found." });
-        }
-
-        const isOwner = toInt(p.VENDOR_ID) === userId;
-        const isAdmin = role === ROLES.ADMIN;
-        if (!isOwner && !isAdmin) {
-          await conn.rollback();
-          return ack({ success: false, message: "Forbidden (not owner)." });
-        }
-
-        const newQty = Math.max(0, toInt(p.STOCK_QUANTITY) + delta);
-
-        await conn.execute(
-          `UPDATE PRODUCTS SET STOCK_QUANTITY = ?, UPDATED_AT = NOW() WHERE ID = ?`,
-          [newQty, productId],
-        );
-
-        // Keep manage_inventory in sync (upsert-like behavior)
-        await conn.execute(
-          `INSERT INTO MANAGE_INVENTORY (PRODUCT_ID, QUANTITY, LAST_UPDATED)
-           VALUES (?, ?, NOW())
-           ON DUPLICATE KEY UPDATE QUANTITY = VALUES(QUANTITY), LAST_UPDATED = NOW()`,
-          [productId, newQty],
-        );
-
-        const [rows] = await conn.execute(
-          `SELECT ID, VENDOR_ID, NAME, CODE, DESCRIPTION, CONDITIONAL, PRICE, STOCK_QUANTITY, IMAGE_URL, CREATED_AT, UPDATED_AT
-           FROM PRODUCTS
-           WHERE ID = ?`,
-          [productId],
-        );
-
-        await conn.commit();
-
-        const updated = safePublicProductRow(rows?.[0]);
-        io.emit("inventory:updated", { product_id: productId, stock_quantity: updated?.stock_quantity });
-
-        pushActivity({
-          id: Date.now(),
-          type: "inventory",
-          message: `Inventory updated for product ID ${productId} (new qty: ${updated?.stock_quantity})`,
-          timestamp: new Date().toISOString(),
-        });
-
-        console.log(`[socket][inventory:adjust] ✅ ok in ${Date.now() - t0}ms`);
-        return ack({ success: true, data: updated });
-      } catch (e) {
+      const [pRows] = await executeWithRetry(
+        conn,
+        `SELECT ID, VENDOR_ID, STOCK_QUANTITY FROM PRODUCTS WHERE ID = ? LIMIT 1`,
+        [productId],
+        "inventory:adjust.select",
+      );
+      const p = pRows?.[0];
+      if (!p) {
         await conn.rollback();
-        throw e;
-      } finally {
-        conn.release();
+        return ack({ success: false, message: "Product not found." });
       }
+
+      const isOwner = toInt(p.VENDOR_ID) === userId;
+      const isAdmin = role === ROLES.ADMIN;
+      if (!isOwner && !isAdmin) {
+        await conn.rollback();
+        return ack({ success: false, message: "Forbidden (not owner)." });
+      }
+
+      const newQty = Math.max(0, toInt(p.STOCK_QUANTITY) + delta);
+
+      await executeWithRetry(
+        conn,
+        `UPDATE PRODUCTS SET STOCK_QUANTITY = ?, UPDATED_AT = NOW() WHERE ID = ?`,
+        [newQty, productId],
+        "inventory:adjust.update",
+      );
+
+      await executeWithRetry(
+        conn,
+        `INSERT INTO MANAGE_INVENTORY (PRODUCT_ID, QUANTITY, LAST_UPDATED)
+         VALUES (?, ?, NOW())
+         ON DUPLICATE KEY UPDATE QUANTITY = VALUES(QUANTITY), LAST_UPDATED = NOW()`,
+        [productId, newQty],
+        "inventory:adjust.upsert",
+      );
+
+      const [rows] = await executeWithRetry(
+        conn,
+        `SELECT ID, VENDOR_ID, NAME, CODE, DESCRIPTION, CONDITIONAL, PRICE, STOCK_QUANTITY, IMAGE_URL, CREATED_AT, UPDATED_AT
+         FROM PRODUCTS
+         WHERE ID = ?`,
+        [productId],
+        "inventory:adjust.select2",
+      );
+
+      await conn.commit();
+
+      const updated = safePublicProductRow(rows?.[0]);
+
+      // send enough info for UI to refresh fast
+      io.emit("inventory:updated", {
+        product_id: productId,
+        stock_quantity: updated?.stock_quantity,
+      });
+
+      pushActivity({
+        id: Date.now(),
+        type: "inventory",
+        message: `Inventory updated for product ID ${productId} (new qty: ${updated?.stock_quantity})`,
+        timestamp: new Date().toISOString(),
+      });
+
+      console.log(`[socket][inventory:adjust] ✅ ok in ${Date.now() - t0}ms`);
+      return ack({ success: true, data: updated });
     } catch (err) {
-      console.error(`[socket][inventory:adjust] ❌ error in ${Date.now() - t0}ms`, err);
+      try {
+        await conn?.rollback();
+      } catch {}
+      console.error(
+        `[socket][inventory:adjust] ❌ error in ${Date.now() - t0}ms`,
+        err,
+      );
       return ack({ success: false, message: "Failed to adjust inventory." });
+    } finally {
+      try {
+        conn?.release();
+      } catch {}
     }
   });
 
   /* =========================================================
      DELETE PRODUCT (vendor owns product OR admin)
      ========================================================= */
-  socket.on("product:delete", async (payload = {}, cb = () => {}) => {
+  socket.on("product:delete", async (payload = {}, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
     const t0 = Date.now();
 
@@ -379,56 +511,70 @@ export default function productSocketController({
     if (!userId) return ack({ success: false, message: "Unauthorized." });
     if (!productId) return ack({ success: false, message: "Product id is required." });
 
+    let conn;
     try {
-      const conn = await db.getConnection();
-      try {
-        await conn.beginTransaction();
+      conn = await db.getConnection();
+      await conn.beginTransaction();
 
-        const [pRows] = await conn.execute(
-          `SELECT ID, VENDOR_ID, NAME FROM PRODUCTS WHERE ID = ? LIMIT 1`,
-          [productId],
-        );
-        const p = pRows?.[0];
-        if (!p) {
-          await conn.rollback();
-          return ack({ success: false, message: "Product not found." });
-        }
-
-        const isOwner = toInt(p.VENDOR_ID) === userId;
-        const isAdmin = role === ROLES.ADMIN;
-        if (!isOwner && !isAdmin) {
-          await conn.rollback();
-          return ack({ success: false, message: "Forbidden (not owner)." });
-        }
-
-        // delete inventory first (FK)
-        await conn.execute(`DELETE FROM MANAGE_INVENTORY WHERE PRODUCT_ID = ?`, [productId]);
-
-        // delete product
-        await conn.execute(`DELETE FROM PRODUCTS WHERE ID = ?`, [productId]);
-
-        await conn.commit();
-
-        io.emit("product:deleted", { id: productId });
-
-        pushActivity({
-          id: Date.now(),
-          type: "product",
-          message: `Product deleted: ${p?.NAME || "item"} (ID ${productId})`,
-          timestamp: new Date().toISOString(),
-        });
-
-        console.log(`[socket][product:delete] ✅ ok in ${Date.now() - t0}ms`);
-        return ack({ success: true });
-      } catch (e) {
+      const [pRows] = await executeWithRetry(
+        conn,
+        `SELECT ID, VENDOR_ID, NAME FROM PRODUCTS WHERE ID = ? LIMIT 1`,
+        [productId],
+        "product:delete.select",
+      );
+      const p = pRows?.[0];
+      if (!p) {
         await conn.rollback();
-        throw e;
-      } finally {
-        conn.release();
+        return ack({ success: false, message: "Product not found." });
       }
+
+      const isOwner = toInt(p.VENDOR_ID) === userId;
+      const isAdmin = role === ROLES.ADMIN;
+      if (!isOwner && !isAdmin) {
+        await conn.rollback();
+        return ack({ success: false, message: "Forbidden (not owner)." });
+      }
+
+      await executeWithRetry(
+        conn,
+        `DELETE FROM MANAGE_INVENTORY WHERE PRODUCT_ID = ?`,
+        [productId],
+        "product:delete.inventory",
+      );
+
+      await executeWithRetry(
+        conn,
+        `DELETE FROM PRODUCTS WHERE ID = ?`,
+        [productId],
+        "product:delete.product",
+      );
+
+      await conn.commit();
+
+      io.emit("product:deleted", { id: productId });
+
+      pushActivity({
+        id: Date.now(),
+        type: "product",
+        message: `Product deleted: ${p?.NAME || "item"} (ID ${productId})`,
+        timestamp: new Date().toISOString(),
+      });
+
+      console.log(`[socket][product:delete] ✅ ok in ${Date.now() - t0}ms`);
+      return ack({ success: true });
     } catch (err) {
-      console.error(`[socket][product:delete] ❌ error in ${Date.now() - t0}ms`, err);
+      try {
+        await conn?.rollback();
+      } catch {}
+      console.error(
+        `[socket][product:delete] ❌ error in ${Date.now() - t0}ms`,
+        err,
+      );
       return ack({ success: false, message: "Failed to delete product." });
+    } finally {
+      try {
+        conn?.release();
+      } catch {}
     }
   });
 }
