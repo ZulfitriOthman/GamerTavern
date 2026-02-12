@@ -109,7 +109,7 @@ app.get("/", (_req, res) => {
 /* ------------------------------ Socket.IO ------------------------------ */
 const io = new Server(httpServer, {
   cors: {
-    origin: allowlist,       // ✅ array, not function
+    origin: allowlist,
     methods: ["GET", "POST"],
     credentials: true,
   },
@@ -117,10 +117,9 @@ const io = new Server(httpServer, {
   maxHttpBufferSize: 1e8,
 });
 
-// attach io to req (optional)
-app.use((req, _res, next) => {
-  req.io = io;
-  next();
+// ✅ MUST be after io is created
+io.engine.on("initial_headers", (headers, req) => {
+  console.log("[engine.io] origin:", req.headers.origin);
 });
 
 /* ------------------------------ DB ------------------------------ */
