@@ -46,7 +46,18 @@ const EXTRA_ORIGINS = (process.env.EXTRA_ORIGINS || "")
   .map((s) => s.trim())
   .filter(Boolean);
 
-const DEFAULT_ORIGINS = [CLIENT_URL, "http://localhost:5173", "http://localhost:5174"];
+const DEFAULT_ORIGINS = [
+  CLIENT_URL,
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "https://nanashicollectibles.com",
+  "https://www.nanashicollectibles.com",
+];
+
+io.engine.on("initial_headers", (headers, req) => {
+  console.log("[engine.io] origin:", req.headers.origin);
+});
+
 const allowlist = Array.from(new Set([...DEFAULT_ORIGINS, ...EXTRA_ORIGINS]));
 
 /* ------------------------------ Middleware ------------------------------ */
@@ -98,12 +109,8 @@ app.get("/", (_req, res) => {
 /* ------------------------------ Socket.IO ------------------------------ */
 const io = new Server(httpServer, {
   cors: {
-    origin: (origin, cb) => {
-      if (!origin) return cb(null, true);
-      if (allowlist.includes(origin)) return cb(null, true);
-      return cb(new Error(`Not allowed by CORS (socket.io): ${origin}`));
-    },
-    methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+    origin: allowlist,       // ✅ array, not function
+    methods: ["GET", "POST"],
     credentials: true,
   },
   transports: ["websocket", "polling"],
@@ -134,7 +141,7 @@ app.use(
   createHealthRoutes({
     dbPing,
     stores: {},
-  })
+  }),
 );
 
 // optional http auth endpoints
@@ -165,7 +172,9 @@ app.use((err, _req, res, _next) => {
   if (String(err?.message || "").startsWith("CORS blocked:")) {
     return res.status(403).json({ message: err.message });
   }
-  if (String(err?.message || "").startsWith("Not allowed by CORS (socket.io):")) {
+  if (
+    String(err?.message || "").startsWith("Not allowed by CORS (socket.io):")
+  ) {
     return res.status(403).json({ message: err.message });
   }
   console.error("[SERVER ERROR]", err);
