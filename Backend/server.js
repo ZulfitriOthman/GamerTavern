@@ -9,6 +9,8 @@ import { fileURLToPath } from "url";
 import { Server } from "socket.io";
 import multer from "multer";
 import { initDB, dbPing } from "./modules/db.module.js";
+
+// routes (optional)
 import createHealthRoutes from "./routes/api/health.routes.js";
 import createAuthRoutes from "./routes/api/auth.routes.js";
 
@@ -28,7 +30,7 @@ dotenv.config({
 /* ------------------------------ Paths & Folders ------------------------------ */
 const publicPath = path.join(process.cwd(), "public");
 const tmpDir = path.join(process.cwd(), "tmp");
-const uploadsDir = path.join(tmpDir, "uploads"); 
+const uploadsDir = path.join(tmpDir, "uploads");
 
 // Ensure folders exist
 fs.mkdirSync(publicPath, { recursive: true });
@@ -96,8 +98,7 @@ const io = new Server(httpServer, {
   maxHttpBufferSize: 1e8,
 });
 
-// ✅ keep ONLY this one
-io.engine.on("initial_headers", (headers, req) => {
+io.engine.on("initial_headers", (_headers, req) => {
   console.log("[engine.io] origin:", req.headers.origin);
 });
 
@@ -107,7 +108,7 @@ app.use(express.urlencoded({ extended: true, limit: "5mb" }));
 
 const corsOptions = {
   origin: (origin, cb) => {
-    if (!origin) return cb(null, true);
+    if (!origin) return cb(null, true); // allow curl/postman or same-origin
     if (allowlist.includes(origin)) return cb(null, true);
     return cb(new Error(`CORS blocked: ${origin}`));
   },
@@ -118,6 +119,8 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
+
+// ✅ static files: anything under Backend/public is served at /public/...
 app.use("/public", express.static(publicPath));
 
 /* ------------------------------ Health/Home ------------------------------ */
@@ -175,15 +178,13 @@ app.use(
   createHealthRoutes({
     dbPing,
     stores: {},
-  }),
+  })
 );
 
-// optional http auth endpoints
 app.use("/api/auth", createAuthRoutes({ db, io }));
 
 /* ------------------------------ Socket Wiring ------------------------------ */
 io.on("connection", (socket) => {
-  // Debug: show incoming events
   socket.onAny((event, ...args) => {
     const first = args?.[0];
     const summary =
@@ -193,31 +194,24 @@ io.on("connection", (socket) => {
     console.log(`[socket] ${event} payloadKeys=${summary}`);
   });
 
-  accountSocketController({
-    socket,
-    io,
-    db,
-    pushActivity: () => {},
-  });
-
-  productSocketController({
-    socket,
-    io,
-    db,
-  });
+  accountSocketController({ socket, io, db, pushActivity: () => {} });
+  productSocketController({ socket, io, db, pushActivity: () => {} });
 });
 
 /* ------------------------------ Error handler ------------------------------ */
 app.use((err, _req, res, _next) => {
-  if (String(err?.message || "").startsWith("CORS blocked:")) {
+  const msg = String(err?.message || "");
+
+  if (msg.startsWith("CORS blocked:")) {
     return res.status(403).json({ message: err.message });
   }
-  if (String(err?.message || "").startsWith("Not allowed by CORS (socket.io):")) {
+  if (msg.startsWith("Not allowed by CORS (socket.io):")) {
     return res.status(403).json({ message: err.message });
   }
-  if (String(err?.message || "").includes("Only image files are allowed")) {
-    return res.status(400).json({ message: err.message });
+  if (msg.includes("Only image files are allowed")) {
+    return res.status(400).json({ success: false, message: err.message });
   }
+
   console.error("[SERVER ERROR]", err);
   return res.status(500).json({ message: "Internal Server Error" });
 });

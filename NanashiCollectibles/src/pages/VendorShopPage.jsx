@@ -687,6 +687,8 @@ export default function VendorShopPage({
                       if (!file) return;
 
                       try {
+                        setServerError("");
+
                         if (!file.type.startsWith("image/")) {
                           throw new Error("Please select an image file.");
                         }
@@ -707,10 +709,16 @@ export default function VendorShopPage({
                         );
 
                         const json = await resp.json();
-                        if (!json.ok)
-                          throw new Error(json.message || "Upload failed");
 
-                        setNewProduct((p) => ({ ...p, image_url: json.url }));
+                        if (!resp.ok || !json?.success) {
+                          throw new Error(json?.message || "Upload failed");
+                        }
+
+                        setNewProduct((p) => ({
+                          ...p,
+                          image_url: json.imageUrl,
+                        }));
+
                         e.target.value = "";
                       } catch (err) {
                         setServerError(

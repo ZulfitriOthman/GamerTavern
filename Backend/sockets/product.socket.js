@@ -22,7 +22,7 @@ function normalizeRole(role) {
 /* ============================================================================
    Local image helpers
    - We store DB IMAGE_URL like: "/public/uploads/products/<filename>"
-   - Actual file on disk: "<project>/public/uploads/products/<filename>"
+   - Actual file on disk: "<Backend>/public/uploads/products/<filename>"
    ============================================================================ */
 const publicPath = path.join(process.cwd(), "public");
 
@@ -31,7 +31,7 @@ function isLocalProductImage(url) {
 }
 
 function localImageDiskPath(url) {
-  const rel = url.replace(/^\/public\//, "");
+  const rel = String(url || "").replace(/^\/public\//, ""); // => "uploads/products/<file>"
   return path.join(publicPath, rel);
 }
 
@@ -82,7 +82,6 @@ async function executeWithRetry(dbOrConn, sql, params = [], label = "db.execute"
         msg.includes("read ECONNRESET");
 
       if (!transient || attempt === max) break;
-
       await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
     }
   }
@@ -102,6 +101,7 @@ export default function productSocketController({
 
   /* =========================================================
      LIST PRODUCTS (public)
+     - SAFE: does NOT reference CATEGORY / TCG columns (until you add them)
      ========================================================= */
   socket.on("product:list", async (payload = {}, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
@@ -109,13 +109,8 @@ export default function productSocketController({
 
     const vendorId = payload.vendorId != null ? toInt(payload.vendorId) : null;
     const search = toStr(payload.search);
-
-    const category = toStr(payload.category);
-    const tcg = toStr(payload.tcg);
-
     const dateFrom = toStr(payload.dateFrom);
     const dateTo = toStr(payload.dateTo);
-
     const sort = toStr(payload.sort || "newest").toLowerCase();
 
     try {
@@ -127,15 +122,6 @@ export default function productSocketController({
         params.push(vendorId);
       }
 
-      if (category) {
-        where.push("CATEGORY = ?");
-        params.push(category);
-      }
-      if (tcg) {
-        where.push("TCG = ?");
-        params.push(tcg);
-      }
-
       if (dateFrom) {
         where.push("CREATED_AT >= ?");
         params.push(dateFrom);
@@ -145,7 +131,6 @@ export default function productSocketController({
         params.push(dateTo);
       }
 
-      // SAFE search (no CATEGORY dependency)
       if (search) {
         where.push("(NAME LIKE ? OR CODE LIKE ?)");
         params.push(`%${search}%`, `%${search}%`);
@@ -159,16 +144,10 @@ export default function productSocketController({
       if (sort === "price_asc") orderBy = "PRICE ASC, ID DESC";
       if (sort === "price_desc") orderBy = "PRICE DESC, ID DESC";
 
-      // OPTIONAL (only if CATEGORY exists)
-      if (sort === "cat_az") orderBy = "CATEGORY ASC, NAME ASC";
-      if (sort === "cat_za") orderBy = "CATEGORY DESC, NAME ASC";
-
       const sql = `
         SELECT
           ID, VENDOR_ID, NAME, CODE, DESCRIPTION, CONDITIONAL,
           PRICE, STOCK_QUANTITY, IMAGE_URL, CREATED_AT, UPDATED_AT
-          -- OPTIONAL (uncomment if you added these columns)
-          -- , CATEGORY, TCG
         FROM PRODUCTS
         ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
         ORDER BY ${orderBy}
@@ -198,7 +177,10 @@ export default function productSocketController({
 
     if (!userId) return ack({ success: false, message: "Unauthorized." });
     if (!(role === ROLES.VENDOR || role === ROLES.ADMIN)) {
-      return ack({ success: false, message: "Only vendors/admin can create products." });
+      return ack({
+        success: false,
+        message: "Only vendors/admin can create products.",
+      });
     }
 
     const name = toStr(payload.name);
@@ -224,7 +206,7 @@ export default function productSocketController({
           (VENDOR_ID, NAME, CODE, DESCRIPTION, CONDITIONAL, PRICE, STOCK_QUANTITY, IMAGE_URL)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [userId, name, code, description, conditional, price, stockQty, imageUrl],
-        "product:create.insert",
+        "product:create.insert"
       );
 
       const productId = res.insertId;
@@ -235,7 +217,7 @@ export default function productSocketController({
          VALUES (?, ?, NOW())
          ON DUPLICATE KEY UPDATE QUANTITY = VALUES(QUANTITY), LAST_UPDATED = NOW()`,
         [productId, stockQty],
-        "product:create.inventory",
+        "product:create.inventory"
       );
 
       const [rows] = await executeWithRetry(
@@ -244,7 +226,7 @@ export default function productSocketController({
          FROM PRODUCTS
          WHERE ID = ?`,
         [productId],
-        "product:create.select",
+        "product:create.select"
       );
 
       await conn.commit();
@@ -276,6 +258,7 @@ export default function productSocketController({
 
   /* =========================================================
      UPDATE PRODUCT (vendor owns product OR admin)
+     - Deletes old local image if replaced
      ========================================================= */
   socket.on("product:update", async (payload = {}, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
@@ -284,8 +267,8 @@ export default function productSocketController({
     const currentUser = payload.currentUser || null;
     const userId = toInt(currentUser?.id);
     const role = normalizeRole(currentUser?.role);
-
     const productId = toInt(payload.id);
+
     if (!userId) return ack({ success: false, message: "Unauthorized." });
     if (!productId) return ack({ success: false, message: "Product id is required." });
 
@@ -294,7 +277,7 @@ export default function productSocketController({
         db,
         `SELECT ID, VENDOR_ID, IMAGE_URL FROM PRODUCTS WHERE ID = ? LIMIT 1`,
         [productId],
-        "product:update.ownercheck",
+        "product:update.ownercheck"
       );
       const p = pRows?.[0];
       if (!p) return ack({ success: false, message: "Product not found." });
@@ -337,7 +320,8 @@ export default function productSocketController({
           : null;
 
       const imageWasIncluded = incomingImageUrl != null;
-      const imageChanged = imageWasIncluded && toStr(incomingImageUrl) !== toStr(oldImageUrl);
+      const imageChanged =
+        imageWasIncluded && toStr(incomingImageUrl) !== toStr(oldImageUrl);
 
       if (payload.image_url != null || payload.imageUrl != null) {
         fields.push("IMAGE_URL = ?");
@@ -355,7 +339,7 @@ export default function productSocketController({
         db,
         `UPDATE PRODUCTS SET ${fields.join(", ")} WHERE ID = ?`,
         params,
-        "product:update.update",
+        "product:update.update"
       );
 
       const [rows] = await executeWithRetry(
@@ -364,13 +348,13 @@ export default function productSocketController({
          FROM PRODUCTS
          WHERE ID = ?`,
         [productId],
-        "product:update.select",
+        "product:update.select"
       );
 
       const updated = safePublicProductRow(rows?.[0]);
       io.emit("product:updated", updated);
 
-      // Delete old local image if replaced by a new one
+      // ✅ delete old local image after update (only if it was replaced)
       if (imageChanged && isLocalProductImage(oldImageUrl)) {
         safeUnlink(localImageDiskPath(oldImageUrl));
       }
@@ -419,7 +403,7 @@ export default function productSocketController({
         conn,
         `SELECT ID, VENDOR_ID, STOCK_QUANTITY FROM PRODUCTS WHERE ID = ? LIMIT 1`,
         [productId],
-        "inventory:adjust.select",
+        "inventory:adjust.select"
       );
       const p = pRows?.[0];
       if (!p) {
@@ -440,7 +424,7 @@ export default function productSocketController({
         conn,
         `UPDATE PRODUCTS SET STOCK_QUANTITY = ?, UPDATED_AT = NOW() WHERE ID = ?`,
         [newQty, productId],
-        "inventory:adjust.update",
+        "inventory:adjust.update"
       );
 
       await executeWithRetry(
@@ -449,7 +433,7 @@ export default function productSocketController({
          VALUES (?, ?, NOW())
          ON DUPLICATE KEY UPDATE QUANTITY = VALUES(QUANTITY), LAST_UPDATED = NOW()`,
         [productId, newQty],
-        "inventory:adjust.upsert",
+        "inventory:adjust.upsert"
       );
 
       const [rows] = await executeWithRetry(
@@ -458,7 +442,7 @@ export default function productSocketController({
          FROM PRODUCTS
          WHERE ID = ?`,
         [productId],
-        "inventory:adjust.select2",
+        "inventory:adjust.select2"
       );
 
       await conn.commit();
@@ -483,7 +467,10 @@ export default function productSocketController({
       try {
         await conn?.rollback();
       } catch {}
-      console.error(`[socket][inventory:adjust] ❌ error in ${Date.now() - t0}ms`, err);
+      console.error(
+        `[socket][inventory:adjust] ❌ error in ${Date.now() - t0}ms`,
+        err
+      );
       return ack({ success: false, message: "Failed to adjust inventory." });
     } finally {
       try {
@@ -494,6 +481,7 @@ export default function productSocketController({
 
   /* =========================================================
      DELETE PRODUCT (vendor owns product OR admin)
+     - Deletes local image file after commit
      ========================================================= */
   socket.on("product:delete", async (payload = {}, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
@@ -516,7 +504,7 @@ export default function productSocketController({
         conn,
         `SELECT ID, VENDOR_ID, NAME, IMAGE_URL FROM PRODUCTS WHERE ID = ? LIMIT 1`,
         [productId],
-        "product:delete.select",
+        "product:delete.select"
       );
       const p = pRows?.[0];
       if (!p) {
@@ -537,21 +525,21 @@ export default function productSocketController({
         conn,
         `DELETE FROM MANAGE_INVENTORY WHERE PRODUCT_ID = ?`,
         [productId],
-        "product:delete.inventory",
+        "product:delete.inventory"
       );
 
       await executeWithRetry(
         conn,
         `DELETE FROM PRODUCTS WHERE ID = ?`,
         [productId],
-        "product:delete.product",
+        "product:delete.product"
       );
 
       await conn.commit();
 
       io.emit("product:deleted", { id: productId });
 
-      // Delete local image file after DB commit
+      // ✅ delete local file AFTER DB commit
       if (isLocalProductImage(oldImageUrl)) {
         safeUnlink(localImageDiskPath(oldImageUrl));
       }
