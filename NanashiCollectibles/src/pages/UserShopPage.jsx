@@ -36,17 +36,41 @@ function asText(v) {
   return String(v);
 }
 
+/**
+ * ✅ IMPORTANT:
+ * Images are served by backend at: `${API_BASE}/public/...`
+ * So if DB stores "/public/uploads/products/xxx.png",
+ * frontend must render: `${API_BASE}/public/uploads/products/xxx.png`
+ */
+const API_BASE =
+  (import.meta?.env?.VITE_API_BASE && String(import.meta.env.VITE_API_BASE)) ||
+  window.location.origin.replace(":5173", ":3001"); // dev fallback
+
 function normalizeImageUrl(v) {
   const s = toStr(v);
+
   if (!s) return PLACEHOLDER;
-  if (/^https?:\/\//i.test(s)) return s; // absolute
-  if (s.startsWith("/")) return s; // /uploads/... or /public/... or /images/...
+
+  // absolute URL (https://...)
+  if (/^https?:\/\//i.test(s)) return s;
+
+  // stored as /public/uploads/...
+  if (s.startsWith("/public/")) return `${API_BASE}${s}`;
+
+  // stored as /uploads/... (if you ever change backend mount to /uploads)
+  if (s.startsWith("/uploads/")) return `${API_BASE}${s}`;
+
+  // stored as relative "uploads/..."
+  if (s.startsWith("uploads/")) return `${API_BASE}/${s}`;
+
+  // local frontend public assets like "/placeholder.png"
+  if (s.startsWith("/")) return s;
+
   return PLACEHOLDER;
 }
 
 // Category helper: supports future DB column, otherwise fallback
 function deriveCategory(row) {
-  // if you later add PRODUCTS.CATEGORY, it will map into row.category automatically if your socket includes it.
   const direct =
     toStr(row?.category) ||
     toStr(row?.CATEGORY) ||
@@ -55,7 +79,6 @@ function deriveCategory(row) {
 
   if (direct) return direct;
 
-  // OPTIONAL heuristic: if CODE looks like "SLEEVE-001", use prefix as category
   const code = toStr(row?.code || row?.CODE);
   if (code.includes("-")) return code.split("-")[0].toUpperCase();
 
@@ -154,7 +177,8 @@ export default function UserShopPage({
   const emitAsync = (event, payload) =>
     new Promise((resolve) => {
       const s = getSocket();
-      if (!s?.connected) return resolve({ success: false, message: "Socket not connected." });
+      if (!s?.connected)
+        return resolve({ success: false, message: "Socket not connected." });
       s.emit(event, payload, (res) => resolve(res));
     });
 
@@ -162,11 +186,7 @@ export default function UserShopPage({
     setLoadingProducts(true);
     setServerError("");
 
-    const res = await emitAsync("product:list", {
-      // optional filters later:
-      // tcg: selectedTcg, // (DB has no tcg column yet)
-      // vendorId: ...
-    });
+    const res = await emitAsync("product:list", {});
 
     setLoadingProducts(false);
 
@@ -178,6 +198,10 @@ export default function UserShopPage({
     const rows = Array.isArray(res.data) ? res.data : [];
     const mapped = rows.map((r) => {
       const createdAt = r?.created_at || r?.CREATED_AT || null;
+
+      const rawImage = asText(r.image_url ?? r.IMAGE_URL);
+      const img = normalizeImageUrl(rawImage);
+
       return {
         id: r.id ?? r.ID,
         vendor_id: r.vendor_id ?? r.VENDOR_ID,
@@ -186,7 +210,7 @@ export default function UserShopPage({
         conditional: toStr(r.conditional ?? r.CONDITIONAL),
         price: toInt(r.price ?? r.PRICE),
         stock: toInt(r.stock_quantity ?? r.STOCK_QUANTITY),
-        image: normalizeImageUrl(asText(r.image_url ?? r.IMAGE_URL)),
+        image: img,
         description: asText(r.description ?? r.DESCRIPTION),
         category: deriveCategory({
           category: r.category,
@@ -207,7 +231,6 @@ export default function UserShopPage({
     if (didInitSocketRef.current) return;
     didInitSocketRef.current = true;
 
-    // If App already connects, this is safe (connectSocket returns existing socket)
     const username =
       localStorage.getItem("tavern_username") ||
       (currentUser?.name ? String(currentUser.name) : null);
@@ -222,13 +245,12 @@ export default function UserShopPage({
 
     const onConnect = () => {
       setIsSocketConnected(true);
-      setServerError(""); // ✅ clear stale "Socket not connected" after refresh
-      loadProducts(); // ✅ load only after connected
+      setServerError("");
+      loadProducts();
     };
 
     const onDisconnect = () => {
       setIsSocketConnected(false);
-      // keep UI calm; no hard error spam
     };
 
     s.on("connect", onConnect);
@@ -281,10 +303,9 @@ export default function UserShopPage({
 
     const passDate = (p) => {
       if (dateFilter === DATE_FILTER.ALL) return true;
-      if (!p.created_at) return true; // if missing date, don't hide it
+      if (!p.created_at) return true;
 
       const t = p.created_at.getTime();
-
       if (dateFilter === DATE_FILTER.TODAY) return t >= startOfToday.getTime();
 
       const days = dateFilter === DATE_FILTER.DAYS_7 ? 7 : 30;
@@ -293,7 +314,6 @@ export default function UserShopPage({
     };
 
     const list = products
-      // (TCG filter placeholder — when DB has tcg column, filter here)
       .filter((p) => passDate(p))
       .filter((p) => {
         if (categoryFilter === "ALL") return true;
@@ -400,7 +420,7 @@ export default function UserShopPage({
           </div>
         </div>
 
-        {/* Errors (only show real errors; not the early refresh flicker) */}
+        {/* Errors */}
         {serverError ? (
           <div className="rounded-xl border border-rose-500/30 bg-rose-950/30 px-4 py-3 text-sm text-rose-200">
             {serverError}
