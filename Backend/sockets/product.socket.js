@@ -1,9 +1,6 @@
 // Backend/sockets/product.socket.js
-// ✅ Adds:
-// - safer cb handling
-// - robust MySQL retry on ECONNRESET / transient disconnects
-// - optional filters: search, dateFrom/dateTo, vendorId, category, tcg (only if columns exist)
-// - optional sorting: newest/oldest, name A-Z/Z-A, price, category A-Z/Z-A
+import fs from "fs";
+import path from "path";
 
 const ROLES = {
   USER: "USER",
@@ -22,6 +19,30 @@ function normalizeRole(role) {
   return Object.values(ROLES).includes(r) ? r : ROLES.USER;
 }
 
+/* ============================================================================
+   Local image helpers
+   - We store DB IMAGE_URL like: "/public/uploads/products/<filename>"
+   - Actual file on disk: "<project>/public/uploads/products/<filename>"
+   ============================================================================ */
+const publicPath = path.join(process.cwd(), "public");
+
+function isLocalProductImage(url) {
+  return typeof url === "string" && url.startsWith("/public/uploads/products/");
+}
+
+function localImageDiskPath(url) {
+  const rel = url.replace(/^\/public\//, "");
+  return path.join(publicPath, rel);
+}
+
+function safeUnlink(filePath) {
+  try {
+    if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  } catch (e) {
+    console.warn("[product.image] unlink failed:", e?.message || e);
+  }
+}
+
 function safePublicProductRow(row) {
   if (!row) return null;
   return {
@@ -29,15 +50,11 @@ function safePublicProductRow(row) {
     vendor_id: row.VENDOR_ID,
     name: row.NAME,
     code: row.CODE,
-    // may be Buffer depending on column type (frontend already handles Buffer)
     description: row.DESCRIPTION,
     conditional: row.CONDITIONAL,
     price: row.PRICE,
     stock_quantity: row.STOCK_QUANTITY,
     image_url: row.IMAGE_URL,
-    // OPTIONAL columns (only if you added them to DB)
-    // category: row.CATEGORY,
-    // tcg: row.TCG,
     created_at: row.CREATED_AT,
     updated_at: row.UPDATED_AT,
   };
@@ -50,7 +67,6 @@ async function executeWithRetry(dbOrConn, sql, params = [], label = "db.execute"
 
   for (let attempt = 0; attempt <= max; attempt++) {
     try {
-      // mysql2 pool has execute; connection has execute too
       return await dbOrConn.execute(sql, params);
     } catch (err) {
       lastErr = err;
@@ -67,19 +83,14 @@ async function executeWithRetry(dbOrConn, sql, params = [], label = "db.execute"
 
       if (!transient || attempt === max) break;
 
-      // small backoff
       await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
     }
   }
 
+  console.error(`[executeWithRetry] failed label=${label}`, lastErr);
   throw lastErr;
 }
 
-/**
- * product socket controller
- * expects: { socket, io, db, pushActivity }
- * where `db` is mysql2 pool from initDB()
- */
 export default function productSocketController({
   socket,
   io,
@@ -96,20 +107,15 @@ export default function productSocketController({
     const ack = typeof cb === "function" ? cb : () => {};
     const t0 = Date.now();
 
-    // optional filters
     const vendorId = payload.vendorId != null ? toInt(payload.vendorId) : null;
-    const search = toStr(payload.search); // name/code/category search
-    const category = toStr(payload.category); // requires PRODUCTS.CATEGORY (optional)
-    const tcg = toStr(payload.tcg); // requires PRODUCTS.TCG (optional)
+    const search = toStr(payload.search);
 
-    // date filtering (CREATED_AT)
-    // accept ISO or yyyy-mm-dd; MySQL will try to parse
+    const category = toStr(payload.category);
+    const tcg = toStr(payload.tcg);
+
     const dateFrom = toStr(payload.dateFrom);
     const dateTo = toStr(payload.dateTo);
 
-    // sort preset
-    // allowed values:
-    // "newest" | "oldest" | "az" | "za" | "price_asc" | "price_desc" | "cat_az" | "cat_za"
     const sort = toStr(payload.sort || "newest").toLowerCase();
 
     try {
@@ -121,11 +127,6 @@ export default function productSocketController({
         params.push(vendorId);
       }
 
-      // NOTE:
-      // If your PRODUCTS table DOES NOT have CATEGORY / TCG, remove those filters
-      // or add the columns:
-      //   ALTER TABLE PRODUCTS ADD COLUMN CATEGORY VARCHAR(80) NULL;
-      //   ALTER TABLE PRODUCTS ADD COLUMN TCG VARCHAR(30) NULL;
       if (category) {
         where.push("CATEGORY = ?");
         params.push(category);
@@ -144,9 +145,10 @@ export default function productSocketController({
         params.push(dateTo);
       }
 
+      // SAFE search (no CATEGORY dependency)
       if (search) {
-        where.push("(NAME LIKE ? OR CODE LIKE ? OR CATEGORY LIKE ?)");
-        params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+        where.push("(NAME LIKE ? OR CODE LIKE ?)");
+        params.push(`%${search}%`, `%${search}%`);
       }
 
       // ORDER BY whitelist
@@ -156,6 +158,8 @@ export default function productSocketController({
       if (sort === "za") orderBy = "NAME DESC";
       if (sort === "price_asc") orderBy = "PRICE ASC, ID DESC";
       if (sort === "price_desc") orderBy = "PRICE DESC, ID DESC";
+
+      // OPTIONAL (only if CATEGORY exists)
       if (sort === "cat_az") orderBy = "CATEGORY ASC, NAME ASC";
       if (sort === "cat_za") orderBy = "CATEGORY DESC, NAME ASC";
 
@@ -176,10 +180,7 @@ export default function productSocketController({
       console.log(`[socket][product:list] ✅ ok in ${Date.now() - t0}ms`);
       return ack({ success: true, data: products });
     } catch (err) {
-      console.error(
-        `[socket][product:list] ❌ error in ${Date.now() - t0}ms`,
-        err,
-      );
+      console.error(`[socket][product:list] ❌ error in ${Date.now() - t0}ms`, err);
       return ack({ success: false, message: "Failed to load products." });
     }
   });
@@ -197,10 +198,7 @@ export default function productSocketController({
 
     if (!userId) return ack({ success: false, message: "Unauthorized." });
     if (!(role === ROLES.VENDOR || role === ROLES.ADMIN)) {
-      return ack({
-        success: false,
-        message: "Only vendors/admin can create products.",
-      });
+      return ack({ success: false, message: "Only vendors/admin can create products." });
     }
 
     const name = toStr(payload.name);
@@ -210,10 +208,6 @@ export default function productSocketController({
     const price = toInt(payload.price);
     const stockQty = toInt(payload.stock_quantity ?? payload.stockQty ?? 0);
     const imageUrl = payload.image_url ?? payload.imageUrl ?? null;
-
-    // OPTIONAL:
-    // const category = toStr(payload.category) || null; // requires PRODUCTS.CATEGORY
-    // const tcg = toStr(payload.tcg) || null; // requires PRODUCTS.TCG
 
     if (!name || !code) {
       return ack({ success: false, message: "name and code are required." });
@@ -271,10 +265,7 @@ export default function productSocketController({
       try {
         await conn?.rollback();
       } catch {}
-      console.error(
-        `[socket][product:create] ❌ error in ${Date.now() - t0}ms`,
-        err,
-      );
+      console.error(`[socket][product:create] ❌ error in ${Date.now() - t0}ms`, err);
       return ack({ success: false, message: "Failed to create product." });
     } finally {
       try {
@@ -301,12 +292,14 @@ export default function productSocketController({
     try {
       const [pRows] = await executeWithRetry(
         db,
-        `SELECT ID, VENDOR_ID FROM PRODUCTS WHERE ID = ? LIMIT 1`,
+        `SELECT ID, VENDOR_ID, IMAGE_URL FROM PRODUCTS WHERE ID = ? LIMIT 1`,
         [productId],
         "product:update.ownercheck",
       );
       const p = pRows?.[0];
       if (!p) return ack({ success: false, message: "Product not found." });
+
+      const oldImageUrl = p?.IMAGE_URL || null;
 
       const isOwner = toInt(p.VENDOR_ID) === userId;
       const isAdmin = role === ROLES.ADMIN;
@@ -337,14 +330,19 @@ export default function productSocketController({
         fields.push("PRICE = ?");
         params.push(toInt(payload.price));
       }
+
+      const incomingImageUrl =
+        payload.image_url != null || payload.imageUrl != null
+          ? toStr(payload.image_url ?? payload.imageUrl)
+          : null;
+
+      const imageWasIncluded = incomingImageUrl != null;
+      const imageChanged = imageWasIncluded && toStr(incomingImageUrl) !== toStr(oldImageUrl);
+
       if (payload.image_url != null || payload.imageUrl != null) {
         fields.push("IMAGE_URL = ?");
         params.push(payload.image_url ?? payload.imageUrl);
       }
-
-      // OPTIONAL:
-      // if (payload.category != null) { fields.push("CATEGORY = ?"); params.push(toStr(payload.category)); }
-      // if (payload.tcg != null) { fields.push("TCG = ?"); params.push(toStr(payload.tcg)); }
 
       if (fields.length === 0) {
         return ack({ success: false, message: "No fields to update." });
@@ -372,6 +370,11 @@ export default function productSocketController({
       const updated = safePublicProductRow(rows?.[0]);
       io.emit("product:updated", updated);
 
+      // Delete old local image if replaced by a new one
+      if (imageChanged && isLocalProductImage(oldImageUrl)) {
+        safeUnlink(localImageDiskPath(oldImageUrl));
+      }
+
       pushActivity({
         id: Date.now(),
         type: "product",
@@ -382,10 +385,7 @@ export default function productSocketController({
       console.log(`[socket][product:update] ✅ ok in ${Date.now() - t0}ms`);
       return ack({ success: true, data: updated });
     } catch (err) {
-      console.error(
-        `[socket][product:update] ❌ error in ${Date.now() - t0}ms`,
-        err,
-      );
+      console.error(`[socket][product:update] ❌ error in ${Date.now() - t0}ms`, err);
       return ack({ success: false, message: "Failed to update product." });
     }
   });
@@ -465,7 +465,6 @@ export default function productSocketController({
 
       const updated = safePublicProductRow(rows?.[0]);
 
-      // send enough info for UI to refresh fast
       io.emit("inventory:updated", {
         product_id: productId,
         stock_quantity: updated?.stock_quantity,
@@ -484,10 +483,7 @@ export default function productSocketController({
       try {
         await conn?.rollback();
       } catch {}
-      console.error(
-        `[socket][inventory:adjust] ❌ error in ${Date.now() - t0}ms`,
-        err,
-      );
+      console.error(`[socket][inventory:adjust] ❌ error in ${Date.now() - t0}ms`, err);
       return ack({ success: false, message: "Failed to adjust inventory." });
     } finally {
       try {
@@ -518,7 +514,7 @@ export default function productSocketController({
 
       const [pRows] = await executeWithRetry(
         conn,
-        `SELECT ID, VENDOR_ID, NAME FROM PRODUCTS WHERE ID = ? LIMIT 1`,
+        `SELECT ID, VENDOR_ID, NAME, IMAGE_URL FROM PRODUCTS WHERE ID = ? LIMIT 1`,
         [productId],
         "product:delete.select",
       );
@@ -527,6 +523,8 @@ export default function productSocketController({
         await conn.rollback();
         return ack({ success: false, message: "Product not found." });
       }
+
+      const oldImageUrl = p?.IMAGE_URL || null;
 
       const isOwner = toInt(p.VENDOR_ID) === userId;
       const isAdmin = role === ROLES.ADMIN;
@@ -553,6 +551,11 @@ export default function productSocketController({
 
       io.emit("product:deleted", { id: productId });
 
+      // Delete local image file after DB commit
+      if (isLocalProductImage(oldImageUrl)) {
+        safeUnlink(localImageDiskPath(oldImageUrl));
+      }
+
       pushActivity({
         id: Date.now(),
         type: "product",
@@ -566,10 +569,7 @@ export default function productSocketController({
       try {
         await conn?.rollback();
       } catch {}
-      console.error(
-        `[socket][product:delete] ❌ error in ${Date.now() - t0}ms`,
-        err,
-      );
+      console.error(`[socket][product:delete] ❌ error in ${Date.now() - t0}ms`, err);
       return ack({ success: false, message: "Failed to delete product." });
     } finally {
       try {

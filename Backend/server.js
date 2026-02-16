@@ -7,10 +7,8 @@ import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
 import { Server } from "socket.io";
-
+import multer from "multer";
 import { initDB, dbPing } from "./modules/db.module.js";
-
-// routes (optional)
 import createHealthRoutes from "./routes/api/health.routes.js";
 import createAuthRoutes from "./routes/api/auth.routes.js";
 
@@ -21,25 +19,27 @@ import productSocketController from "./sockets/product.socket.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ---- existing ----
+// ---- env ----
 dotenv.config({
   path: path.join(__dirname, ".env.dev"),
   override: true,
 });
 
+/* ------------------------------ Paths & Folders ------------------------------ */
 const publicPath = path.join(process.cwd(), "public");
 const tmpDir = path.join(process.cwd(), "tmp");
-const uploadsDir = path.join(tmpDir, "uploads");
+const uploadsDir = path.join(tmpDir, "uploads"); 
 
+// Ensure folders exist
 fs.mkdirSync(publicPath, { recursive: true });
 fs.mkdirSync(tmpDir, { recursive: true });
 fs.mkdirSync(uploadsDir, { recursive: true });
 
-import multer from "multer"; // put this at the TOP with other imports
-
+// Store product images in: Backend/public/uploads/products
 const productUploadsDir = path.join(publicPath, "uploads", "products");
 fs.mkdirSync(productUploadsDir, { recursive: true });
 
+/* ------------------------------ Multer config ------------------------------ */
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, productUploadsDir),
   filename: (_req, file, cb) => {
@@ -49,9 +49,16 @@ const storage = multer.diskStorage({
   },
 });
 
+// Optional: only allow images
+const fileFilter = (_req, file, cb) => {
+  const ok = /^image\/(png|jpeg|jpg|webp|gif)$/i.test(file.mimetype || "");
+  cb(ok ? null : new Error("Only image files are allowed."), ok);
+};
+
 const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
 });
 
 /* ------------------------------ App / Server ------------------------------ */
@@ -152,6 +159,16 @@ app.get("/api/db-test", async (_req, res) => {
   }
 });
 
+/* ------------------------------ Upload Route ------------------------------ */
+app.post("/api/upload/product-image", upload.single("image"), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ success: false, message: "No file uploaded" });
+  }
+
+  const imageUrl = `/public/uploads/products/${req.file.filename}`;
+  return res.json({ success: true, imageUrl });
+});
+
 /* ------------------------------ Routes ------------------------------ */
 app.use(
   "/api",
@@ -195,10 +212,11 @@ app.use((err, _req, res, _next) => {
   if (String(err?.message || "").startsWith("CORS blocked:")) {
     return res.status(403).json({ message: err.message });
   }
-  if (
-    String(err?.message || "").startsWith("Not allowed by CORS (socket.io):")
-  ) {
+  if (String(err?.message || "").startsWith("Not allowed by CORS (socket.io):")) {
     return res.status(403).json({ message: err.message });
+  }
+  if (String(err?.message || "").includes("Only image files are allowed")) {
+    return res.status(400).json({ message: err.message });
   }
   console.error("[SERVER ERROR]", err);
   return res.status(500).json({ message: "Internal Server Error" });
@@ -222,7 +240,8 @@ async function start() {
       console.log("=".repeat(60));
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`🌐 Allowed origins: ${allowlist.join(", ")}`);
-      console.log("📡 WebSocket ready for connections (account only)");
+      console.log("📡 WebSocket ready for connections (account + product)");
+      console.log("🖼️  Product uploads:", productUploadsDir);
       console.log("=".repeat(60) + "\n");
     });
   } catch (e) {
