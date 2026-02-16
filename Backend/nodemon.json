@@ -1,7 +1,12 @@
 {
   "watch": ["."],
   "ext": "js,json",
-  "ignore": ["node_modules"],
+  "ignore": [
+    "node_modules/**",
+    "public/uploads/**",
+    "tmp/**",
+    "*.log"
+  ],
   "exec": "node server.js",
   "env": {
     "NODE_ENV": "development"
