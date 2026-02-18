@@ -565,4 +565,88 @@ export default function productSocketController({
       } catch {}
     }
   });
+
+  /* =========================================================
+     UPLOAD IMAGE (via Socket.IO - works on mobile!)
+     Receives base64 data and saves to disk
+     ========================================================= */
+  socket.on("image:upload", async (payload = {}, cb) => {
+    const ack = typeof cb === "function" ? cb : () => {};
+    const t0 = Date.now();
+
+    const currentUser = payload.currentUser || null;
+    const userId = toInt(currentUser?.id);
+    const role = normalizeRole(currentUser?.role);
+
+    if (!userId) return ack({ success: false, message: "Unauthorized." });
+    if (!(role === ROLES.VENDOR || role === ROLES.ADMIN)) {
+      return ack({
+        success: false,
+        message: "Only vendors/admin can upload images.",
+      });
+    }
+
+    try {
+      // Receive base64 image data
+      const base64Data = payload.base64 || payload.data || "";
+      const fileName = payload.fileName || "";
+
+      if (!base64Data) {
+        return ack({ success: false, message: "No image data provided." });
+      }
+
+      if (!fileName) {
+        return ack({ success: false, message: "No file name provided." });
+      }
+
+      // Validate file extension
+      const validExtensions = /\.(jpg|jpeg|png|gif|webp)$/i;
+      if (!validExtensions.test(fileName)) {
+        return ack({
+          success: false,
+          message: "Only .jpg, .jpeg, .png, .gif, .webp allowed.",
+        });
+      }
+
+      // Create uploads directory if needed
+      const uploadsDir = path.join(publicPath, "uploads", "products");
+      if (!fs.existsSync(uploadsDir)) {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+      }
+
+      // Generate safe filename with timestamp
+      const ext = path.extname(fileName).toLowerCase();
+      const safe = Date.now() + "-" + Math.random().toString(16).slice(2);
+      const finalFileName = safe + ext;
+      const filePath = path.join(uploadsDir, finalFileName);
+
+      // Decode base64 and write to disk
+      const buffer = Buffer.from(base64Data, "base64");
+
+      // Basic size check (5MB max)
+      if (buffer.length > 5 * 1024 * 1024) {
+        return ack({ success: false, message: "File exceeds 5MB limit." });
+      }
+
+      fs.writeFileSync(filePath, buffer);
+
+      const imageUrl = `/public/uploads/products/${finalFileName}`;
+
+      console.log(`[socket][image:upload] ✅ ok in ${Date.now() - t0}ms`);
+      console.log(`  File: ${finalFileName}`);
+      console.log(`  Size: ${(buffer.length / 1024).toFixed(2)}KB`);
+      console.log(`  URL: ${imageUrl}`);
+
+      return ack({ success: true, imageUrl });
+    } catch (err) {
+      console.error(
+        `[socket][image:upload] ❌ error in ${Date.now() - t0}ms`,
+        err
+      );
+      return ack({
+        success: false,
+        message: "Failed to upload image: " + (err?.message || "Unknown error"),
+      });
+    }
+  });
 }

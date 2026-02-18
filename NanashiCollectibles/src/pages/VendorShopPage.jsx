@@ -710,10 +710,10 @@ export default function VendorShopPage({
                       try {
                         setServerError("");
                         console.log("\n================================");
-                        console.log("🎬 IMAGE UPLOAD STARTED");
+                        console.log("🎬 IMAGE UPLOAD STARTED (via Socket.IO)");
                         console.log("================================");
 
-                        // ✅ Mobile fix: Don't rely on file.type, check by extension instead
+                        // Validate file
                         const fileName = file.name.toLowerCase();
                         const imageExtensions = [
                           ".jpg",
@@ -730,15 +730,13 @@ export default function VendorShopPage({
 
                         console.log("🔍 FILE VALIDATION:");
                         console.log("  Original name:", file.name);
-                        console.log("  Lowercase name:", fileName);
                         console.log("  Valid extension?", hasImageExt);
                         console.log("  MIME type:", file.type || "(empty)");
-                        console.log("  Valid MIME?", hasImageType);
                         console.log("  File size:", (file.size / 1024).toFixed(2), "KB");
 
                         if (!hasImageExt && !hasImageType) {
                           throw new Error(
-                            `Invalid file. Expected image but got: ${file.type || "unknown"} (${fileName})`,
+                            `Invalid file. Expected image but got: ${file.type || "unknown"}`,
                           );
                         }
 
@@ -746,75 +744,65 @@ export default function VendorShopPage({
                           throw new Error("Max image size is 5MB.");
                         }
 
-                        const fd = new FormData();
-                        fd.append("image", file);
+                        // Convert file to base64
+                        console.log("\n⏳ CONVERTING TO BASE64...");
+                        const base64Data = await new Promise((resolve, reject) => {
+                          const reader = new FileReader();
+                          reader.onload = () => {
+                            const result = reader.result;
+                            const base64 = result.split(",")[1]; // Remove data:image/... prefix
+                            resolve(base64);
+                          };
+                          reader.onerror = reject;
+                          reader.readAsDataURL(file);
+                        });
 
-                        // ✅ Use API_BASE for consistency across desktop/mobile
-                        const uploadUrl = `${API_BASE}/api/upload/product-image`;
-                        
-                        console.log("\n📤 UPLOAD CONFIGURATION:");
-                        console.log("  API_BASE:", API_BASE);
-                        console.log("  Upload URL:", uploadUrl);
-                        console.log("  Window hostname:", window.location.hostname);
-                        console.log("  Window origin:", window.location.origin);
+                        console.log(`✅ BASE64 READY (${(base64Data.length / 1024).toFixed(2)}KB)`);
 
-                        console.log("\n⏳ STARTING FETCH...");
+                        // Send via Socket.IO
+                        console.log("\n📤 SENDING VIA SOCKET.IO...");
                         const startTime = Date.now();
 
-                        let resp;
-                        try {
-                          resp = await fetch(uploadUrl, {
-                            method: "POST",
-                            body: fd,
-                            credentials: "include",
-                          });
-                          const elapsed = Date.now() - startTime;
-                          console.log(`✅ FETCH COMPLETED in ${elapsed}ms`);
-                        } catch (fetchErr) {
-                          const elapsed = Date.now() - startTime;
-                          console.error(`❌ FETCH FAILED after ${elapsed}ms:`, fetchErr);
-                          throw new Error(`Network error: ${fetchErr.message}`);
-                        }
-
-                        console.log("\n📥 SERVER RESPONSE:");
-                        console.log("  Status:", resp.status, resp.statusText);
-                        console.log("  OK?", resp.ok);
-                        console.log("  Content-Type:", resp.headers.get("content-type"));
-
-                        if (!resp.ok) {
-                          let errorText = "";
-                          try {
-                            errorText = await resp.text();
-                            console.error("  Error body:", errorText.substring(0, 200));
-                          } catch (e) {
-                            console.error("  Could not read error body");
+                        const result = await new Promise((resolve) => {
+                          const s = getSocket();
+                          if (!s?.connected) {
+                            return resolve({
+                              success: false,
+                              message: "Socket not connected",
+                            });
                           }
 
+                          s.emit(
+                            "image:upload",
+                            {
+                              currentUser: {
+                                id: currentUser.id,
+                                role: currentUser.role,
+                              },
+                              fileName: file.name,
+                              base64: base64Data,
+                            },
+                            (res) => resolve(res)
+                          );
+                        });
+
+                        const elapsed = Date.now() - startTime;
+                        console.log(`✅ SOCKET RESPONSE in ${elapsed}ms`);
+                        console.log("  Response:", result);
+
+                        if (!result?.success) {
                           throw new Error(
-                            `Upload failed (${resp.status}): ${resp.statusText}${errorText ? `. Server said: ${errorText.substring(0, 100)}` : ""}`,
+                            result?.message || "Upload failed on server"
                           );
                         }
 
-                        let json;
-                        try {
-                          json = await resp.json();
-                          console.log("  JSON response:", json);
-                        } catch (e) {
-                          console.error("  Failed to parse JSON response:", e.message);
-                          throw new Error("Server response was not valid JSON");
-                        }
-
-                        if (!json?.success) {
-                          throw new Error(json?.message || "Upload failed (server returned success: false)");
-                        }
-
                         console.log("\n✅ UPLOAD SUCCESS!");
-                        console.log("  Image URL:", json.imageUrl);
+                        console.log("  Image URL:", result.imageUrl);
                         console.log("================================\n");
 
                         setNewProduct((p) => ({
                           ...p,
-                          image_url: json.imageUrl,
+                          image_url: result.imageUrl,
                         }));
 
                         e.target.value = "";
