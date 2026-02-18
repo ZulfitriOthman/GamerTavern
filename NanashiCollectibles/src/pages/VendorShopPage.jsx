@@ -37,9 +37,21 @@ function asText(v) {
   return String(v);
 }
 
-const API_BASE =
-  (import.meta?.env?.VITE_API_BASE && String(import.meta.env.VITE_API_BASE)) ||
-  "http://localhost:3001";
+// ✅ Better API_BASE handling for mobile
+function getApiBase() {
+  const env = import.meta?.env?.VITE_API_BASE && String(import.meta.env.VITE_API_BASE);
+  if (env) return env;
+
+  // On mobile/different machine, localhost won't work
+  // Fall back to current origin to at least try the same host
+  if (typeof window !== "undefined" && window.location.hostname !== "localhost") {
+    return `http://${window.location.hostname}:3001`;
+  }
+
+  return "http://localhost:3001";
+}
+
+const API_BASE = getApiBase();
 
 // ✅ Resolve image URLs correctly for BOTH dev/prod
 function resolveImageSrc(url) {
@@ -193,14 +205,18 @@ export default function VendorShopPage({
       s.emit(event, payload, (res) => resolve(res));
     });
 
+  // ✅ UPDATED: Vendor sees only their products; Admin sees all
   const loadProducts = async () => {
     if (!currentUser?.id) return;
 
     setLoadingProducts(true);
     setServerError("");
 
+    const role = normalizeRole(currentUser?.role);
+
     const res = await emitAsync("product:list", {
-      // vendor/admin can list all; optionally: vendorId: currentUser.id
+      currentUser: { id: currentUser.id, role },
+      ...(role === ROLES.VENDOR ? { vendorId: currentUser.id } : {}),
     });
 
     setLoadingProducts(false);
@@ -348,6 +364,10 @@ export default function VendorShopPage({
 
     const payload = {
       currentUser: { id: currentUser.id, role: currentUser.role },
+
+      // ✅ UPDATED: link product to vendor owner
+      vendor_id: currentUser.id,
+
       name: toStr(newProduct.name),
       code: toStr(newProduct.code),
       conditional: toStr(newProduct.conditional),
@@ -682,6 +702,7 @@ export default function VendorShopPage({
                   <input
                     type="file"
                     accept="image/*"
+                    capture="environment"
                     onChange={async (e) => {
                       const file = e.target.files?.[0];
                       if (!file) return;
@@ -689,9 +710,26 @@ export default function VendorShopPage({
                       try {
                         setServerError("");
 
-                        if (!file.type.startsWith("image/")) {
-                          throw new Error("Please select an image file.");
+                        // ✅ Mobile fix: Don't rely on file.type, check by extension instead
+                        const fileName = file.name.toLowerCase();
+                        const imageExtensions = [
+                          ".jpg",
+                          ".jpeg",
+                          ".png",
+                          ".gif",
+                          ".webp",
+                          ".bmp",
+                        ];
+                        const hasImageExt = imageExtensions.some((ext) =>
+                          fileName.endsWith(ext),
+                        );
+                        const hasImageType =
+                          file.type && file.type.startsWith("image/");
+
+                        if (!hasImageExt && !hasImageType) {
+                          throw new Error("Please select a valid image file.");
                         }
+
                         if (file.size > 5 * 1024 * 1024) {
                           throw new Error("Max image size is 5MB.");
                         }
@@ -699,18 +737,32 @@ export default function VendorShopPage({
                         const fd = new FormData();
                         fd.append("image", file);
 
-                        const resp = await fetch(
-                          `${API_BASE}/api/upload/product-image`,
-                          {
-                            method: "POST",
-                            body: fd,
-                            credentials: "include",
-                          },
-                        );
+                        // ✅ Use API_BASE for consistency across desktop/mobile
+                        const uploadUrl = `${API_BASE}/api/upload/product-image`;
+                        
+                        console.log("📤 Uploading to:", uploadUrl);
+                        console.log("📁 File:", file.name, `(${(file.size / 1024).toFixed(2)}KB)`);
+
+                        const resp = await fetch(uploadUrl, {
+                          method: "POST",
+                          body: fd,
+                          credentials: "include",
+                        });
+
+                        console.log("✅ Response status:", resp.status, resp.statusText);
+
+                        if (!resp.ok) {
+                          const errorText = await resp.text();
+                          console.error("❌ Upload error response:", errorText);
+                          throw new Error(
+                            `Upload failed (${resp.status}): ${resp.statusText}. Check console for details.`,
+                          );
+                        }
 
                         const json = await resp.json();
+                        console.log("📦 Server response:", json);
 
-                        if (!resp.ok || !json?.success) {
+                        if (!json?.success) {
                           throw new Error(json?.message || "Upload failed");
                         }
 
@@ -996,7 +1048,7 @@ export default function VendorShopPage({
                     <span className="text-emerald-200/70">➜</span>
                   </button>
 
-                  {/* ✅ Vendor-only Manage Inventory (FIXED: single details, upgraded restock/reduce) */}
+                  {/* ✅ Vendor-only Manage Inventory */}
                   {isVendor ? (
                     <details className="group mt-1 rounded-2xl border border-emerald-900/40 bg-slate-950/35">
                       <summary className="flex cursor-pointer list-none items-center justify-between px-3 py-3">
@@ -1015,7 +1067,6 @@ export default function VendorShopPage({
                       </summary>
 
                       <div className="px-3 pb-3">
-                        {/* ✅ Qty + Actions (2x2 layout) */}
                         <div className="rounded-xl border border-emerald-900/40 bg-slate-950/35 p-3">
                           <div className="mb-2 flex items-center justify-between">
                             <span className="font-serif text-[10px] uppercase tracking-[0.2em] text-emerald-200/70">
@@ -1028,7 +1079,6 @@ export default function VendorShopPage({
                           </div>
 
                           <div className="grid grid-cols-2 gap-2">
-                            {/* Qty input (full width) */}
                             <div className="col-span-2">
                               <input
                                 type="number"
@@ -1045,7 +1095,6 @@ export default function VendorShopPage({
                               />
                             </div>
 
-                            {/* Restock */}
                             <button
                               type="button"
                               onClick={() =>
@@ -1068,7 +1117,6 @@ export default function VendorShopPage({
                               </span>
                             </button>
 
-                            {/* Reduce */}
                             <button
                               type="button"
                               onClick={() =>
@@ -1093,7 +1141,6 @@ export default function VendorShopPage({
                               </span>
                             </button>
 
-                            {/* Set exact (full width) */}
                             <button
                               type="button"
                               onClick={() =>
@@ -1118,7 +1165,6 @@ export default function VendorShopPage({
                           </div>
                         </div>
 
-                        {/* Quick actions (cleaned) */}
                         <div className="mt-3 grid grid-cols-1 gap-2">
                           <button
                             type="button"
@@ -1130,7 +1176,6 @@ export default function VendorShopPage({
                           </button>
                         </div>
 
-                        {/* Listing CTA */}
                         <button
                           type="button"
                           onClick={() =>

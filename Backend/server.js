@@ -53,8 +53,13 @@ const storage = multer.diskStorage({
 });
 
 // Optional: only allow images
+// ✅ Mobile fix: Check both MIME type AND file extension (MIME type may be empty on mobile)
 const fileFilter = (_req, file, cb) => {
-  const ok = /^image\/(png|jpeg|jpg|webp|gif)$/i.test(file.mimetype || "");
+  const mimeOk = /^image\/(png|jpeg|jpg|webp|gif)$/i.test(file.mimetype || "");
+  const fileName = (file.originalname || "").toLowerCase();
+  const extOk = /\.(jpg|jpeg|png|gif|webp)$/i.test(fileName);
+  
+  const ok = mimeOk || extOk; // Accept if either MIME type OR extension is valid
   cb(ok ? null : new Error("Only image files are allowed."), ok);
 };
 
