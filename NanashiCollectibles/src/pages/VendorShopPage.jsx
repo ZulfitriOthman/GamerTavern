@@ -709,6 +709,9 @@ export default function VendorShopPage({
 
                       try {
                         setServerError("");
+                        console.log("\n================================");
+                        console.log("🎬 IMAGE UPLOAD STARTED");
+                        console.log("================================");
 
                         // ✅ Mobile fix: Don't rely on file.type, check by extension instead
                         const fileName = file.name.toLowerCase();
@@ -718,7 +721,6 @@ export default function VendorShopPage({
                           ".png",
                           ".gif",
                           ".webp",
-                          ".bmp",
                         ];
                         const hasImageExt = imageExtensions.some((ext) =>
                           fileName.endsWith(ext),
@@ -726,8 +728,18 @@ export default function VendorShopPage({
                         const hasImageType =
                           file.type && file.type.startsWith("image/");
 
+                        console.log("🔍 FILE VALIDATION:");
+                        console.log("  Original name:", file.name);
+                        console.log("  Lowercase name:", fileName);
+                        console.log("  Valid extension?", hasImageExt);
+                        console.log("  MIME type:", file.type || "(empty)");
+                        console.log("  Valid MIME?", hasImageType);
+                        console.log("  File size:", (file.size / 1024).toFixed(2), "KB");
+
                         if (!hasImageExt && !hasImageType) {
-                          throw new Error("Please select a valid image file.");
+                          throw new Error(
+                            `Invalid file. Expected image but got: ${file.type || "unknown"} (${fileName})`,
+                          );
                         }
 
                         if (file.size > 5 * 1024 * 1024) {
@@ -740,31 +752,65 @@ export default function VendorShopPage({
                         // ✅ Use API_BASE for consistency across desktop/mobile
                         const uploadUrl = `${API_BASE}/api/upload/product-image`;
                         
-                        console.log("📤 Uploading to:", uploadUrl);
-                        console.log("📁 File:", file.name, `(${(file.size / 1024).toFixed(2)}KB)`);
+                        console.log("\n📤 UPLOAD CONFIGURATION:");
+                        console.log("  API_BASE:", API_BASE);
+                        console.log("  Upload URL:", uploadUrl);
+                        console.log("  Window hostname:", window.location.hostname);
+                        console.log("  Window origin:", window.location.origin);
 
-                        const resp = await fetch(uploadUrl, {
-                          method: "POST",
-                          body: fd,
-                          credentials: "include",
-                        });
+                        console.log("\n⏳ STARTING FETCH...");
+                        const startTime = Date.now();
 
-                        console.log("✅ Response status:", resp.status, resp.statusText);
+                        let resp;
+                        try {
+                          resp = await fetch(uploadUrl, {
+                            method: "POST",
+                            body: fd,
+                            credentials: "include",
+                          });
+                          const elapsed = Date.now() - startTime;
+                          console.log(`✅ FETCH COMPLETED in ${elapsed}ms`);
+                        } catch (fetchErr) {
+                          const elapsed = Date.now() - startTime;
+                          console.error(`❌ FETCH FAILED after ${elapsed}ms:`, fetchErr);
+                          throw new Error(`Network error: ${fetchErr.message}`);
+                        }
+
+                        console.log("\n📥 SERVER RESPONSE:");
+                        console.log("  Status:", resp.status, resp.statusText);
+                        console.log("  OK?", resp.ok);
+                        console.log("  Content-Type:", resp.headers.get("content-type"));
 
                         if (!resp.ok) {
-                          const errorText = await resp.text();
-                          console.error("❌ Upload error response:", errorText);
+                          let errorText = "";
+                          try {
+                            errorText = await resp.text();
+                            console.error("  Error body:", errorText.substring(0, 200));
+                          } catch (e) {
+                            console.error("  Could not read error body");
+                          }
+
                           throw new Error(
-                            `Upload failed (${resp.status}): ${resp.statusText}. Check console for details.`,
+                            `Upload failed (${resp.status}): ${resp.statusText}${errorText ? `. Server said: ${errorText.substring(0, 100)}` : ""}`,
                           );
                         }
 
-                        const json = await resp.json();
-                        console.log("📦 Server response:", json);
+                        let json;
+                        try {
+                          json = await resp.json();
+                          console.log("  JSON response:", json);
+                        } catch (e) {
+                          console.error("  Failed to parse JSON response:", e.message);
+                          throw new Error("Server response was not valid JSON");
+                        }
 
                         if (!json?.success) {
-                          throw new Error(json?.message || "Upload failed");
+                          throw new Error(json?.message || "Upload failed (server returned success: false)");
                         }
+
+                        console.log("\n✅ UPLOAD SUCCESS!");
+                        console.log("  Image URL:", json.imageUrl);
+                        console.log("================================\n");
 
                         setNewProduct((p) => ({
                           ...p,
@@ -773,6 +819,9 @@ export default function VendorShopPage({
 
                         e.target.value = "";
                       } catch (err) {
+                        console.error("\n❌ ================================");
+                        console.error("ERROR:", err?.message);
+                        console.error("================================\n");
                         setServerError(
                           err?.message || "Failed to upload image.",
                         );

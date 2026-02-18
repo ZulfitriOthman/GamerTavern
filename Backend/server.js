@@ -59,7 +59,15 @@ const fileFilter = (_req, file, cb) => {
   const fileName = (file.originalname || "").toLowerCase();
   const extOk = /\.(jpg|jpeg|png|gif|webp)$/i.test(fileName);
   
-  const ok = mimeOk || extOk; // Accept if either MIME type OR extension is valid
+  const ok = mimeOk || extOk;
+  
+  console.log(`[multer] File validation:
+    - Original filename: ${file.originalname}
+    - MIME type: ${file.mimetype || "(empty)"}
+    - MIME OK: ${mimeOk}
+    - Extension OK: ${extOk}
+    - Overall OK: ${ok}`);
+  
   cb(ok ? null : new Error("Only image files are allowed."), ok);
 };
 
@@ -170,11 +178,21 @@ app.get("/api/db-test", async (_req, res) => {
 
 /* ------------------------------ Upload Route ------------------------------ */
 app.post("/api/upload/product-image", upload.single("image"), (req, res) => {
+  console.log(`[upload] Request received:
+    - File received: ${req.file ? "YES" : "NO"}
+    - Field name: ${req.file?.fieldname}
+    - Filename: ${req.file?.filename}
+    - Original: ${req.file?.originalname}
+    - MIME: ${req.file?.mimetype}
+    - Size: ${req.file?.size} bytes`);
+
   if (!req.file) {
+    console.log("[upload] ❌ No file attached");
     return res.status(400).json({ success: false, message: "No file uploaded" });
   }
 
   const imageUrl = `/public/uploads/products/${req.file.filename}`;
+  console.log("[upload] ✅ Upload successful:", imageUrl);
   return res.json({ success: true, imageUrl });
 });
 
