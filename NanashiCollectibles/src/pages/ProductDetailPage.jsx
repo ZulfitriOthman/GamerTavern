@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { getSocket, connectSocket } from "../socket/socketClient";
 import { getCurrentUser, getUsername } from "../authStorage";
+import { TCG_LIST } from "../data/products";
 
 const PLACEHOLDER = "/placeholder.png";
 
@@ -19,8 +20,7 @@ function asText(v) {
   if (v?.type === "Buffer" && Array.isArray(v?.data)) {
     return new TextDecoder().decode(new Uint8Array(v.data));
   }
-  if (v instanceof ArrayBuffer)
-    return new TextDecoder().decode(new Uint8Array(v));
+  if (v instanceof ArrayBuffer) return new TextDecoder().decode(new Uint8Array(v));
   if (v instanceof Uint8Array) return new TextDecoder().decode(v);
   if (Buffer.isBuffer?.(v)) return v.toString("utf8");
   return String(v);
@@ -62,6 +62,8 @@ function resolveImageSrc(url) {
   return PLACEHOLDER;
 }
 
+const tcgNameById = (id) => TCG_LIST.find((t) => t.id === id)?.name || id;
+
 export default function ProductDetailPage({ addToCart }) {
   const { id } = useParams(); // product id from URL
   const navigate = useNavigate();
@@ -93,8 +95,7 @@ export default function ProductDetailPage({ addToCart }) {
   // Ensure socket
   useEffect(() => {
     const username =
-      getUsername() ||
-      (currentUser?.name ? String(currentUser.name) : null);
+      getUsername() || (currentUser?.name ? String(currentUser.name) : null);
 
     connectSocket(username);
   }, [currentUser?.name]);
@@ -135,7 +136,6 @@ export default function ProductDetailPage({ addToCart }) {
     // ✅ reuse list (no backend changes)
     const res = await emitAsync("product:list", {
       currentUser: { id: currentUser.id, role: currentUser.role },
-      // If vendor role, your backend already supports vendorId filter (based on your VendorShopPage)
       ...(String(currentUser?.role || "").toUpperCase() === "VENDOR"
         ? { vendorId: currentUser.id }
         : {}),
@@ -168,6 +168,7 @@ export default function ProductDetailPage({ addToCart }) {
       stock: toInt(r.stock_quantity ?? r.STOCK_QUANTITY),
       image_url: asText(r.image_url ?? r.IMAGE_URL),
       description: asText(r.description ?? r.DESCRIPTION),
+      category: toStr(r.category ?? r.CATEGORY), // ✅ CATEGORY = TCG
       created_at:
         r?.created_at || r?.CREATED_AT
           ? new Date(r.created_at || r.CREATED_AT)
@@ -252,6 +253,12 @@ export default function ProductDetailPage({ addToCart }) {
             </div>
 
             <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+              {product.category ? (
+                <span className="rounded-full border border-amber-600/40 bg-amber-950/15 px-2 py-0.5 font-serif text-amber-200/90">
+                  TCG: {tcgNameById(product.category)}
+                </span>
+              ) : null}
+
               <span className="rounded-full border border-emerald-900/40 bg-slate-950/60 px-2 py-0.5 font-serif text-emerald-200/80">
                 Code: {product.code || "-"}
               </span>

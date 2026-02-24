@@ -86,22 +86,6 @@ function resolveImageSrc(url) {
   return PLACEHOLDER;
 }
 
-// Category helper: supports future DB column, otherwise fallback
-function deriveCategory(row) {
-  const direct =
-    toStr(row?.category) ||
-    toStr(row?.CATEGORY) ||
-    toStr(row?.product_category) ||
-    toStr(row?.PRODUCT_CATEGORY);
-
-  if (direct) return direct;
-
-  const code = toStr(row?.code || row?.CODE);
-  if (code.includes("-")) return code.split("-")[0].toUpperCase();
-
-  return "Uncategorized";
-}
-
 // Date filter buckets
 const DATE_FILTER = {
   ALL: "ALL",
@@ -158,16 +142,13 @@ export default function VendorShopPage({
     stock_quantity: 0,
     image_url: "",
     description: "",
-    tcg: "mtg", // UI only; DB has no tcg column
+    category: "mtg", // ✅ CATEGORY = TCG id/name
   });
 
-  // ✅ Manage Inventory UI state (per product)
-  const [stockInput, setStockInput] = useState({}); // { [productId]: string }
+  // Manage Inventory UI state (per product)
+  const [stockInput, setStockInput] = useState({});
   const getQty = (productId) => toInt(stockInput[productId], 0);
 
-  const [expanded, setExpanded] = useState({}); // { [productId]: boolean }
-  const isExpanded = (id) => !!expanded[id];
-  const toggleExpanded = (id) => setExpanded((m) => ({ ...m, [id]: !m[id] }));
   // ----------------------------
   // Guard: must be logged in AND vendor/admin
   // ----------------------------
@@ -204,7 +185,7 @@ export default function VendorShopPage({
 
   const activeTcg = useMemo(
     () => TCG_LIST.find((t) => t.id === selectedTcg),
-    [selectedTcg],
+    [selectedTcg]
   );
 
   const handleSelectTcg = (id) => {
@@ -223,7 +204,7 @@ export default function VendorShopPage({
       s.emit(event, payload, (res) => resolve(res));
     });
 
-  // ✅ UPDATED: Vendor sees only their products; Admin sees all
+  // Vendor sees only their products; Admin sees all
   const loadProducts = async () => {
     if (!currentUser?.id) return;
 
@@ -257,13 +238,7 @@ export default function VendorShopPage({
         stock: toInt(r.stock_quantity ?? r.STOCK_QUANTITY),
         image_url: asText(r.image_url ?? r.IMAGE_URL),
         description: asText(r.description ?? r.DESCRIPTION),
-        category: deriveCategory({
-          category: r.category,
-          CATEGORY: r.CATEGORY,
-          product_category: r.product_category,
-          PRODUCT_CATEGORY: r.PRODUCT_CATEGORY,
-          code: r.code ?? r.CODE,
-        }),
+        category: toStr(r.category ?? r.CATEGORY) || "Uncategorized", // ✅ CATEGORY from DB
         created_at: createdAt ? new Date(createdAt) : null,
       };
     });
@@ -271,7 +246,7 @@ export default function VendorShopPage({
     setProducts(mapped);
   };
 
-  // ✅ Ensure socket exists (handles refresh timing)
+  // Ensure socket exists (handles refresh timing)
   useEffect(() => {
     if (didInitSocketRef.current) return;
     didInitSocketRef.current = true;
@@ -283,14 +258,14 @@ export default function VendorShopPage({
     connectSocket(username);
   }, [currentUser?.name]);
 
-  // ✅ Listen for connect/disconnect and load only after connect
+  // Listen for connect/disconnect and load only after connect
   useEffect(() => {
     const s = getSocket();
     if (!s) return;
 
     const onConnect = () => {
       setIsSocketConnected(true);
-      setServerError(""); // clear stale "Socket not connected"
+      setServerError("");
       loadProducts();
     };
 
@@ -301,14 +276,12 @@ export default function VendorShopPage({
     s.on("connect", onConnect);
     s.on("disconnect", onDisconnect);
 
-    // initial status
     setIsSocketConnected(!!s.connected);
     if (s.connected) {
       setServerError("");
       loadProducts();
     }
 
-    // realtime updates
     const onCreated = () => loadProducts();
     const onUpdated = () => loadProducts();
     const onDeleted = () => loadProducts();
@@ -370,9 +343,6 @@ export default function VendorShopPage({
     return applyDeltaStock(productId, delta);
   };
 
-  const adjustStock = async (productId, delta) =>
-    applyDeltaStock(productId, delta);
-
   // ----------------------------
   // Product actions
   // ----------------------------
@@ -382,10 +352,7 @@ export default function VendorShopPage({
 
     const payload = {
       currentUser: { id: currentUser.id, role: currentUser.role },
-
-      // ✅ UPDATED: link product to vendor owner
       vendor_id: currentUser.id,
-
       name: toStr(newProduct.name),
       code: toStr(newProduct.code),
       conditional: toStr(newProduct.conditional),
@@ -393,7 +360,7 @@ export default function VendorShopPage({
       stock_quantity: toInt(newProduct.stock_quantity),
       image_url: toStr(newProduct.image_url),
       description: toStr(newProduct.description),
-      // category / tcg not in DB yet (optional later)
+      category: toStr(newProduct.category), // ✅ CATEGORY = TCG
     };
 
     if (!payload.name || !payload.code) {
@@ -418,7 +385,7 @@ export default function VendorShopPage({
       stock_quantity: 0,
       image_url: "",
       description: "",
-      tcg: "mtg",
+      category: selectedTcg || "mtg",
     });
 
     loadProducts();
@@ -454,18 +421,13 @@ export default function VendorShopPage({
     const q = search.trim().toLowerCase();
 
     const now = new Date();
-    const startOfToday = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-    );
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     const passDate = (p) => {
       if (dateFilter === DATE_FILTER.ALL) return true;
       if (!p.created_at) return true;
 
       const t = p.created_at.getTime();
-
       if (dateFilter === DATE_FILTER.TODAY) return t >= startOfToday.getTime();
 
       const days = dateFilter === DATE_FILTER.DAYS_7 ? 7 : 30;
@@ -474,6 +436,7 @@ export default function VendorShopPage({
     };
 
     const list = products
+      .filter((p) => (selectedTcg ? toStr(p.category) === toStr(selectedTcg) : true))
       .filter((p) => passDate(p))
       .filter((p) => {
         if (categoryFilter === "ALL") return true;
@@ -493,11 +456,9 @@ export default function VendorShopPage({
       const bt = b.created_at ? b.created_at.getTime() : 0;
       return bt - at;
     };
-
     const byName = (a, b) => a.name.localeCompare(b.name);
     const byPrice = (a, b) => a.price - b.price;
-    const byCategory = (a, b) =>
-      (a.category || "").localeCompare(b.category || "");
+    const byCategory = (a, b) => (a.category || "").localeCompare(b.category || "");
 
     const sorted = [...list];
     switch (sortMode) {
@@ -526,65 +487,22 @@ export default function VendorShopPage({
     }
 
     return sorted;
-  }, [products, search, categoryFilter, dateFilter, sortMode]);
+  }, [products, selectedTcg, search, categoryFilter, dateFilter, sortMode]);
 
   if (!currentUser) return null;
 
   const isVendor =
     currentUser?.role === ROLES.VENDOR || currentUser?.role === ROLES.ADMIN;
 
+  const tcgNameById = (id) => TCG_LIST.find((t) => t.id === id)?.name || id;
+
   return (
     <div className="relative flex flex-col gap-6 md:flex-row">
-      <div className="pointer-events-none absolute -left-32 top-10 h-64 w-64 rounded-full bg-emerald-900/25 blur-3xl" />
+      {/* ✅ Match User theme glows */}
+      <div className="pointer-events-none absolute -left-32 top-10 h-64 w-64 rounded-full bg-purple-900/30 blur-3xl" />
       <div className="pointer-events-none absolute -right-40 bottom-0 h-72 w-72 rounded-full bg-amber-800/25 blur-3xl" />
 
       <section className="relative z-10 flex-1 space-y-6">
-        {/* Role banner */}
-        <div className="overflow-hidden rounded-2xl border border-emerald-900/40 bg-gradient-to-br from-slate-950 via-emerald-950/20 to-slate-950 p-4 shadow-lg shadow-emerald-900/20">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="font-serif text-xs text-emerald-100/70">
-                Logged in as{" "}
-                <span className="font-semibold text-emerald-200">
-                  {currentUser?.name}
-                </span>
-              </p>
-              <p className="font-serif text-[11px] uppercase tracking-[0.25em] text-emerald-400">
-                ROLE: {currentUser?.role}
-              </p>
-              <p className="font-serif text-[10px] text-emerald-100/50 mt-1">
-                🔧 Backend: {API_BASE}
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className="rounded-full border border-emerald-600/40 bg-emerald-950/30 px-3 py-1 font-serif text-[10px] uppercase tracking-wide text-emerald-200">
-                Vendor Mode
-              </span>
-
-              <span
-                className={[
-                  "rounded-full border px-3 py-1 font-serif text-[10px] uppercase tracking-wide",
-                  isSocketConnected
-                    ? "border-emerald-600/40 bg-emerald-950/30 text-emerald-200"
-                    : "border-rose-600/40 bg-rose-950/30 text-rose-200",
-                ].join(" ")}
-                title="Socket connection status"
-              >
-                {isSocketConnected ? "Live" : "Offline"}
-              </span>
-
-              <button
-                type="button"
-                onClick={loadProducts}
-                className="rounded-full border border-emerald-700/40 bg-emerald-950/20 px-3 py-1 font-serif text-[10px] uppercase tracking-wide text-emerald-200 hover:border-emerald-500"
-              >
-                Refresh
-              </button>
-            </div>
-          </div>
-        </div>
-
         {/* Errors */}
         {serverError ? (
           <div className="rounded-xl border border-rose-500/30 bg-rose-950/30 px-4 py-3 text-sm text-rose-200">
@@ -592,22 +510,25 @@ export default function VendorShopPage({
           </div>
         ) : null}
 
-        {/* Vendor Console */}
-        <div className="rounded-2xl border border-emerald-900/40 bg-gradient-to-br from-slate-950 via-emerald-950/20 to-slate-950 p-5 shadow-lg shadow-emerald-900/20">
+        {/* ✅ Vendor Console (Arcane theme) */}
+        <div className="rounded-2xl border border-amber-900/40 bg-gradient-to-br from-slate-950 via-purple-950/45 to-slate-950 p-5 shadow-lg shadow-purple-900/20">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h3 className="font-serif text-base font-bold text-emerald-100">
+              <h3 className="font-serif text-base font-bold text-amber-100">
                 Vendor Console
               </h3>
-              <p className="mt-1 font-serif text-[11px] italic text-emerald-100/70">
+              <p className="mt-1 font-serif text-[11px] italic text-amber-200/70">
                 Create listings, manage stock, and sell items.
               </p>
             </div>
 
             <button
               type="button"
-              onClick={() => setShowAdd(true)}
-              className="rounded-xl border border-emerald-500/50 bg-gradient-to-r from-emerald-950/40 to-slate-950 px-4 py-2 font-serif text-xs font-semibold text-emerald-100 hover:border-emerald-400"
+              onClick={() => {
+                setNewProduct((p) => ({ ...p, category: selectedTcg || p.category }));
+                setShowAdd(true);
+              }}
+              className="rounded-xl border border-amber-500/50 bg-gradient-to-r from-amber-950/40 to-slate-950 px-4 py-2 font-serif text-xs font-semibold text-amber-100 hover:border-amber-400"
             >
               + Add Product
             </button>
@@ -617,16 +538,16 @@ export default function VendorShopPage({
           {showAdd ? (
             <form
               onSubmit={submitAddProduct}
-              className="mt-4 rounded-2xl border border-emerald-700/30 bg-slate-950/40 p-4"
+              className="mt-4 rounded-2xl border border-amber-700/30 bg-slate-950/40 p-4"
             >
               <div className="mb-3 flex items-center justify-between">
-                <p className="font-serif text-sm font-semibold text-emerald-100">
+                <p className="font-serif text-sm font-semibold text-amber-100">
                   New Product
                 </p>
                 <button
                   type="button"
                   onClick={() => setShowAdd(false)}
-                  className="font-serif text-xs text-emerald-200/70 hover:text-emerald-200"
+                  className="font-serif text-xs text-amber-200/70 hover:text-amber-200"
                 >
                   Close ✕
                 </button>
@@ -634,7 +555,7 @@ export default function VendorShopPage({
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
-                  <label className="mb-1 block font-serif text-xs text-emerald-100/80">
+                  <label className="mb-1 block font-serif text-xs text-amber-100/80">
                     Name
                   </label>
                   <input
@@ -642,13 +563,32 @@ export default function VendorShopPage({
                     onChange={(e) =>
                       setNewProduct((p) => ({ ...p, name: e.target.value }))
                     }
-                    className="w-full rounded-lg border border-emerald-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-emerald-50"
+                    className="w-full rounded-lg border border-amber-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-amber-50"
                     placeholder="e.g. MTG Booster Pack"
                   />
                 </div>
 
                 <div>
-                  <label className="mb-1 block font-serif text-xs text-emerald-100/80">
+                  <label className="mb-1 block font-serif text-xs text-amber-100/80">
+                    TCG Name (CATEGORY)
+                  </label>
+                  <select
+                    value={newProduct.category}
+                    onChange={(e) =>
+                      setNewProduct((p) => ({ ...p, category: e.target.value }))
+                    }
+                    className="w-full rounded-lg border border-amber-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-amber-50"
+                  >
+                    {TCG_LIST.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block font-serif text-xs text-amber-100/80">
                     Code
                   </label>
                   <input
@@ -656,13 +596,13 @@ export default function VendorShopPage({
                     onChange={(e) =>
                       setNewProduct((p) => ({ ...p, code: e.target.value }))
                     }
-                    className="w-full rounded-lg border border-emerald-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-emerald-50"
+                    className="w-full rounded-lg border border-amber-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-amber-50"
                     placeholder="e.g. MTG-BST-001"
                   />
                 </div>
 
                 <div>
-                  <label className="mb-1 block font-serif text-xs text-emerald-100/80">
+                  <label className="mb-1 block font-serif text-xs text-amber-100/80">
                     Condition
                   </label>
                   <select
@@ -673,7 +613,7 @@ export default function VendorShopPage({
                         conditional: e.target.value,
                       }))
                     }
-                    className="w-full rounded-lg border border-emerald-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-emerald-50"
+                    className="w-full rounded-lg border border-amber-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-amber-50"
                   >
                     <option value="NEW">NEW</option>
                     <option value="USED">USED</option>
@@ -683,7 +623,7 @@ export default function VendorShopPage({
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="mb-1 block font-serif text-xs text-emerald-100/80">
+                    <label className="mb-1 block font-serif text-xs text-amber-100/80">
                       Price (BND)
                     </label>
                     <input
@@ -692,12 +632,12 @@ export default function VendorShopPage({
                       onChange={(e) =>
                         setNewProduct((p) => ({ ...p, price: e.target.value }))
                       }
-                      className="w-full rounded-lg border border-emerald-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-emerald-50"
+                      className="w-full rounded-lg border border-amber-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-amber-50"
                     />
                   </div>
 
                   <div>
-                    <label className="mb-1 block font-serif text-xs text-emerald-100/80">
+                    <label className="mb-1 block font-serif text-xs text-amber-100/80">
                       Stock Qty
                     </label>
                     <input
@@ -709,14 +649,14 @@ export default function VendorShopPage({
                           stock_quantity: e.target.value,
                         }))
                       }
-                      className="w-full rounded-lg border border-emerald-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-emerald-50"
+                      className="w-full rounded-lg border border-amber-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-amber-50"
                     />
                   </div>
                 </div>
 
-                {/* Image upload */}
+                {/* Image upload (logic unchanged) */}
                 <div className="sm:col-span-2">
-                  <label className="mb-1 block font-serif text-xs text-emerald-100/80">
+                  <label className="mb-1 block font-serif text-xs text-amber-100/80">
                     Product Image
                   </label>
 
@@ -730,38 +670,17 @@ export default function VendorShopPage({
 
                       try {
                         setServerError("");
-                        console.log("\n================================");
-                        console.log("🎬 IMAGE UPLOAD STARTED (via Socket.IO)");
-                        console.log("================================");
 
-                        // Validate file
                         const fileName = file.name.toLowerCase();
-                        const imageExtensions = [
-                          ".jpg",
-                          ".jpeg",
-                          ".png",
-                          ".gif",
-                          ".webp",
-                        ];
+                        const imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
                         const hasImageExt = imageExtensions.some((ext) =>
-                          fileName.endsWith(ext),
+                          fileName.endsWith(ext)
                         );
-                        const hasImageType =
-                          file.type && file.type.startsWith("image/");
-
-                        console.log("🔍 FILE VALIDATION:");
-                        console.log("  Original name:", file.name);
-                        console.log("  Valid extension?", hasImageExt);
-                        console.log("  MIME type:", file.type || "(empty)");
-                        console.log(
-                          "  File size:",
-                          (file.size / 1024).toFixed(2),
-                          "KB",
-                        );
+                        const hasImageType = file.type && file.type.startsWith("image/");
 
                         if (!hasImageExt && !hasImageType) {
                           throw new Error(
-                            `Invalid file. Expected image but got: ${file.type || "unknown"}`,
+                            `Invalid file. Expected image but got: ${file.type || "unknown"}`
                           );
                         }
 
@@ -769,28 +688,16 @@ export default function VendorShopPage({
                           throw new Error("Max image size is 5MB.");
                         }
 
-                        // Convert file to base64
-                        console.log("\n⏳ CONVERTING TO BASE64...");
-                        const base64Data = await new Promise(
-                          (resolve, reject) => {
-                            const reader = new FileReader();
-                            reader.onload = () => {
-                              const result = reader.result;
-                              const base64 = result.split(",")[1]; // Remove data:image/... prefix
-                              resolve(base64);
-                            };
-                            reader.onerror = reject;
-                            reader.readAsDataURL(file);
-                          },
-                        );
-
-                        console.log(
-                          `✅ BASE64 READY (${(base64Data.length / 1024).toFixed(2)}KB)`,
-                        );
-
-                        // Send via Socket.IO
-                        console.log("\n📤 SENDING VIA SOCKET.IO...");
-                        const startTime = Date.now();
+                        const base64Data = await new Promise((resolve, reject) => {
+                          const reader = new FileReader();
+                          reader.onload = () => {
+                            const result = reader.result;
+                            const base64 = String(result).split(",")[1];
+                            resolve(base64);
+                          };
+                          reader.onerror = reject;
+                          reader.readAsDataURL(file);
+                        });
 
                         const result = await new Promise((resolve) => {
                           const s = getSocket();
@@ -804,30 +711,17 @@ export default function VendorShopPage({
                           s.emit(
                             "image:upload",
                             {
-                              currentUser: {
-                                id: currentUser.id,
-                                role: currentUser.role,
-                              },
+                              currentUser: { id: currentUser.id, role: currentUser.role },
                               fileName: file.name,
                               base64: base64Data,
                             },
-                            (res) => resolve(res),
+                            (res) => resolve(res)
                           );
                         });
 
-                        const elapsed = Date.now() - startTime;
-                        console.log(`✅ SOCKET RESPONSE in ${elapsed}ms`);
-                        console.log("  Response:", result);
-
                         if (!result?.success) {
-                          throw new Error(
-                            result?.message || "Upload failed on server",
-                          );
+                          throw new Error(result?.message || "Upload failed on server");
                         }
-
-                        console.log("\n✅ UPLOAD SUCCESS!");
-                        console.log("  Image URL:", result.imageUrl);
-                        console.log("================================\n");
 
                         setNewProduct((p) => ({
                           ...p,
@@ -836,15 +730,10 @@ export default function VendorShopPage({
 
                         e.target.value = "";
                       } catch (err) {
-                        console.error("\n❌ ================================");
-                        console.error("ERROR:", err?.message);
-                        console.error("================================\n");
-                        setServerError(
-                          err?.message || "Failed to upload image.",
-                        );
+                        setServerError(err?.message || "Failed to upload image.");
                       }
                     }}
-                    className="w-full rounded-lg border border-emerald-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-emerald-50"
+                    className="w-full rounded-lg border border-amber-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-amber-50"
                   />
 
                   {newProduct.image_url ? (
@@ -852,10 +741,10 @@ export default function VendorShopPage({
                       <img
                         src={resolveImageSrc(newProduct.image_url)}
                         alt="Preview"
-                        className="h-14 w-14 rounded-lg object-cover border border-emerald-900/40"
+                        className="h-14 w-14 rounded-lg object-cover border border-amber-900/40"
                         onError={(e) => (e.currentTarget.src = PLACEHOLDER)}
                       />
-                      <span className="font-serif text-[11px] text-emerald-200/70">
+                      <span className="font-serif text-[11px] text-amber-200/70">
                         Saved: {newProduct.image_url}
                       </span>
                     </div>
@@ -863,18 +752,15 @@ export default function VendorShopPage({
                 </div>
 
                 <div className="sm:col-span-2">
-                  <label className="mb-1 block font-serif text-xs text-emerald-100/80">
+                  <label className="mb-1 block font-serif text-xs text-amber-100/80">
                     Description
                   </label>
                   <textarea
                     value={newProduct.description}
                     onChange={(e) =>
-                      setNewProduct((p) => ({
-                        ...p,
-                        description: e.target.value,
-                      }))
+                      setNewProduct((p) => ({ ...p, description: e.target.value }))
                     }
-                    className="min-h-[90px] w-full rounded-lg border border-emerald-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-emerald-50"
+                    className="min-h-[90px] w-full rounded-lg border border-amber-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-amber-50"
                     placeholder="Short description..."
                   />
                 </div>
@@ -884,13 +770,13 @@ export default function VendorShopPage({
                 <button
                   type="button"
                   onClick={() => setShowAdd(false)}
-                  className="rounded-xl border border-emerald-900/40 bg-slate-950/50 px-4 py-2 font-serif text-xs text-emerald-100/80 hover:border-emerald-400"
+                  className="rounded-xl border border-amber-900/40 bg-slate-950/50 px-4 py-2 font-serif text-xs text-amber-100/80 hover:border-amber-400"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="rounded-xl border border-emerald-500/50 bg-gradient-to-r from-emerald-950/40 to-slate-950 px-4 py-2 font-serif text-xs font-semibold text-emerald-100 hover:border-emerald-400"
+                  className="rounded-xl border border-amber-500/50 bg-gradient-to-r from-amber-950/40 to-slate-950 px-4 py-2 font-serif text-xs font-semibold text-amber-100 hover:border-amber-400"
                 >
                   Create Product
                 </button>
@@ -899,7 +785,7 @@ export default function VendorShopPage({
           ) : null}
         </div>
 
-        {/* TCG selector (routing only) */}
+        {/* ✅ TCG selector */}
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           {TCG_LIST.map((tcg) => {
             const isActive = tcg.id === selectedTcg;
@@ -911,20 +797,22 @@ export default function VendorShopPage({
                 className={[
                   "group relative flex h-28 flex-col justify-between overflow-hidden rounded-xl border p-4 text-left transition-all duration-200",
                   isActive
-                    ? "border-emerald-400/70 bg-gradient-to-br from-emerald-950/40 via-slate-950 to-slate-950 shadow-xl shadow-emerald-900/25 ring-1 ring-emerald-300/40"
-                    : "border-emerald-900/30 bg-gradient-to-br from-slate-950 to-emerald-950/10 hover:border-emerald-400/60",
+                    ? "border-amber-500/80 bg-gradient-to-br from-amber-950/70 via-purple-950/50 to-slate-950 shadow-xl shadow-amber-900/40 ring-1 ring-amber-400/60"
+                    : "border-amber-900/40 bg-gradient-to-br from-slate-950 to-purple-950/40 hover:border-amber-500/60 hover:shadow-lg hover:shadow-purple-900/30",
                 ].join(" ")}
               >
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(251,191,36,0.15),_transparent_55%)] opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
+
                 <div className="relative flex items-center justify-between gap-3">
-                  <span className="font-serif text-[10px] uppercase tracking-[0.18em] text-emerald-300">
+                  <span className="font-serif text-[10px] uppercase tracking-[0.18em] text-amber-500">
                     Trading Card Game
                   </span>
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full border border-emerald-500/40 bg-slate-950/80 text-xs font-bold text-emerald-200">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full border border-amber-500/50 bg-slate-950/80 text-xs font-bold text-amber-200 shadow-inner shadow-amber-900/60">
                     {initial}
                   </div>
                 </div>
 
-                <span className="relative mt-1 font-serif text-sm font-semibold text-emerald-50">
+                <span className="relative mt-1 font-serif text-sm font-semibold text-amber-50">
                   {tcg.name}
                 </span>
 
@@ -940,33 +828,31 @@ export default function VendorShopPage({
         </div>
 
         {/* Marketplace controls */}
-        <div className="rounded-2xl border border-emerald-900/40 bg-gradient-to-br from-slate-950 via-emerald-950/20 to-slate-950 p-5 shadow-lg shadow-emerald-900/20">
+        <div className="rounded-2xl border border-amber-900/40 bg-gradient-to-br from-slate-950 via-purple-950/45 to-slate-950 p-5 shadow-lg shadow-purple-900/20">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h3 className="font-serif text-xl font-bold text-emerald-100">
+              <h3 className="font-serif text-xl font-bold text-amber-100">
                 {activeTcg?.name} Products (Vendor View)
               </h3>
-              <p className="mt-1 font-serif text-[11px] italic text-emerald-100/70">
+              <p className="mt-1 font-serif text-[11px] italic text-amber-200/70">
                 Search • Filter • Sort • Stock Control
               </p>
             </div>
 
-            <span className="rounded-full border border-emerald-700/40 bg-emerald-950/20 px-3 py-1 font-serif text-[10px] uppercase tracking-wide text-emerald-200">
-              {loadingProducts
-                ? "Loading..."
-                : `${filteredProducts.length} item(s)`}
+            <span className="rounded-full border border-amber-700/40 bg-amber-950/20 px-3 py-1 font-serif text-[10px] uppercase tracking-wide text-amber-200">
+              {loadingProducts ? "Loading..." : `${filteredProducts.length} item(s)`}
             </span>
           </div>
 
           <div className="mt-4 grid gap-3 md:grid-cols-12">
             <div className="md:col-span-6">
-              <div className="flex items-center gap-2 rounded-xl border border-emerald-900/40 bg-slate-950/60 px-3 py-2">
-                <span className="text-emerald-300/80">⌕</span>
+              <div className="flex items-center gap-2 rounded-xl border border-amber-900/40 bg-slate-950/60 px-3 py-2">
+                <span className="text-amber-300/80">⌕</span>
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search name / code / category..."
-                  className="w-full bg-transparent font-serif text-sm text-emerald-50 placeholder:text-emerald-200/40 outline-none"
+                  className="w-full bg-transparent font-serif text-sm text-amber-50 placeholder:text-amber-200/40 outline-none"
                 />
               </div>
             </div>
@@ -975,7 +861,7 @@ export default function VendorShopPage({
               <select
                 value={categoryFilter}
                 onChange={(e) => setCategoryFilter(e.target.value)}
-                className="w-full rounded-xl border border-emerald-900/40 bg-slate-950/60 px-3 py-2 font-serif text-sm text-emerald-50"
+                className="w-full rounded-xl border border-amber-900/40 bg-slate-950/60 px-3 py-2 font-serif text-sm text-amber-50"
               >
                 {categories.map((c) => (
                   <option key={c} value={c}>
@@ -989,7 +875,7 @@ export default function VendorShopPage({
               <select
                 value={dateFilter}
                 onChange={(e) => setDateFilter(e.target.value)}
-                className="w-full rounded-xl border border-emerald-900/40 bg-slate-950/60 px-3 py-2 font-serif text-sm text-emerald-50"
+                className="w-full rounded-xl border border-amber-900/40 bg-slate-950/60 px-3 py-2 font-serif text-sm text-amber-50"
               >
                 <option value={DATE_FILTER.ALL}>All Dates</option>
                 <option value={DATE_FILTER.TODAY}>Today</option>
@@ -1018,8 +904,8 @@ export default function VendorShopPage({
                   className={[
                     "rounded-full border px-3 py-1.5 font-serif text-[11px] uppercase tracking-wide transition",
                     active
-                      ? "border-emerald-400/70 bg-emerald-950/40 text-emerald-100"
-                      : "border-emerald-900/40 bg-slate-950/40 text-emerald-200/70 hover:border-emerald-400/60 hover:text-emerald-100",
+                      ? "border-amber-500/70 bg-amber-950/40 text-amber-100"
+                      : "border-amber-900/40 bg-slate-950/40 text-amber-200/70 hover:border-amber-500/60 hover:text-amber-100",
                   ].join(" ")}
                 >
                   {b.label}
@@ -1031,277 +917,218 @@ export default function VendorShopPage({
 
         {/* Products grid */}
         {filteredProducts.length === 0 ? (
-          <div className="rounded-xl border border-emerald-900/40 bg-gradient-to-br from-slate-950 to-emerald-950/20 p-6 text-sm italic text-emerald-100/70">
+          <div className="rounded-xl border border-amber-900/40 bg-gradient-to-br from-slate-950 to-purple-950/40 p-6 text-sm italic text-amber-100/70">
             No products found in DB yet.
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {filteredProducts.map((p) => (
-              <article
-                key={p.id}
-                className="group relative flex flex-col overflow-hidden rounded-2xl border border-emerald-900/40 bg-gradient-to-br from-slate-950 to-emerald-950/15 shadow-lg shadow-emerald-900/20 transition-all duration-200 hover:-translate-y-1 hover:border-emerald-400/60 hover:shadow-2xl"
-              >
-                <div className="relative h-44 w-full overflow-hidden">
-                  <img
-                    src={resolveImageSrc(p.image_url)}
-                    alt={p.name}
-                    className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
-                    onError={(e) => (e.currentTarget.src = PLACEHOLDER)}
-                  />
+            {filteredProducts.map((p) => {
+              const tcgLabel = tcgNameById(p.category);
+              return (
+                <article
+                  key={p.id}
+                  className="group relative flex flex-col overflow-hidden rounded-2xl border border-amber-900/40 bg-gradient-to-br from-slate-950 to-purple-950/40 shadow-lg shadow-purple-900/30 transition-all duration-200 hover:-translate-y-1 hover:border-amber-500/60 hover:shadow-2xl hover:shadow-amber-900/30"
+                >
+                  <div className="relative h-44 w-full overflow-hidden">
+                    <img
+                      src={resolveImageSrc(p.image_url)}
+                      alt={p.name}
+                      className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
+                      onError={(e) => (e.currentTarget.src = PLACEHOLDER)}
+                    />
 
-                  <div className="absolute left-3 top-3 flex items-center gap-2">
-                    <span className="rounded-full border border-emerald-500/60 bg-slate-950/80 px-2.5 py-1 font-serif text-[10px] uppercase tracking-wide text-emerald-200">
-                      {p.category || "Uncategorized"}
-                    </span>
-
-                    {p.conditional ? (
-                      <span className="rounded-full border border-amber-600/40 bg-amber-950/20 px-2.5 py-1 font-serif text-[10px] uppercase tracking-wide text-amber-200">
-                        {p.conditional}
-                      </span>
-                    ) : null}
-                  </div>
-
-                  <span className="absolute bottom-3 right-3 rounded-full border border-emerald-500/60 bg-slate-950/80 px-3 py-1 font-serif text-[11px] font-semibold text-emerald-300">
-                    BND {toInt(p.price).toFixed(2)}
-                  </span>
-                </div>
-
-                <div className="flex flex-1 flex-col gap-3 p-4">
-                  {/* Title */}
-                  <h4 className="line-clamp-2 font-serif text-sm font-semibold text-emerald-50">
-                    {p.name}
-                  </h4>
-
-                  {/* Meta row */}
-                  <div className="flex items-center justify-between text-[11px] text-emerald-100/70">
-                    <span className="inline-flex items-center gap-1 italic">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400/70" />
-                      Stock:
-                      <span className="font-semibold text-emerald-200">
-                        {toInt(p.stock)}
-                      </span>
-                    </span>
-
-                    <span className="rounded-full border border-emerald-900/40 bg-slate-950/60 px-2 py-0.5 font-serif text-[10px] uppercase tracking-wide text-emerald-200/80">
-                      {p.code || "-"}
-                    </span>
-                  </div>
-
-                  {/* Divider */}
-                  <div className="h-px w-full bg-gradient-to-r from-transparent via-emerald-700/30 to-transparent" />
-
-                  {/* BUY */}
-                  <button
-                    onClick={() =>
-                      addToCart({
-                        id: p.id,
-                        name: p.name,
-                        price: toInt(p.price),
-                        image: resolveImageSrc(p.image_url),
-                        stock: toInt(p.stock),
-                      })
-                    }
-                    disabled={toInt(p.stock) === 0}
-                    className={[
-                      "mt-1 inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 font-serif text-[11px] font-semibold uppercase tracking-wide transition-all",
-                      "focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:ring-offset-0",
-                      toInt(p.stock) === 0
-                        ? "cursor-not-allowed border-emerald-900/40 bg-slate-950/40 text-emerald-100/40"
-                        : "border-emerald-500/50 bg-gradient-to-r from-emerald-950/40 to-slate-950 text-emerald-100 hover:border-emerald-400 hover:shadow-lg hover:shadow-emerald-900/20 active:translate-y-[1px]",
-                    ].join(" ")}
-                  >
-                    {toInt(p.stock) === 0 ? "Out of Stock" : "Add to Cart"}
-                    <span className="text-emerald-200/70">➜</span>
-                  </button>
-
-                  {/* ✅ View More */}
-                  <div className="rounded-xl border border-emerald-900/40 bg-slate-950/35 p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="font-serif text-[11px] text-emerald-200/70">
-                        Details
+                    <div className="absolute left-3 top-3 flex items-center gap-2">
+                      <span className="rounded-full border border-amber-500/60 bg-slate-950/80 px-2.5 py-1 font-serif text-[10px] uppercase tracking-wide text-amber-200">
+                        {tcgLabel}
                       </span>
 
-                      <button
-                        type="button"
-                        onClick={() => navigate(`/vendor/product/${p.id}`)}
-                        className="inline-flex items-center justify-center rounded-xl border border-emerald-900/40 bg-slate-950/40 px-3 py-2 font-serif text-[11px] font-semibold uppercase tracking-wide text-emerald-200/80 hover:border-emerald-400 hover:text-emerald-100"
-                      >
-                        View More →
-                      </button>
+                      {p.conditional ? (
+                        <span className="rounded-full border border-emerald-600/40 bg-emerald-950/25 px-2.5 py-1 font-serif text-[10px] uppercase tracking-wide text-emerald-200">
+                          {p.conditional}
+                        </span>
+                      ) : null}
                     </div>
 
-                    {isExpanded(p.id) ? (
-                      <div className="mt-2 space-y-2">
-                        {p.description ? (
-                          <p className="whitespace-pre-wrap font-serif text-[11px] leading-relaxed text-emerald-100/70">
-                            {p.description}
-                          </p>
-                        ) : (
-                          <p className="font-serif text-[11px] italic text-emerald-200/50">
-                            No description provided.
-                          </p>
-                        )}
-
-                        {/* Optional extra info */}
-                        <div className="flex flex-wrap gap-2 pt-1">
-                          <span className="rounded-full border border-emerald-900/40 bg-slate-950/60 px-2 py-0.5 font-serif text-[10px] text-emerald-200/70">
-                            Vendor ID: {p.vendor_id ?? "-"}
-                          </span>
-
-                          {p.created_at ? (
-                            <span className="rounded-full border border-emerald-900/40 bg-slate-950/60 px-2 py-0.5 font-serif text-[10px] text-emerald-200/70">
-                              Added: {p.created_at.toLocaleDateString()}
-                            </span>
-                          ) : null}
-                        </div>
-                      </div>
-                    ) : null}
+                    <span className="absolute bottom-3 right-3 rounded-full border border-emerald-500/60 bg-slate-950/80 px-3 py-1 font-serif text-[11px] font-semibold text-emerald-300">
+                      BND {toInt(p.price).toFixed(2)}
+                    </span>
                   </div>
 
-                  {/* ✅ Vendor-only Manage Inventory */}
-                  {isVendor ? (
-                    <details className="group mt-1 rounded-2xl border border-emerald-900/40 bg-slate-950/35">
-                      <summary className="flex cursor-pointer list-none items-center justify-between px-3 py-3">
-                        <div className="flex flex-col">
-                          <span className="font-serif text-[11px] font-semibold text-emerald-200">
-                            Manage Inventory
-                          </span>
-                          <span className="font-serif text-[10px] text-emerald-200/60">
-                            Current: {toInt(p.stock)}
-                          </span>
-                        </div>
+                  <div className="flex flex-1 flex-col gap-3 p-4">
+                    <h4 className="line-clamp-2 font-serif text-sm font-semibold text-amber-50">
+                      {p.name}
+                    </h4>
 
-                        <span className="rounded-lg border border-emerald-900/40 bg-slate-950/60 px-2 py-1 font-serif text-[10px] text-emerald-200/80 transition-all group-open:rotate-180">
-                          ▼
+                    <div className="flex items-center justify-between text-[11px] text-amber-100/70">
+                      <span className="italic">
+                        Stock:{" "}
+                        <span className="font-semibold text-amber-300">
+                          {toInt(p.stock)}
                         </span>
-                      </summary>
+                      </span>
 
-                      <div className="px-3 pb-3">
-                        <div className="rounded-xl border border-emerald-900/40 bg-slate-950/35 p-3">
-                          <div className="mb-2 flex items-center justify-between">
-                            <span className="font-serif text-[10px] uppercase tracking-[0.2em] text-emerald-200/70">
-                              Quantity
+                      <span className="rounded-full border border-amber-900/40 bg-slate-950/50 px-2 py-0.5 font-serif text-[10px] uppercase tracking-wide text-amber-200/80">
+                        {p.code || "-"}
+                      </span>
+                    </div>
+
+                    <div className="h-px w-full bg-gradient-to-r from-transparent via-amber-700/30 to-transparent" />
+
+                    <button
+                      onClick={() =>
+                        addToCart({
+                          id: p.id,
+                          name: p.name,
+                          price: toInt(p.price),
+                          image: resolveImageSrc(p.image_url),
+                          stock: toInt(p.stock),
+                        })
+                      }
+                      disabled={toInt(p.stock) === 0}
+                      className="mt-1 inline-flex items-center justify-center rounded-xl border border-amber-500/60 bg-gradient-to-r from-amber-950/60 to-purple-950/60 px-3 py-2 font-serif text-[11px] font-semibold uppercase tracking-wide text-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {toInt(p.stock) === 0 ? "Out of Stock" : "Add to Cart"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/vendor/product/${p.id}`)}
+                      className="inline-flex items-center justify-center rounded-xl border border-amber-900/40 bg-slate-950/40 px-3 py-2 font-serif text-[11px] font-semibold uppercase tracking-wide text-amber-200/80 hover:border-amber-500/60 hover:text-amber-100"
+                    >
+                      View More →
+                    </button>
+
+                    {isVendor ? (
+                      <details className="group mt-1 rounded-2xl border border-amber-900/40 bg-slate-950/35">
+                        <summary className="flex cursor-pointer list-none items-center justify-between px-3 py-3">
+                          <div className="flex flex-col">
+                            <span className="font-serif text-[11px] font-semibold text-amber-200">
+                              Manage Inventory
                             </span>
-
-                            <span className="font-serif text-[10px] text-emerald-200/50">
-                              Tip: enter qty → apply
+                            <span className="font-serif text-[10px] text-amber-200/60">
+                              Current: {toInt(p.stock)}
                             </span>
                           </div>
 
-                          <div className="grid grid-cols-2 gap-2">
-                            <div className="col-span-2">
-                              <input
-                                type="number"
-                                min={0}
-                                value={stockInput[p.id] ?? ""}
-                                onChange={(e) =>
-                                  setStockInput((m) => ({
-                                    ...m,
-                                    [p.id]: e.target.value,
-                                  }))
-                                }
-                                className="w-full rounded-lg border border-emerald-900/40 bg-slate-950 px-3 py-2 font-serif text-[11px] text-emerald-50 outline-none focus:ring-2 focus:ring-emerald-500/40"
-                                placeholder="Qty"
-                              />
+                          <span className="rounded-lg border border-amber-900/40 bg-slate-950/60 px-2 py-1 font-serif text-[10px] text-amber-200/80 transition-all group-open:rotate-180">
+                            ▼
+                          </span>
+                        </summary>
+
+                        <div className="px-3 pb-3">
+                          <div className="rounded-xl border border-amber-900/40 bg-slate-950/35 p-3">
+                            <div className="mb-2 flex items-center justify-between">
+                              <span className="font-serif text-[10px] uppercase tracking-[0.2em] text-amber-200/70">
+                                Quantity
+                              </span>
+
+                              <span className="font-serif text-[10px] text-amber-200/50">
+                                Tip: enter qty → apply
+                              </span>
                             </div>
 
-                            <button
-                              type="button"
-                              onClick={() =>
-                                applyDeltaStock(p.id, +getQty(p.id))
-                              }
-                              disabled={getQty(p.id) <= 0}
-                              className={[
-                                "inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 font-serif text-[11px] font-semibold transition",
-                                "active:translate-y-[1px]",
-                                getQty(p.id) <= 0
-                                  ? "cursor-not-allowed border-emerald-900/40 bg-slate-950/40 text-emerald-100/30"
-                                  : "border-emerald-500/50 bg-emerald-950/25 text-emerald-100 hover:border-emerald-400 hover:bg-emerald-950/35 hover:shadow-lg hover:shadow-emerald-900/20",
-                              ].join(" ")}
-                              title="Add qty to stock"
-                            >
-                              <span className="text-emerald-200/80">＋</span>
-                              Restock
-                              <span className="text-emerald-200/60">
-                                (+{getQty(p.id)})
-                              </span>
-                            </button>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="col-span-2">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={stockInput[p.id] ?? ""}
+                                  onChange={(e) =>
+                                    setStockInput((m) => ({
+                                      ...m,
+                                      [p.id]: e.target.value,
+                                    }))
+                                  }
+                                  className="w-full rounded-lg border border-amber-900/40 bg-slate-950 px-3 py-2 font-serif text-[11px] text-amber-50 outline-none focus:ring-2 focus:ring-amber-500/40"
+                                  placeholder="Qty"
+                                />
+                              </div>
 
-                            <button
-                              type="button"
-                              onClick={() =>
-                                applyDeltaStock(p.id, -getQty(p.id))
-                              }
-                              disabled={
-                                getQty(p.id) <= 0 || toInt(p.stock) === 0
-                              }
-                              className={[
-                                "inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 font-serif text-[11px] font-semibold transition",
-                                "active:translate-y-[1px]",
-                                getQty(p.id) <= 0 || toInt(p.stock) === 0
-                                  ? "cursor-not-allowed border-emerald-900/40 bg-slate-950/40 text-emerald-100/30"
-                                  : "border-emerald-500/50 bg-emerald-950/25 text-emerald-100 hover:border-emerald-400 hover:bg-emerald-950/35 hover:shadow-lg hover:shadow-emerald-900/20",
-                              ].join(" ")}
-                              title="Subtract qty from stock"
-                            >
-                              <span className="text-emerald-200/80">－</span>
-                              Reduce
-                              <span className="text-emerald-200/60">
-                                (-{getQty(p.id)})
-                              </span>
-                            </button>
+                              <button
+                                type="button"
+                                onClick={() => applyDeltaStock(p.id, +getQty(p.id))}
+                                disabled={getQty(p.id) <= 0}
+                                className={[
+                                  "inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 font-serif text-[11px] font-semibold transition",
+                                  "active:translate-y-[1px]",
+                                  getQty(p.id) <= 0
+                                    ? "cursor-not-allowed border-amber-900/40 bg-slate-950/40 text-amber-100/30"
+                                    : "border-amber-500/50 bg-amber-950/25 text-amber-100 hover:border-amber-400 hover:bg-amber-950/35 hover:shadow-lg hover:shadow-amber-900/20",
+                                ].join(" ")}
+                                title="Add qty to stock"
+                              >
+                                <span className="text-amber-200/80">＋</span>
+                                Restock
+                                <span className="text-amber-200/60">
+                                  (+{getQty(p.id)})
+                                </span>
+                              </button>
 
+                              <button
+                                type="button"
+                                onClick={() => applyDeltaStock(p.id, -getQty(p.id))}
+                                disabled={getQty(p.id) <= 0 || toInt(p.stock) === 0}
+                                className={[
+                                  "inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 font-serif text-[11px] font-semibold transition",
+                                  "active:translate-y-[1px]",
+                                  getQty(p.id) <= 0 || toInt(p.stock) === 0
+                                    ? "cursor-not-allowed border-amber-900/40 bg-slate-950/40 text-amber-100/30"
+                                    : "border-amber-500/50 bg-amber-950/25 text-amber-100 hover:border-amber-400 hover:bg-amber-950/35 hover:shadow-lg hover:shadow-amber-900/20",
+                                ].join(" ")}
+                                title="Subtract qty from stock"
+                              >
+                                <span className="text-amber-200/80">－</span>
+                                Reduce
+                                <span className="text-amber-200/60">
+                                  (-{getQty(p.id)})
+                                </span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => setExactStock(p.id, getQty(p.id), p.stock)}
+                                disabled={getQty(p.id) < 0 || (stockInput[p.id] ?? "") === ""}
+                                className={[
+                                  "col-span-2 inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 font-serif text-[11px] font-semibold transition",
+                                  "active:translate-y-[1px]",
+                                  (stockInput[p.id] ?? "") === ""
+                                    ? "cursor-not-allowed border-amber-900/30 bg-amber-950/10 text-amber-100/30"
+                                    : "border-amber-500/40 bg-amber-950/20 text-amber-100 hover:border-amber-400 hover:bg-amber-950/30",
+                                ].join(" ")}
+                                title="Set stock to this exact qty"
+                              >
+                                Set Exact Stock
+                                <span className="text-amber-200/70">→</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="mt-3 grid grid-cols-1 gap-2">
                             <button
                               type="button"
-                              onClick={() =>
-                                setExactStock(p.id, getQty(p.id), p.stock)
-                              }
-                              disabled={
-                                getQty(p.id) < 0 ||
-                                (stockInput[p.id] ?? "") === ""
-                              }
-                              className={[
-                                "col-span-2 inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 font-serif text-[11px] font-semibold transition",
-                                "active:translate-y-[1px]",
-                                (stockInput[p.id] ?? "") === ""
-                                  ? "cursor-not-allowed border-amber-900/30 bg-amber-950/10 text-amber-100/30"
-                                  : "border-amber-500/40 bg-amber-950/20 text-amber-100 hover:border-amber-400 hover:bg-amber-950/30",
-                              ].join(" ")}
-                              title="Set stock to this exact qty"
+                              onClick={() => deleteProduct(p.id)}
+                              className="rounded-lg border border-rose-500/40 bg-rose-950/15 px-3 py-2 font-serif text-[11px] font-semibold text-rose-200 transition hover:border-rose-400 hover:bg-rose-950/25 active:translate-y-[1px]"
+                              title="Delete product"
                             >
-                              Set Exact Stock
-                              <span className="text-amber-200/70">→</span>
+                              Delete Product
                             </button>
                           </div>
-                        </div>
 
-                        <div className="mt-3 grid grid-cols-1 gap-2">
                           <button
                             type="button"
-                            onClick={() => deleteProduct(p.id)}
-                            className="rounded-lg border border-rose-500/40 bg-rose-950/15 px-3 py-2 font-serif text-[11px] font-semibold text-rose-200 transition hover:border-rose-400 hover:bg-rose-950/25 active:translate-y-[1px]"
-                            title="Delete product"
+                            onClick={() => alert(`Sell / listing flow for: ${p.name}`)}
+                            className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-amber-500/50 bg-gradient-to-r from-amber-950/25 to-slate-950 px-3 py-2 font-serif text-[11px] font-semibold uppercase tracking-wide text-amber-100 transition hover:border-amber-400 hover:shadow-lg hover:shadow-amber-900/20 active:translate-y-[1px]"
                           >
-                            Delete Product
+                            Sell / List Item
+                            <span className="text-amber-200/70">↗</span>
                           </button>
                         </div>
-
-                        <button
-                          type="button"
-                          onClick={() =>
-                            alert(`Sell / listing flow for: ${p.name}`)
-                          }
-                          className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-500/50 bg-gradient-to-r from-emerald-950/25 to-slate-950 px-3 py-2 font-serif text-[11px] font-semibold uppercase tracking-wide text-emerald-100 transition hover:border-emerald-400 hover:shadow-lg hover:shadow-emerald-900/20 active:translate-y-[1px]"
-                        >
-                          Sell / List Item
-                          <span className="text-emerald-200/70">↗</span>
-                        </button>
-                      </div>
-                    </details>
-                  ) : null}
-                </div>
-              </article>
-            ))}
+                      </details>
+                    ) : null}
+                  </div>
+                </article>
+              );
+            })}
           </div>
         )}
       </section>
@@ -1382,7 +1209,7 @@ export default function VendorShopPage({
                   Go to Checkout
                 </Link>
 
-                <p className="mt-2 font-serif text-[10px] italic text-emerald-200/60">
+                <p className="mt-2 font-serif text-[10px] italic text-amber-200/60">
                   Vendor tip: Use Restock/Reduce/Set to control quantity.
                 </p>
               </div>

@@ -19,11 +19,6 @@ function normalizeRole(role) {
   return Object.values(ROLES).includes(r) ? r : ROLES.USER;
 }
 
-/* ============================================================================
-   Local image helpers
-   - We store DB IMAGE_URL like: "/public/uploads/products/<filename>"
-   - Actual file on disk: "<Backend>/public/uploads/products/<filename>"
-   ============================================================================ */
 const publicPath = path.join(process.cwd(), "public");
 
 function isLocalProductImage(url) {
@@ -55,14 +50,14 @@ function safePublicProductRow(row) {
     price: row.PRICE,
     stock_quantity: row.STOCK_QUANTITY,
     image_url: row.IMAGE_URL,
+    category: row.CATEGORY, 
     created_at: row.CREATED_AT,
     updated_at: row.UPDATED_AT,
   };
 }
 
-/** retry wrapper for transient DB resets */
 async function executeWithRetry(dbOrConn, sql, params = [], label = "db.execute") {
-  const max = 2; // 1 retry
+  const max = 2; 
   let lastErr = null;
 
   for (let attempt = 0; attempt <= max; attempt++) {
@@ -101,7 +96,6 @@ export default function productSocketController({
 
   /* =========================================================
      LIST PRODUCTS (public)
-     - SAFE: does NOT reference CATEGORY / TCG columns (until you add them)
      ========================================================= */
   socket.on("product:list", async (payload = {}, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
@@ -132,11 +126,10 @@ export default function productSocketController({
       }
 
       if (search) {
-        where.push("(NAME LIKE ? OR CODE LIKE ?)");
-        params.push(`%${search}%`, `%${search}%`);
+        where.push("(NAME LIKE ? OR CODE LIKE ? OR CATEGORY LIKE ?)");
+        params.push(`%${search}%`, `%${search}%`, `%${search}%`);
       }
 
-      // ORDER BY whitelist
       let orderBy = "ID DESC";
       if (sort === "oldest") orderBy = "ID ASC";
       if (sort === "az") orderBy = "NAME ASC";
@@ -147,7 +140,7 @@ export default function productSocketController({
       const sql = `
         SELECT
           ID, VENDOR_ID, NAME, CODE, DESCRIPTION, CONDITIONAL,
-          PRICE, STOCK_QUANTITY, IMAGE_URL, CREATED_AT, UPDATED_AT
+          PRICE, STOCK_QUANTITY, IMAGE_URL, CATEGORY, CREATED_AT, UPDATED_AT
         FROM PRODUCTS
         ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
         ORDER BY ${orderBy}
@@ -190,6 +183,7 @@ export default function productSocketController({
     const price = toInt(payload.price);
     const stockQty = toInt(payload.stock_quantity ?? payload.stockQty ?? 0);
     const imageUrl = payload.image_url ?? payload.imageUrl ?? null;
+    const category = payload.category != null ? toStr(payload.category) : null;
 
     if (!name || !code) {
       return ack({ success: false, message: "name and code are required." });
@@ -203,9 +197,9 @@ export default function productSocketController({
       const [res] = await executeWithRetry(
         conn,
         `INSERT INTO PRODUCTS
-          (VENDOR_ID, NAME, CODE, DESCRIPTION, CONDITIONAL, PRICE, STOCK_QUANTITY, IMAGE_URL)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [userId, name, code, description, conditional, price, stockQty, imageUrl],
+          (VENDOR_ID, NAME, CODE, DESCRIPTION, CONDITIONAL, PRICE, STOCK_QUANTITY, IMAGE_URL, CATEGORY)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [userId, name, code, description, conditional, price, stockQty, imageUrl, category],
         "product:create.insert"
       );
 
@@ -222,7 +216,7 @@ export default function productSocketController({
 
       const [rows] = await executeWithRetry(
         conn,
-        `SELECT ID, VENDOR_ID, NAME, CODE, DESCRIPTION, CONDITIONAL, PRICE, STOCK_QUANTITY, IMAGE_URL, CREATED_AT, UPDATED_AT
+        `SELECT ID, VENDOR_ID, NAME, CODE, DESCRIPTION, CONDITIONAL, PRICE, STOCK_QUANTITY, IMAGE_URL, CATEGORY, CREATED_AT, UPDATED_AT
          FROM PRODUCTS
          WHERE ID = ?`,
         [productId],
@@ -257,8 +251,7 @@ export default function productSocketController({
   });
 
   /* =========================================================
-     UPDATE PRODUCT (vendor owns product OR admin)
-     - Deletes old local image if replaced
+     UPDATE PRODUCT
      ========================================================= */
   socket.on("product:update", async (payload = {}, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
@@ -314,6 +307,11 @@ export default function productSocketController({
         params.push(toInt(payload.price));
       }
 
+      if (payload.category != null) {
+        fields.push("CATEGORY = ?");
+        params.push(toStr(payload.category));
+      }
+
       const incomingImageUrl =
         payload.image_url != null || payload.imageUrl != null
           ? toStr(payload.image_url ?? payload.imageUrl)
@@ -344,7 +342,7 @@ export default function productSocketController({
 
       const [rows] = await executeWithRetry(
         db,
-        `SELECT ID, VENDOR_ID, NAME, CODE, DESCRIPTION, CONDITIONAL, PRICE, STOCK_QUANTITY, IMAGE_URL, CREATED_AT, UPDATED_AT
+        `SELECT ID, VENDOR_ID, NAME, CODE, DESCRIPTION, CONDITIONAL, PRICE, STOCK_QUANTITY, IMAGE_URL, CATEGORY, CREATED_AT, UPDATED_AT
          FROM PRODUCTS
          WHERE ID = ?`,
         [productId],
@@ -354,7 +352,6 @@ export default function productSocketController({
       const updated = safePublicProductRow(rows?.[0]);
       io.emit("product:updated", updated);
 
-      // ✅ delete old local image after update (only if it was replaced)
       if (imageChanged && isLocalProductImage(oldImageUrl)) {
         safeUnlink(localImageDiskPath(oldImageUrl));
       }
@@ -375,7 +372,7 @@ export default function productSocketController({
   });
 
   /* =========================================================
-     INVENTORY ADJUST (vendor owns product OR admin)
+     INVENTORY ADJUST
      ========================================================= */
   socket.on("inventory:adjust", async (payload = {}, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
@@ -438,7 +435,7 @@ export default function productSocketController({
 
       const [rows] = await executeWithRetry(
         conn,
-        `SELECT ID, VENDOR_ID, NAME, CODE, DESCRIPTION, CONDITIONAL, PRICE, STOCK_QUANTITY, IMAGE_URL, CREATED_AT, UPDATED_AT
+        `SELECT ID, VENDOR_ID, NAME, CODE, DESCRIPTION, CONDITIONAL, PRICE, STOCK_QUANTITY, IMAGE_URL, CATEGORY, CREATED_AT, UPDATED_AT
          FROM PRODUCTS
          WHERE ID = ?`,
         [productId],
@@ -480,8 +477,7 @@ export default function productSocketController({
   });
 
   /* =========================================================
-     DELETE PRODUCT (vendor owns product OR admin)
-     - Deletes local image file after commit
+     DELETE PRODUCT
      ========================================================= */
   socket.on("product:delete", async (payload = {}, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
@@ -539,7 +535,6 @@ export default function productSocketController({
 
       io.emit("product:deleted", { id: productId });
 
-      // ✅ delete local file AFTER DB commit
       if (isLocalProductImage(oldImageUrl)) {
         safeUnlink(localImageDiskPath(oldImageUrl));
       }
@@ -567,8 +562,7 @@ export default function productSocketController({
   });
 
   /* =========================================================
-     UPLOAD IMAGE (via Socket.IO - works on mobile!)
-     Receives base64 data and saves to disk
+     UPLOAD IMAGE
      ========================================================= */
   socket.on("image:upload", async (payload = {}, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
@@ -587,7 +581,6 @@ export default function productSocketController({
     }
 
     try {
-      // Receive base64 image data
       const base64Data = payload.base64 || payload.data || "";
       const fileName = payload.fileName || "";
 
@@ -599,7 +592,6 @@ export default function productSocketController({
         return ack({ success: false, message: "No file name provided." });
       }
 
-      // Validate file extension
       const validExtensions = /\.(jpg|jpeg|png|gif|webp)$/i;
       if (!validExtensions.test(fileName)) {
         return ack({
@@ -608,22 +600,16 @@ export default function productSocketController({
         });
       }
 
-      // Create uploads directory if needed
       const uploadsDir = path.join(publicPath, "uploads", "products");
       if (!fs.existsSync(uploadsDir)) {
         fs.mkdirSync(uploadsDir, { recursive: true });
       }
 
-      // Generate safe filename with timestamp
       const ext = path.extname(fileName).toLowerCase();
       const safe = Date.now() + "-" + Math.random().toString(16).slice(2);
       const finalFileName = safe + ext;
       const filePath = path.join(uploadsDir, finalFileName);
-
-      // Decode base64 and write to disk
       const buffer = Buffer.from(base64Data, "base64");
-
-      // Basic size check (5MB max)
       if (buffer.length > 5 * 1024 * 1024) {
         return ack({ success: false, message: "File exceeds 5MB limit." });
       }

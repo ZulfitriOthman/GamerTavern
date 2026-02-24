@@ -377,49 +377,6 @@ export default function UserShopPage({
 
       {/* LEFT */}
       <section className="relative z-10 flex-1 space-y-6">
-        {/* Banner */}
-        <div className="overflow-hidden rounded-2xl border border-amber-900/40 bg-gradient-to-br from-slate-950 via-purple-950/45 to-slate-950 p-4 shadow-lg shadow-purple-900/20">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="font-serif text-xs text-amber-100/70">
-                Logged in as{" "}
-                <span className="font-semibold text-amber-200">
-                  {currentUser?.name}
-                </span>
-              </p>
-              <p className="font-serif text-[11px] uppercase tracking-[0.25em] text-amber-500">
-                ROLE: {currentUser?.role}
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className="rounded-full border border-sky-600/40 bg-sky-950/30 px-3 py-1 font-serif text-[10px] uppercase tracking-wide text-sky-200">
-                User Mode: Buy Only
-              </span>
-
-              <span
-                className={[
-                  "rounded-full border px-3 py-1 font-serif text-[10px] uppercase tracking-wide",
-                  isSocketConnected
-                    ? "border-emerald-600/40 bg-emerald-950/30 text-emerald-200"
-                    : "border-rose-600/40 bg-rose-950/30 text-rose-200",
-                ].join(" ")}
-                title="Socket connection status"
-              >
-                {isSocketConnected ? "Live" : "Offline"}
-              </span>
-
-              <button
-                type="button"
-                onClick={loadProducts}
-                className="rounded-full border border-amber-700/40 bg-amber-950/20 px-3 py-1 font-serif text-[10px] uppercase tracking-wide text-amber-200 hover:border-amber-500"
-              >
-                Refresh
-              </button>
-            </div>
-          </div>
-        </div>
-
         {/* Errors */}
         {serverError ? (
           <div className="rounded-xl border border-rose-500/30 bg-rose-950/30 px-4 py-3 text-sm text-rose-200">
