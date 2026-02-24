@@ -30,18 +30,13 @@ function asText(v) {
   if (v?.type === "Buffer" && Array.isArray(v?.data)) {
     return new TextDecoder().decode(new Uint8Array(v.data));
   }
-  if (v instanceof ArrayBuffer) return new TextDecoder().decode(new Uint8Array(v));
+  if (v instanceof ArrayBuffer)
+    return new TextDecoder().decode(new Uint8Array(v));
   if (v instanceof Uint8Array) return new TextDecoder().decode(v);
   if (Buffer.isBuffer?.(v)) return v.toString("utf8");
   return String(v);
 }
 
-/**
- * ✅ IMPORTANT:
- * Images are served by backend at: `${API_BASE}/public/...`
- * So if DB stores "/public/uploads/products/xxx.png",
- * frontend must render: `${API_BASE}/public/uploads/products/xxx.png`
- */
 const API_BASE =
   (import.meta?.env?.VITE_API_BASE && String(import.meta.env.VITE_API_BASE)) ||
   window.location.origin.replace(":5173", ":3001"); // dev fallback
@@ -299,7 +294,11 @@ export default function UserShopPage({
     const q = search.trim().toLowerCase();
 
     const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfToday = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    );
 
     const passDate = (p) => {
       if (dateFilter === DATE_FILTER.ALL) return true;
@@ -336,7 +335,8 @@ export default function UserShopPage({
 
     const byName = (a, b) => a.name.localeCompare(b.name);
     const byPrice = (a, b) => a.price - b.price;
-    const byCategory = (a, b) => (a.category || "").localeCompare(b.category || "");
+    const byCategory = (a, b) =>
+      (a.category || "").localeCompare(b.category || "");
 
     const sorted = [...list];
     switch (sortMode) {
@@ -483,7 +483,9 @@ export default function UserShopPage({
 
             <div className="flex items-center gap-2">
               <span className="rounded-full border border-amber-700/40 bg-amber-950/20 px-3 py-1 font-serif text-[10px] uppercase tracking-wide text-amber-200">
-                {loadingProducts ? "Loading..." : `${filteredProducts.length} item(s)`}
+                {loadingProducts
+                  ? "Loading..."
+                  : `${filteredProducts.length} item(s)`}
               </span>
             </div>
           </div>
@@ -631,6 +633,14 @@ export default function UserShopPage({
                     className="mt-2 inline-flex items-center justify-center rounded-xl border border-amber-500/60 bg-gradient-to-r from-amber-950/60 to-purple-950/60 px-3 py-2 font-serif text-[11px] font-semibold uppercase tracking-wide text-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {toInt(p.stock) === 0 ? "Out of Stock" : "Add to Cart"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/product/${p.id}`)}
+                    className="mt-2 inline-flex items-center justify-center rounded-xl border border-amber-900/40 bg-slate-950/40 px-3 py-2 font-serif text-[11px] font-semibold uppercase tracking-wide text-amber-200/80 hover:border-amber-500/60 hover:text-amber-100"
+                  >
+                    View More →
                   </button>
                 </div>
               </article>

@@ -37,34 +37,49 @@ function asText(v) {
   return String(v);
 }
 
-// ✅ Better API_BASE handling for mobile
 function getApiBase() {
-  const env = import.meta?.env?.VITE_API_BASE && String(import.meta.env.VITE_API_BASE);
-  if (env) return env;
-
-  // On mobile/different machine, localhost won't work
-  // Fall back to current origin to at least try the same host
-  if (typeof window !== "undefined" && window.location.hostname !== "localhost") {
-    return `http://${window.location.hostname}:3001`;
+  const env =
+    import.meta?.env?.VITE_API_BASE && String(import.meta.env.VITE_API_BASE);
+  if (env) {
+    console.log("[API_BASE] Using VITE_API_BASE env:", env);
+    return env;
   }
 
+  if (typeof window !== "undefined") {
+    const hostname = window.location.hostname;
+
+    if (
+      hostname === "nanashicollectibles.com" ||
+      hostname === "www.nanashicollectibles.com" ||
+      hostname === "sidequest.nanashicollectibles.com"
+    ) {
+      const apiUrl = window.location.origin + "/api";
+      console.log("[API_BASE] Using production proxy:", apiUrl);
+      return apiUrl;
+    }
+
+    if (hostname !== "localhost" && hostname !== "127.0.0.1") {
+      const apiUrl = `http://${hostname}:3001`;
+      console.log("[API_BASE] Using local network:", apiUrl);
+      return apiUrl;
+    }
+  }
+
+  console.log("[API_BASE] Using localhost");
   return "http://localhost:3001";
 }
 
 const API_BASE = getApiBase();
+const ASSET_BASE = API_BASE.replace(/\/api\/?$/, "");
 
-// ✅ Resolve image URLs correctly for BOTH dev/prod
 function resolveImageSrc(url) {
   const s = toStr(url);
   if (!s) return PLACEHOLDER;
 
-  // absolute http(s)
   if (/^https?:\/\//i.test(s)) return s;
 
-  // backend static served at /public/...
-  if (s.startsWith("/public/")) return `${API_BASE}${s}`;
+  if (s.startsWith("/public/")) return `${ASSET_BASE}${s}`;
 
-  // local public assets like /placeholder.png
   if (s.startsWith("/")) return s;
 
   return PLACEHOLDER;
@@ -149,6 +164,9 @@ export default function VendorShopPage({
   const [stockInput, setStockInput] = useState({}); // { [productId]: string }
   const getQty = (productId) => toInt(stockInput[productId], 0);
 
+  const [expanded, setExpanded] = useState({}); // { [productId]: boolean }
+  const isExpanded = (id) => !!expanded[id];
+  const toggleExpanded = (id) => setExpanded((m) => ({ ...m, [id]: !m[id] }));
   // ----------------------------
   // Guard: must be logged in AND vendor/admin
   // ----------------------------
@@ -534,6 +552,9 @@ export default function VendorShopPage({
               <p className="font-serif text-[11px] uppercase tracking-[0.25em] text-emerald-400">
                 ROLE: {currentUser?.role}
               </p>
+              <p className="font-serif text-[10px] text-emerald-100/50 mt-1">
+                🔧 Backend: {API_BASE}
+              </p>
             </div>
 
             <div className="flex items-center gap-2">
@@ -732,7 +753,11 @@ export default function VendorShopPage({
                         console.log("  Original name:", file.name);
                         console.log("  Valid extension?", hasImageExt);
                         console.log("  MIME type:", file.type || "(empty)");
-                        console.log("  File size:", (file.size / 1024).toFixed(2), "KB");
+                        console.log(
+                          "  File size:",
+                          (file.size / 1024).toFixed(2),
+                          "KB",
+                        );
 
                         if (!hasImageExt && !hasImageType) {
                           throw new Error(
@@ -746,18 +771,22 @@ export default function VendorShopPage({
 
                         // Convert file to base64
                         console.log("\n⏳ CONVERTING TO BASE64...");
-                        const base64Data = await new Promise((resolve, reject) => {
-                          const reader = new FileReader();
-                          reader.onload = () => {
-                            const result = reader.result;
-                            const base64 = result.split(",")[1]; // Remove data:image/... prefix
-                            resolve(base64);
-                          };
-                          reader.onerror = reject;
-                          reader.readAsDataURL(file);
-                        });
+                        const base64Data = await new Promise(
+                          (resolve, reject) => {
+                            const reader = new FileReader();
+                            reader.onload = () => {
+                              const result = reader.result;
+                              const base64 = result.split(",")[1]; // Remove data:image/... prefix
+                              resolve(base64);
+                            };
+                            reader.onerror = reject;
+                            reader.readAsDataURL(file);
+                          },
+                        );
 
-                        console.log(`✅ BASE64 READY (${(base64Data.length / 1024).toFixed(2)}KB)`);
+                        console.log(
+                          `✅ BASE64 READY (${(base64Data.length / 1024).toFixed(2)}KB)`,
+                        );
 
                         // Send via Socket.IO
                         console.log("\n📤 SENDING VIA SOCKET.IO...");
@@ -782,7 +811,7 @@ export default function VendorShopPage({
                               fileName: file.name,
                               base64: base64Data,
                             },
-                            (res) => resolve(res)
+                            (res) => resolve(res),
                           );
                         });
 
@@ -792,7 +821,7 @@ export default function VendorShopPage({
 
                         if (!result?.success) {
                           throw new Error(
-                            result?.message || "Upload failed on server"
+                            result?.message || "Upload failed on server",
                           );
                         }
 
@@ -1084,6 +1113,50 @@ export default function VendorShopPage({
                     {toInt(p.stock) === 0 ? "Out of Stock" : "Add to Cart"}
                     <span className="text-emerald-200/70">➜</span>
                   </button>
+
+                  {/* ✅ View More */}
+                  <div className="rounded-xl border border-emerald-900/40 bg-slate-950/35 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-serif text-[11px] text-emerald-200/70">
+                        Details
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/vendor/product/${p.id}`)}
+                        className="inline-flex items-center justify-center rounded-xl border border-emerald-900/40 bg-slate-950/40 px-3 py-2 font-serif text-[11px] font-semibold uppercase tracking-wide text-emerald-200/80 hover:border-emerald-400 hover:text-emerald-100"
+                      >
+                        View More →
+                      </button>
+                    </div>
+
+                    {isExpanded(p.id) ? (
+                      <div className="mt-2 space-y-2">
+                        {p.description ? (
+                          <p className="whitespace-pre-wrap font-serif text-[11px] leading-relaxed text-emerald-100/70">
+                            {p.description}
+                          </p>
+                        ) : (
+                          <p className="font-serif text-[11px] italic text-emerald-200/50">
+                            No description provided.
+                          </p>
+                        )}
+
+                        {/* Optional extra info */}
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          <span className="rounded-full border border-emerald-900/40 bg-slate-950/60 px-2 py-0.5 font-serif text-[10px] text-emerald-200/70">
+                            Vendor ID: {p.vendor_id ?? "-"}
+                          </span>
+
+                          {p.created_at ? (
+                            <span className="rounded-full border border-emerald-900/40 bg-slate-950/60 px-2 py-0.5 font-serif text-[10px] text-emerald-200/70">
+                              Added: {p.created_at.toLocaleDateString()}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
 
                   {/* ✅ Vendor-only Manage Inventory */}
                   {isVendor ? (

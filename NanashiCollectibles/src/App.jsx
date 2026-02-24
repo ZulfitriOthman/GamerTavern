@@ -21,9 +21,14 @@ import LoginPage from "./pages/LoginPage";
 import ChatPage from "./pages/ChatPage";
 import UserShopPage from "./pages/UserShopPage";
 import VendorShopPage from "./pages/VendorShopPage";
+import ProductDetailPage from "./pages/ProductDetailPage";
 
 // ✅ Socket.IO (no direct `socket` export anymore)
-import { connectSocket, disconnectSocket, getSocket } from "./socket/socketClient";
+import {
+  connectSocket,
+  disconnectSocket,
+  getSocket,
+} from "./socket/socketClient";
 
 const pageVariants = {
   initial: { opacity: 0, y: 16, filter: "blur(8px)" },
@@ -108,7 +113,9 @@ function App() {
 
   // ✅ Show name in navbar
   const displayName = useMemo(() => {
-    return currentUser?.name || localStorage.getItem("tavern_username") || "Traveler";
+    return (
+      currentUser?.name || localStorage.getItem("tavern_username") || "Traveler"
+    );
   }, [currentUser]);
 
   const isLoggedIn = !!currentUser?.id;
@@ -422,7 +429,10 @@ function App() {
             />
 
             {/* ✅ VENDOR SHOP */}
-            <Route path="/vendor" element={<Navigate to="/vendor/tcg/mtg" replace />} />
+            <Route
+              path="/vendor"
+              element={<Navigate to="/vendor/tcg/mtg" replace />}
+            />
 
             <Route
               path="/vendor/tcg/:tcgId"
@@ -436,6 +446,24 @@ function App() {
                     cartTotalItems={cartTotalItems}
                     cartTotalPrice={cartTotalPrice}
                   />
+                </PageWrap>
+              }
+            />
+
+            <Route
+              path="/vendor/product/:id"
+              element={
+                <PageWrap>
+                  <ProductDetailPage addToCart={addToCart} />
+                </PageWrap>
+              }
+            />
+
+            <Route
+              path="/product/:id"
+              element={
+                <PageWrap>
+                  <ProductDetailPage addToCart={addToCart} />
                 </PageWrap>
               }
             />
