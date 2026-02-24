@@ -2,6 +2,7 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useSocket } from "../hooks/useSocket";
+import { setCurrentUser, setUsername } from "../authStorage";
 
 const emailRegex = /\S+@\S+\.\S+/;
 
@@ -119,8 +120,8 @@ export default function SignUpPage() {
 
       const user = res.data;
 
-      localStorage.setItem("tavern_current_user", JSON.stringify(user));
-      localStorage.setItem("tavern_username", user?.name || payload.name);
+      setCurrentUser(user);
+      setUsername(user?.name || payload.name);
 
       window.dispatchEvent(new Event("tavern:authChanged"));
 

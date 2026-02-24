@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { TCG_LIST, PRODUCTS } from "../data/products";
+import { getCurrentUser } from "../authStorage";
 
 const ROLES = {
   USER: "USER",
@@ -24,8 +25,7 @@ function ShopPage({
   const [currentUser, setCurrentUser] = useState(null);
 
   useEffect(() => {
-    const raw = localStorage.getItem("tavern_current_user");
-    const user = raw ? JSON.parse(raw) : null;
+    const user = getCurrentUser();
 
     if (!user?.id) {
       navigate("/login");

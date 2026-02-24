@@ -2,14 +2,10 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useSocket } from "../hooks/useSocket";
 import OnlineUsers from "../components/OnlineUsers";
+import { getCurrentUser, getUsername } from "../authStorage";
 
 function readCurrentUser() {
-  try {
-    const raw = localStorage.getItem("tavern_current_user");
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
+  return getCurrentUser();
 }
 
 function ChatPage() {
@@ -17,7 +13,7 @@ function ChatPage() {
   const [newMessage, setNewMessage] = useState("");
   const [currentUser, setCurrentUser] = useState(() => {
     const u = readCurrentUser();
-    const fallback = localStorage.getItem("tavern_username") || "Guest";
+    const fallback = getUsername("Guest") || "Guest";
     // normalize so we always have { username }
     return u ? { ...u, username: u?.name || u?.username || fallback } : { username: fallback };
   });
@@ -26,7 +22,7 @@ function ChatPage() {
 
   // ✅ username should reflect login changes (without refresh)
   const username = useMemo(() => {
-    return currentUser?.username || localStorage.getItem("tavern_username") || "Guest";
+    return currentUser?.username || getUsername("Guest") || "Guest";
   }, [currentUser]);
 
   // ✅ Pass username so the hook joins presence correctly
@@ -36,7 +32,7 @@ function ChatPage() {
   useEffect(() => {
     const syncAuth = () => {
       const u = readCurrentUser();
-      const fallback = localStorage.getItem("tavern_username") || "Guest";
+      const fallback = getUsername("Guest") || "Guest";
       setCurrentUser(
         u ? { ...u, username: u?.name || u?.username || fallback } : { username: fallback },
       );

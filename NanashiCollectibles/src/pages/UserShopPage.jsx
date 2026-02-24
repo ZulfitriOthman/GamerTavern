@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { TCG_LIST } from "../data/products";
 import { getSocket, connectSocket } from "../socket/socketClient";
+import { getCurrentUser, getUsername } from "../authStorage";
 
 const ROLES = {
   USER: "USER",
@@ -132,8 +133,7 @@ export default function UserShopPage({
 
   // ✅ Guard: must be logged in AND role USER
   useEffect(() => {
-    const raw = localStorage.getItem("tavern_current_user");
-    const user = raw ? JSON.parse(raw) : null;
+    const user = getCurrentUser();
 
     if (!user?.id) {
       navigate("/login");
@@ -227,7 +227,7 @@ export default function UserShopPage({
     didInitSocketRef.current = true;
 
     const username =
-      localStorage.getItem("tavern_username") ||
+      getUsername() ||
       (currentUser?.name ? String(currentUser.name) : null);
 
     connectSocket(username);

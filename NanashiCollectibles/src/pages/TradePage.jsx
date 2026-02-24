@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { getSocket, connectSocket } from "../socket/socketClient";
+import { getCurrentUser, getUsername } from "../authStorage";
 
 function TradePage() {
   const [currentUser, setCurrentUser] = useState(null);
@@ -28,11 +29,10 @@ function TradePage() {
      INIT USER + SOCKET
   ----------------------------------------------------------- */
   useEffect(() => {
-    const raw = localStorage.getItem("tavern_current_user");
-    const user = raw ? JSON.parse(raw) : null;
+    const user = getCurrentUser();
     setCurrentUser(user);
 
-    connectSocket(user?.name || "guest");
+    connectSocket(user?.name || getUsername("guest") || "guest");
   }, []);
 
   /* -----------------------------------------------------------

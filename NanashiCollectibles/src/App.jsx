@@ -29,6 +29,12 @@ import {
   disconnectSocket,
   getSocket,
 } from "./socket/socketClient";
+import {
+  clearAuthStorage,
+  getCurrentUser,
+  getUsername,
+  setUsername,
+} from "./authStorage";
 
 const pageVariants = {
   initial: { opacity: 0, y: 16, filter: "blur(8px)" },
@@ -51,12 +57,7 @@ function PageWrap({ children }) {
 }
 
 function readCurrentUser() {
-  try {
-    const raw = localStorage.getItem("tavern_current_user");
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
+  return getCurrentUser();
 }
 
 function ShopEntryRedirect() {
@@ -64,8 +65,7 @@ function ShopEntryRedirect() {
   const { tcgId } = useParams();
 
   useEffect(() => {
-    const raw = localStorage.getItem("tavern_current_user");
-    const user = raw ? JSON.parse(raw) : null;
+    const user = getCurrentUser();
 
     if (!user?.id) {
       navigate("/login", { replace: true });
@@ -101,11 +101,11 @@ function App() {
 
   // ✅ Username for socket presence (fallback to Traveler###)
   const [username] = useState(() => {
-    const stored = localStorage.getItem("tavern_username");
+    const stored = getUsername();
     if (stored) return stored;
 
     const newUsername = `Traveler${Math.floor(Math.random() * 1000)}`;
-    localStorage.setItem("tavern_username", newUsername);
+    setUsername(newUsername);
     return newUsername;
   });
 
@@ -113,9 +113,7 @@ function App() {
 
   // ✅ Show name in navbar
   const displayName = useMemo(() => {
-    return (
-      currentUser?.name || localStorage.getItem("tavern_username") || "Traveler"
-    );
+    return currentUser?.name || getUsername("Traveler") || "Traveler";
   }, [currentUser]);
 
   const isLoggedIn = !!currentUser?.id;
@@ -134,7 +132,7 @@ function App() {
   }, []);
 
   const handleLogout = () => {
-    localStorage.removeItem("tavern_current_user");
+    clearAuthStorage();
     window.dispatchEvent(new Event("tavern:authChanged"));
     setMobileMenuOpen(false);
     navigate("/login");

@@ -2,6 +2,7 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useSocket } from "../hooks/useSocket";
+import { setCurrentUser, setUsername } from "../authStorage";
 
 const ROLES = {
   USER: "USER",
@@ -104,8 +105,8 @@ export default function LoginPage() {
       // }
 
       // ✅ store user
-      localStorage.setItem("tavern_current_user", JSON.stringify(user));
-      localStorage.setItem("tavern_username", user?.name || "Traveler");
+      setCurrentUser(user);
+      setUsername(user?.name || "Traveler");
 
       // ✅ notify App.jsx (same tab) so navbar updates without refresh
       window.dispatchEvent(new Event("tavern:authChanged"));

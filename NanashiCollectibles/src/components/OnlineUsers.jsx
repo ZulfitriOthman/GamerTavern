@@ -1,28 +1,24 @@
 // Online Users Component - Shows who's currently online
 import { useMemo, useEffect, useState } from "react";
 import { useSocket } from "../hooks/useSocket";
+import { getCurrentUser, getUsername } from "../authStorage";
 
 function readCurrentUser() {
-  try {
-    const raw = localStorage.getItem("tavern_current_user");
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
+  return getCurrentUser();
 }
 
 function OnlineUsers() {
   // ✅ keep a local username that updates after login/logout (no refresh)
   const [username, setUsername] = useState(() => {
     const u = readCurrentUser();
-    return u?.name || localStorage.getItem("tavern_username") || "Guest";
+    return u?.name || getUsername("Guest") || "Guest";
   });
 
   // ✅ sync username when auth changes
   useEffect(() => {
     const syncAuth = () => {
       const u = readCurrentUser();
-      setUsername(u?.name || localStorage.getItem("tavern_username") || "Guest");
+      setUsername(u?.name || getUsername("Guest") || "Guest");
     };
 
     window.addEventListener("storage", syncAuth);

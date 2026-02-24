@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { getSocket, connectSocket } from "../socket/socketClient";
+import { getCurrentUser, getUsername } from "../authStorage";
 
 const PLACEHOLDER = "/placeholder.png";
 
@@ -81,8 +82,7 @@ export default function ProductDetailPage({ addToCart }) {
 
   // Load current user
   useEffect(() => {
-    const raw = localStorage.getItem("tavern_current_user");
-    const user = raw ? JSON.parse(raw) : null;
+    const user = getCurrentUser();
     if (!user?.id) {
       navigate("/login");
       return;
@@ -93,7 +93,7 @@ export default function ProductDetailPage({ addToCart }) {
   // Ensure socket
   useEffect(() => {
     const username =
-      localStorage.getItem("tavern_username") ||
+      getUsername() ||
       (currentUser?.name ? String(currentUser.name) : null);
 
     connectSocket(username);
