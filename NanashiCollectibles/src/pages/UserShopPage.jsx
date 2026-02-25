@@ -65,7 +65,7 @@ function normalizeImageUrl(v) {
   return PLACEHOLDER;
 }
 
-// Category helper: supports future DB column, otherwise fallback
+// Category helper: supports DB column, otherwise fallback
 function deriveCategory(row) {
   const direct =
     toStr(row?.category) ||
@@ -158,7 +158,7 @@ export default function UserShopPage({
 
   const activeTcg = useMemo(
     () => TCG_LIST.find((t) => t.id === selectedTcg),
-    [selectedTcg],
+    [selectedTcg]
   );
 
   const handleSelectTcg = (id) => {
@@ -197,6 +197,14 @@ export default function UserShopPage({
       const rawImage = asText(r.image_url ?? r.IMAGE_URL);
       const img = normalizeImageUrl(rawImage);
 
+      const category = deriveCategory({
+        category: r.category,
+        CATEGORY: r.CATEGORY,
+        product_category: r.product_category,
+        PRODUCT_CATEGORY: r.PRODUCT_CATEGORY,
+        code: r.code ?? r.CODE,
+      });
+
       return {
         id: r.id ?? r.ID,
         vendor_id: r.vendor_id ?? r.VENDOR_ID,
@@ -207,13 +215,7 @@ export default function UserShopPage({
         stock: toInt(r.stock_quantity ?? r.STOCK_QUANTITY),
         image: img,
         description: asText(r.description ?? r.DESCRIPTION),
-        category: deriveCategory({
-          category: r.category,
-          CATEGORY: r.CATEGORY,
-          product_category: r.product_category,
-          PRODUCT_CATEGORY: r.PRODUCT_CATEGORY,
-          code: r.code ?? r.CODE,
-        }),
+        category,
         created_at: createdAt ? new Date(createdAt) : null,
       };
     });
@@ -227,8 +229,7 @@ export default function UserShopPage({
     didInitSocketRef.current = true;
 
     const username =
-      getUsername() ||
-      (currentUser?.name ? String(currentUser.name) : null);
+      getUsername() || (currentUser?.name ? String(currentUser.name) : null);
 
     connectSocket(username);
   }, [currentUser?.name]);
@@ -282,23 +283,32 @@ export default function UserShopPage({
   }, []);
 
   // ----------------------------
-  // Filters / Sort
+  // ✅ TCG FILTER (same spirit as vendor: CATEGORY is the TCG name)
+  // ----------------------------
+  const tcgCategoryName = useMemo(() => toStr(activeTcg?.name), [activeTcg]);
+
+  const tcgFilteredProducts = useMemo(() => {
+    // If no active tcg found, just show all (failsafe)
+    if (!tcgCategoryName) return products;
+
+    // Exact match against CATEGORY
+    return products.filter((p) => toStr(p.category) === tcgCategoryName);
+  }, [products, tcgCategoryName]);
+
+  // ----------------------------
+  // Filters / Sort (applies after TCG filter)
   // ----------------------------
   const categories = useMemo(() => {
     const set = new Set();
-    for (const p of products) set.add(p.category || "Uncategorized");
+    for (const p of tcgFilteredProducts) set.add(p.category || "Uncategorized");
     return ["ALL", ...Array.from(set).sort((a, b) => a.localeCompare(b))];
-  }, [products]);
+  }, [tcgFilteredProducts]);
 
   const filteredProducts = useMemo(() => {
     const q = search.trim().toLowerCase();
 
     const now = new Date();
-    const startOfToday = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-    );
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     const passDate = (p) => {
       if (dateFilter === DATE_FILTER.ALL) return true;
@@ -312,7 +322,7 @@ export default function UserShopPage({
       return t >= cutoff;
     };
 
-    const list = products
+    const list = tcgFilteredProducts
       .filter((p) => passDate(p))
       .filter((p) => {
         if (categoryFilter === "ALL") return true;
@@ -335,8 +345,7 @@ export default function UserShopPage({
 
     const byName = (a, b) => a.name.localeCompare(b.name);
     const byPrice = (a, b) => a.price - b.price;
-    const byCategory = (a, b) =>
-      (a.category || "").localeCompare(b.category || "");
+    const byCategory = (a, b) => (a.category || "").localeCompare(b.category || "");
 
     const sorted = [...list];
     switch (sortMode) {
@@ -365,7 +374,7 @@ export default function UserShopPage({
     }
 
     return sorted;
-  }, [products, search, categoryFilter, dateFilter, sortMode]);
+  }, [tcgFilteredProducts, search, categoryFilter, dateFilter, sortMode]);
 
   if (!currentUser) return null;
 
@@ -434,15 +443,25 @@ export default function UserShopPage({
                 {activeTcg?.name} Marketplace
               </h3>
               <p className="mt-1 font-serif text-[11px] italic text-amber-200/70">
-                Live vendor inventory • Search • Filter • Sort
+                CATEGORY-driven TCG view • Search • Filter • Sort
               </p>
             </div>
 
             <div className="flex items-center gap-2">
+              <span
+                className={[
+                  "rounded-full border px-3 py-1 font-serif text-[10px] uppercase tracking-wide",
+                  isSocketConnected
+                    ? "border-emerald-600/40 bg-emerald-950/30 text-emerald-200"
+                    : "border-rose-600/40 bg-rose-950/30 text-rose-200",
+                ].join(" ")}
+                title="Socket connection status"
+              >
+                {isSocketConnected ? "Live" : "Offline"}
+              </span>
+
               <span className="rounded-full border border-amber-700/40 bg-amber-950/20 px-3 py-1 font-serif text-[10px] uppercase tracking-wide text-amber-200">
-                {loadingProducts
-                  ? "Loading..."
-                  : `${filteredProducts.length} item(s)`}
+                {loadingProducts ? "Loading..." : `${filteredProducts.length} item(s)`}
               </span>
             </div>
           </div>
@@ -526,7 +545,7 @@ export default function UserShopPage({
         {/* Products */}
         {filteredProducts.length === 0 ? (
           <div className="rounded-xl border border-amber-900/40 bg-gradient-to-br from-slate-950 to-purple-950/40 p-6 text-sm italic text-amber-100/70">
-            No products found (try changing category / search / date / sort).
+            No products found for this TCG (CATEGORY = "{tcgCategoryName || "-"}").
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -547,6 +566,7 @@ export default function UserShopPage({
                     <span className="rounded-full border border-amber-500/60 bg-slate-950/80 px-2.5 py-1 font-serif text-[10px] uppercase tracking-wide text-amber-200">
                       {p.category || "Uncategorized"}
                     </span>
+
                     {p.conditional ? (
                       <span className="rounded-full border border-emerald-600/40 bg-emerald-950/25 px-2.5 py-1 font-serif text-[10px] uppercase tracking-wide text-emerald-200">
                         {p.conditional}
@@ -571,6 +591,7 @@ export default function UserShopPage({
                         {toInt(p.stock)}
                       </span>
                     </span>
+
                     <span className="rounded-full border border-amber-900/40 bg-slate-950/50 px-2 py-0.5 font-serif text-[10px] uppercase tracking-wide text-amber-200/80">
                       {p.code || "-"}
                     </span>
