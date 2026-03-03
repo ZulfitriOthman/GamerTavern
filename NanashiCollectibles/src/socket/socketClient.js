@@ -25,7 +25,12 @@ export const connectSocket = (username) => {
     socket.on("connect", () => {
       console.log("✅ Connected to Socket.IO:", socket.id, "->", url);
 
-      if (lastUsername) socket.emit("user:join", lastUsername);
+      if (lastUsername) {
+        console.log("👤 Emitting user:join with username:", lastUsername);
+        socket.emit("user:join", lastUsername);
+      } else {
+        console.warn("⚠️ No username to join with");
+      }
 
       socket.emit("activities:request");
     });

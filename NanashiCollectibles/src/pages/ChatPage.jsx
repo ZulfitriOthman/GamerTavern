@@ -11,6 +11,9 @@ function readCurrentUser() {
 function ChatPage() {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState("");
+  const [isTyping, setIsTyping] = useState(false);
+  const [typingUsers, setTypingUsers] = useState(new Set());
+  const [connectionError, setConnectionError] = useState(null);
   const [currentUser, setCurrentUser] = useState(() => {
     const u = readCurrentUser();
     const fallback = getUsername("Guest") || "Guest";
@@ -19,6 +22,8 @@ function ChatPage() {
   });
 
   const messagesEndRef = useRef(null);
+  const typingTimeoutRef = useRef(null);
+  const inputRef = useRef(null);
 
   // ✅ username should reflect login changes (without refresh)
   const username = useMemo(() => {
@@ -47,13 +52,22 @@ function ChatPage() {
     };
   }, []);
 
-  // ✅ Debug connection (remove later if you want)
+  // Enhanced connection handling
   useEffect(() => {
     if (!socket) return;
 
-    const onConnect = () => console.log("✅ socket connected:", socket.id);
-    const onDisconnect = (reason) => console.log("⚠️ socket disconnected:", reason);
-    const onConnectError = (err) => console.log("❌ connect_error:", err?.message, err);
+    const onConnect = () => {
+      console.log("✅ socket connected:", socket.id);
+      setConnectionError(null);
+    };
+    const onDisconnect = (reason) => {
+      console.log("⚠️ socket disconnected:", reason);
+      setConnectionError(`Disconnected: ${reason}`);
+    };
+    const onConnectError = (err) => {
+      console.log("❌ connect_error:", err?.message, err);
+      setConnectionError("Connection failed");
+    };
 
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
@@ -66,37 +80,73 @@ function ChatPage() {
     };
   }, [socket]);
 
-  // ✅ Listen for chat messages
+  // ✅ Listen for chat messages and typing
   useEffect(() => {
     if (!socket) return;
 
     function onChatMessage(message) {
-      setMessages((prev) => [...prev, message]);
+      console.log("📨 Received:", message);
+      setMessages((prev) => {
+        // Prevent duplicates
+        if (prev.some(m => m.id === message.id)) return prev;
+        return [...prev, message];
+      });
+      // Clear typing for this user
+      setTypingUsers(prev => {
+        const next = new Set(prev);
+        next.delete(message.username);
+        return next;
+      });
+    }
+
+    function onUserTyping({ username: typingUser }) {
+      if (typingUser !== username) {
+        setTypingUsers(prev => new Set(prev).add(typingUser));
+        setTimeout(() => setTypingUsers(prev => {
+          const next = new Set(prev);
+          next.delete(typingUser);
+          return next;
+        }), 3000);
+      }
     }
 
     socket.on("chat:message", onChatMessage);
+    socket.on("chat:typing", onUserTyping);
 
     return () => {
       socket.off("chat:message", onChatMessage);
+      socket.off("chat:typing", onUserTyping);
     };
-  }, [socket]);
+  }, [socket, username]);
 
   // ✅ Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Handle typing indicator
+  const handleTyping = () => {
+    if (!socket || !isConnected) return;
+    if (!isTyping) {
+      setIsTyping(true);
+      socket.emit("chat:typing", { username });
+    }
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => setIsTyping(false), 1000);
+  };
+
   const handleSendMessage = (e) => {
     e.preventDefault();
     if (!newMessage.trim() || !isConnected || !socket) return;
 
-    // ✅ send as object (preferred) but keep backward compatibility if server expects string
-    socket.emit("chat:message", {
-      message: newMessage.trim(),
-      username: currentUser?.username || username,
-    });
+    console.log("📤 Sending:", newMessage.trim());
+    // Backend expects STRING
+    socket.emit("chat:message", newMessage.trim());
 
     setNewMessage("");
+    setIsTyping(false);
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    inputRef.current?.focus();
   };
 
   const formatTime = (timestamp) => {
@@ -135,15 +185,22 @@ function ChatPage() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
-                <div
-                  className={`h-3 w-3 rounded-full ${
-                    isConnected ? "bg-green-500 animate-pulse" : "bg-red-500"
-                  }`}
-                />
-                <span className="font-serif text-sm text-amber-100/70">
-                  {isConnected ? "Connected" : "Disconnected"}
-                </span>
+              <div className="flex flex-col items-end gap-1">
+                <div className="flex items-center gap-2">
+                  <div
+                    className={`h-3 w-3 rounded-full ${
+                      isConnected ? "bg-green-500 animate-pulse" : "bg-red-500"
+                    }`}
+                  />
+                  <span className="font-serif text-sm text-amber-100/70">
+                    {isConnected ? "Connected" : "Disconnected"}
+                  </span>
+                </div>
+                {connectionError && (
+                  <span className="font-serif text-xs text-red-400">
+                    {connectionError}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -201,28 +258,61 @@ function ChatPage() {
                   );
                 })
               )}
+              
+              {/* Typing Indicator */}
+              {typingUsers.size > 0 && (
+                <div className="flex items-center gap-2 px-3 py-2">
+                  <div className="flex gap-1">
+                    <div className="h-2 w-2 animate-bounce rounded-full bg-amber-500/50"></div>
+                    <div className="h-2 w-2 animate-bounce rounded-full bg-amber-500/50" style={{ animationDelay: "150ms" }}></div>
+                    <div className="h-2 w-2 animate-bounce rounded-full bg-amber-500/50" style={{ animationDelay: "300ms" }}></div>
+                  </div>
+                  <span className="font-serif text-xs italic text-amber-100/50">
+                    {Array.from(typingUsers).join(", ")} {typingUsers.size === 1 ? "is" : "are"} typing...
+                  </span>
+                </div>
+              )}
+              
               <div ref={messagesEndRef} />
             </div>
 
             {/* Message Input */}
-            <div className="border-t border-amber-900/30 p-4">
+            <div className="border-t border-amber-900/30 bg-slate-950/50 p-4">
               <form onSubmit={handleSendMessage} className="flex gap-3">
-                <input
-                  type="text"
-                  value={newMessage}
-                  onChange={(e) => setNewMessage(e.target.value)}
-                  placeholder="Type your message..."
-                  disabled={!isConnected}
-                  className="flex-1 rounded-lg border border-amber-900/30 bg-slate-950 px-4 py-3 font-serif text-sm text-amber-100 placeholder-amber-100/40 focus:outline-none focus:ring-2 focus:ring-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
-                />
+                <div className="relative flex-1">
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    value={newMessage}
+                    onChange={(e) => {
+                      setNewMessage(e.target.value);
+                      handleTyping();
+                    }}
+                    placeholder={isConnected ? "Type your message..." : "Connecting..."}
+                    disabled={!isConnected}
+                    maxLength={500}
+                    className="w-full rounded-lg border border-amber-900/30 bg-slate-950 px-4 py-3 pr-12 font-serif text-sm text-amber-100 placeholder-amber-100/40 transition-all focus:border-amber-600 focus:outline-none focus:ring-2 focus:ring-amber-600/30 disabled:cursor-not-allowed disabled:opacity-50"
+                  />
+                  {newMessage && (
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 font-serif text-xs text-amber-100/30">
+                      {newMessage.length}/500
+                    </span>
+                  )}
+                </div>
                 <button
                   type="submit"
                   disabled={!isConnected || !newMessage.trim()}
-                  className="rounded-lg border border-amber-600/50 bg-gradient-to-r from-amber-950/50 to-purple-950/50 px-6 py-3 font-serif text-sm font-semibold text-amber-100 shadow-lg shadow-amber-900/30 transition-all hover:border-amber-500 hover:shadow-amber-500/40 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="group rounded-lg border border-amber-600/50 bg-gradient-to-r from-amber-950/50 to-purple-950/50 px-6 py-3 font-serif text-sm font-semibold text-amber-100 shadow-lg shadow-amber-900/30 transition-all hover:scale-105 hover:border-amber-500 hover:shadow-amber-500/40 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
                 >
-                  Send
+                  <span className="flex items-center gap-2">
+                    Send
+                    <span className="transition-transform group-hover:translate-x-0.5">→</span>
+                  </span>
                 </button>
               </form>
+              <p className="mt-2 font-serif text-xs text-amber-100/30">
+                Press Enter to send
+              </p>
             </div>
 
             <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-amber-500/30 to-transparent" />

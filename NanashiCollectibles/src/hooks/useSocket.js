@@ -36,6 +36,7 @@ function attachListenersOnce() {
   };
 
   const onUsersOnline = (users) => {
+    console.log("👥 Received users:online event:", users);
     globalState = { ...globalState, onlineUsers: Array.isArray(users) ? users : [] };
     notify();
   };
