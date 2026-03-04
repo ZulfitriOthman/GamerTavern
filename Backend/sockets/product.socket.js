@@ -43,6 +43,8 @@ function safePublicProductRow(row) {
   return {
     id: row.ID,
     vendor_id: row.VENDOR_ID,
+    seller_name: row.SELLER_NAME ?? null,
+    seller_phone: row.SELLER_PHONE ?? null,
     name: row.NAME,
     code: row.CODE,
     description: row.DESCRIPTION,
@@ -112,21 +114,21 @@ export default function productSocketController({
       const params = [];
 
       if (vendorId) {
-        where.push("VENDOR_ID = ?");
+        where.push("p.VENDOR_ID = ?");
         params.push(vendorId);
       }
 
       if (dateFrom) {
-        where.push("CREATED_AT >= ?");
+        where.push("p.CREATED_AT >= ?");
         params.push(dateFrom);
       }
       if (dateTo) {
-        where.push("CREATED_AT <= ?");
+        where.push("p.CREATED_AT <= ?");
         params.push(dateTo);
       }
 
       if (search) {
-        where.push("(NAME LIKE ? OR CODE LIKE ? OR CATEGORY LIKE ?)");
+        where.push("(p.NAME LIKE ? OR p.CODE LIKE ? OR p.CATEGORY LIKE ?)");
         params.push(`%${search}%`, `%${search}%`, `%${search}%`);
       }
 
@@ -139,11 +141,24 @@ export default function productSocketController({
 
       const sql = `
         SELECT
-          ID, VENDOR_ID, NAME, CODE, DESCRIPTION, CONDITIONAL,
-          PRICE, STOCK_QUANTITY, IMAGE_URL, CATEGORY, CREATED_AT, UPDATED_AT
-        FROM PRODUCTS
+          p.ID,
+          p.VENDOR_ID,
+          p.NAME,
+          p.CODE,
+          p.DESCRIPTION,
+          p.CONDITIONAL,
+          p.PRICE,
+          p.STOCK_QUANTITY,
+          p.IMAGE_URL,
+          p.CATEGORY,
+          p.CREATED_AT,
+          p.UPDATED_AT,
+          u.NAME AS SELLER_NAME,
+          u.PHONE AS SELLER_PHONE
+        FROM PRODUCTS p
+        LEFT JOIN PERSONAL_USER u ON u.ID = p.VENDOR_ID
         ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-        ORDER BY ${orderBy}
+        ORDER BY ${orderBy.replace(/\b(ID|NAME|PRICE)\b/g, "p.$1")}
       `;
 
       const [rows] = await executeWithRetry(db, sql, params, "product:list");

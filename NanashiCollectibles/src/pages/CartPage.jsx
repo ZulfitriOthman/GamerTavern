@@ -1,5 +1,71 @@
 // src/pages/CartPage.jsx
-function CartPage({ cart, removeFromCart, updateQuantity, cartTotalPrice }) {
+import { useState } from "react";
+import { checkoutPayment } from "../api/payments";
+
+function CartPage({
+  cart,
+  removeFromCart,
+  updateQuantity,
+  cartTotalPrice,
+  clearCart,
+}) {
+  const [isPaying, setIsPaying] = useState(false);
+  const [paymentError, setPaymentError] = useState("");
+  const [paymentSuccess, setPaymentSuccess] = useState("");
+  const [checkoutForm, setCheckoutForm] = useState({
+    fullName: "",
+    email: "",
+    cardNumber: "",
+    expirationMonth: "",
+    expirationYear: "",
+    securityCode: "",
+  });
+
+  const onFieldChange = (e) => {
+    const { name, value } = e.target;
+    setCheckoutForm((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleCheckout = async () => {
+    if (cart.length === 0) return;
+
+    setIsPaying(true);
+    setPaymentError("");
+    setPaymentSuccess("");
+
+    try {
+      const result = await checkoutPayment({
+        amount: cartTotalPrice,
+        currency: "USD",
+        card: {
+          number: checkoutForm.cardNumber,
+          expirationMonth: checkoutForm.expirationMonth,
+          expirationYear: checkoutForm.expirationYear,
+          securityCode: checkoutForm.securityCode,
+        },
+        billTo: {
+          fullName: checkoutForm.fullName,
+          email: checkoutForm.email,
+        },
+        cartItems: cart.map((item) => ({
+          id: item.id,
+          name: item.name,
+          quantity: item.quantity,
+          price: item.price,
+        })),
+      });
+
+      setPaymentSuccess(
+        `Payment ${result.status || "processed"}. Transaction ID: ${result.transactionId || "N/A"}`,
+      );
+      clearCart?.();
+    } catch (err) {
+      setPaymentError(err?.message || "Checkout failed");
+    } finally {
+      setIsPaying(false);
+    }
+  };
+
   return (
     <div className="mx-auto w-full max-w-4xl space-y-6">
       {/* Fantasy Header */}
@@ -79,12 +145,67 @@ function CartPage({ cart, removeFromCart, updateQuantity, cartTotalPrice }) {
               </span>
             </div>
 
+            <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <input
+                name="fullName"
+                value={checkoutForm.fullName}
+                onChange={onFieldChange}
+                placeholder="Cardholder name"
+                className="rounded-lg border border-amber-900/30 bg-slate-950 px-3 py-2 font-serif text-sm text-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-600"
+              />
+              <input
+                name="email"
+                value={checkoutForm.email}
+                onChange={onFieldChange}
+                placeholder="Email"
+                type="email"
+                className="rounded-lg border border-amber-900/30 bg-slate-950 px-3 py-2 font-serif text-sm text-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-600"
+              />
+              <input
+                name="cardNumber"
+                value={checkoutForm.cardNumber}
+                onChange={onFieldChange}
+                placeholder="Card number"
+                className="rounded-lg border border-amber-900/30 bg-slate-950 px-3 py-2 font-serif text-sm text-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-600 sm:col-span-2"
+              />
+              <input
+                name="expirationMonth"
+                value={checkoutForm.expirationMonth}
+                onChange={onFieldChange}
+                placeholder="MM"
+                className="rounded-lg border border-amber-900/30 bg-slate-950 px-3 py-2 font-serif text-sm text-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-600"
+              />
+              <input
+                name="expirationYear"
+                value={checkoutForm.expirationYear}
+                onChange={onFieldChange}
+                placeholder="YYYY"
+                className="rounded-lg border border-amber-900/30 bg-slate-950 px-3 py-2 font-serif text-sm text-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-600"
+              />
+              <input
+                name="securityCode"
+                value={checkoutForm.securityCode}
+                onChange={onFieldChange}
+                placeholder="CVV"
+                className="rounded-lg border border-amber-900/30 bg-slate-950 px-3 py-2 font-serif text-sm text-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-600"
+              />
+            </div>
+
             <button
               className="mt-6 w-full overflow-hidden rounded-xl border border-amber-600/50 bg-gradient-to-r from-amber-950/50 to-purple-950/50 py-4 font-serif text-base font-bold uppercase tracking-wider text-amber-100 shadow-lg shadow-amber-900/30 transition-all hover:border-amber-500 hover:shadow-xl hover:shadow-amber-500/40"
-              onClick={() => alert("Real checkout flow coming soon 😉")}
+              onClick={handleCheckout}
+              disabled={isPaying || cart.length === 0}
             >
-              Proceed to Checkout
+              {isPaying ? "Processing Payment..." : "Proceed to Checkout"}
             </button>
+
+            {paymentError ? (
+              <p className="mt-3 text-center font-serif text-xs text-rose-300">{paymentError}</p>
+            ) : null}
+
+            {paymentSuccess ? (
+              <p className="mt-3 text-center font-serif text-xs text-emerald-300">{paymentSuccess}</p>
+            ) : null}
             
             <p className="mt-3 text-center font-serif text-xs italic text-amber-100/50">
               Secure payment processing • Multiple payment methods accepted

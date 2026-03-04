@@ -161,6 +161,8 @@ export default function ProductDetailPage({ addToCart }) {
     setProduct({
       id: r.id ?? r.ID,
       vendor_id: r.vendor_id ?? r.VENDOR_ID,
+      seller_name: toStr(r.seller_name ?? r.SELLER_NAME),
+      seller_phone: toStr(r.seller_phone ?? r.SELLER_PHONE),
       name: toStr(r.name ?? r.NAME),
       code: toStr(r.code ?? r.CODE),
       conditional: toStr(r.conditional ?? r.CONDITIONAL),
@@ -262,6 +264,18 @@ export default function ProductDetailPage({ addToCart }) {
               <span className="rounded-full border border-emerald-900/40 bg-slate-950/60 px-2 py-0.5 font-serif text-emerald-200/80">
                 Code: {product.code || "-"}
               </span>
+
+              {product.seller_name ? (
+                <span className="rounded-full border border-sky-600/40 bg-sky-950/15 px-2 py-0.5 font-serif text-sky-200/90">
+                  Seller: {product.seller_name}
+                </span>
+              ) : null}
+
+              {product.seller_phone ? (
+                <span className="rounded-full border border-sky-600/40 bg-sky-950/15 px-2 py-0.5 font-serif text-sky-200/90">
+                  Phone: {product.seller_phone}
+                </span>
+              ) : null}
 
               {product.conditional ? (
                 <span className="rounded-full border border-amber-600/40 bg-amber-950/15 px-2 py-0.5 font-serif text-amber-200/90">

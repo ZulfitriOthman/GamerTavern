@@ -1,4 +1,13 @@
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
+const ENV_API_BASE =
+  String(import.meta.env.VITE_API_BASE || "").trim() ||
+  String(import.meta.env.VITE_API_URL || "").trim();
+
+const API_BASE =
+  ENV_API_BASE ||
+  (typeof window !== "undefined" &&
+  (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+    ? "http://localhost:3001"
+    : window.location.origin);
 
 export async function register({ name, email, phone, password }) {
   const res = await fetch(`${API_BASE}/api/auth/register`, {
