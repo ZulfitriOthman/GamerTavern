@@ -42,6 +42,68 @@ const pageVariants = {
   exit: { opacity: 0, y: -16, filter: "blur(8px)" },
 };
 
+function ArcaneNavItem({
+  to,
+  label,
+  isActive,
+  onClick,
+  variant = "desktop", // "desktop" | "mobileRow" | "mobilePill"
+}) {
+  const base =
+    variant === "mobileRow"
+      ? "group relative block px-4 py-3 font-serif text-sm transition-colors"
+      : variant === "mobilePill"
+        ? "group relative rounded-lg px-3 py-2 font-serif text-sm font-semibold tracking-wide transition-all"
+        : "group relative px-5 lg:px-6 py-2.5 font-serif text-sm font-medium tracking-wide transition-all";
+
+  const colors =
+    variant === "mobileRow"
+      ? isActive
+        ? "text-amber-300 bg-amber-950/25"
+        : "text-amber-100 hover:bg-amber-950/30"
+      : isActive
+        ? "text-amber-400"
+        : "text-amber-100 hover:text-amber-300";
+
+  return (
+    <Link to={to} onClick={onClick} className={[base, colors].join(" ")}>
+      <span className="relative z-10 flex items-center justify-between">
+        <span>{label}</span>
+        {variant === "mobileRow" ? (
+          <span className="opacity-0 translate-x-1 transition-all duration-200 group-hover:opacity-100 group-hover:translate-x-0">
+            →
+          </span>
+        ) : null}
+      </span>
+
+      {/* Base backgrounds */}
+      {variant === "mobilePill" ? (
+        <span className="absolute inset-0 rounded-lg border border-amber-600/50 bg-gradient-to-r from-amber-950/50 to-purple-950/50" />
+      ) : null}
+
+      {variant === "desktop" ? (
+        <>
+          {/* Hover background */}
+          <div className="absolute inset-0 scale-x-0 rounded-lg bg-gradient-to-r from-amber-950/50 to-purple-950/50 transition-transform group-hover:scale-x-100" />
+          {/* Bottom glow line */}
+          <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber-500 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+        </>
+      ) : null}
+
+      {/* ✅ Active square-line frame + corners */}
+      {isActive ? (
+        <>
+          <span className="pointer-events-none absolute inset-0 rounded-md border border-amber-500/70 scale-95 opacity-0 transition-all duration-300 group-hover:scale-100 group-hover:opacity-100" />
+          <span className="absolute left-0 top-0 h-2 w-2 border-l-2 border-t-2 border-amber-400" />
+          <span className="absolute right-0 top-0 h-2 w-2 border-r-2 border-t-2 border-amber-400" />
+          <span className="absolute left-0 bottom-0 h-2 w-2 border-l-2 border-b-2 border-amber-400" />
+          <span className="absolute right-0 bottom-0 h-2 w-2 border-r-2 border-b-2 border-amber-400" />
+        </>
+      ) : null}
+    </Link>
+  );
+}
+
 function PageWrap({ children }) {
   return (
     <motion.div
@@ -91,6 +153,45 @@ function ShopEntryRedirect() {
 
 function App() {
   const location = useLocation();
+  const isShopRoute = useMemo(() => {
+    const p = location.pathname;
+    return (
+      p === "/shop" ||
+      p.startsWith("/user/") ||
+      p.startsWith("/vendor/") ||
+      p.startsWith("/tcg/") ||
+      p.startsWith("/product/") // optional: keep Shop active on product details
+    );
+  }, [location.pathname]);
+  const isCartRoute = useMemo(
+    () => location.pathname.startsWith("/cart"),
+    [location.pathname],
+  );
+
+  const isTradeRoute = useMemo(
+    () => location.pathname.startsWith("/trade"),
+    [location.pathname],
+  );
+
+  const isChatRoute = useMemo(
+    () => location.pathname.startsWith("/chat"),
+    [location.pathname],
+  );
+
+  const isNewsRoute = useMemo(() => {
+    const p = location.pathname;
+    return p === "/" || p.startsWith("/news");
+  }, [location.pathname]);
+
+  const isAccountRoute = useMemo(
+    () => location.pathname.startsWith("/account"),
+    [location.pathname],
+  );
+
+  const isAuthRoute = useMemo(() => {
+    const p = location.pathname;
+    return p.startsWith("/login") || p.startsWith("/signup");
+  }, [location.pathname]);
   const navigate = useNavigate();
 
   const [cart, setCart] = useState([]);
@@ -263,20 +364,57 @@ function App() {
             {/* Desktop nav */}
             <div className="hidden md:flex items-center gap-2">
               <nav className="flex items-center gap-1">
-                {desktopNavItems.map((item) => (
-                  <NavLink
-                    key={item.to}
-                    to={item.to}
-                    className={({ isActive }) =>
-                      `group relative px-5 lg:px-6 py-2.5 font-serif text-sm font-medium tracking-wide transition-all
-                      ${isActive ? "text-amber-400" : "text-amber-100 hover:text-amber-300"}`
-                    }
-                  >
-                    <span className="relative z-10">{item.label}</span>
-                    <div className="absolute inset-0 scale-x-0 rounded-lg bg-gradient-to-r from-amber-950/50 to-purple-950/50 transition-transform group-hover:scale-x-100" />
-                    <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber-500 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
-                  </NavLink>
-                ))}
+                <ArcaneNavItem
+                  to="/shop"
+                  label="Shop"
+                  isActive={isShopRoute}
+                  variant="desktop"
+                  onClick={() => setMobileMenuOpen(false)}
+                />
+
+                <ArcaneNavItem
+                  to="/trade"
+                  label="Trade"
+                  isActive={isTradeRoute}
+                  variant="desktop"
+                />
+
+                <ArcaneNavItem
+                  to="/chat"
+                  label="Chat"
+                  isActive={isChatRoute}
+                  variant="desktop"
+                />
+
+                <ArcaneNavItem
+                  to="/news"
+                  label="News"
+                  isActive={isNewsRoute}
+                  variant="desktop"
+                />
+
+                {isLoggedIn ? (
+                  <ArcaneNavItem
+                    to="/account"
+                    label={displayName}
+                    isActive={isAccountRoute}
+                    variant="desktop"
+                  />
+                ) : (
+                  <ArcaneNavItem
+                    to="/login"
+                    label="Login"
+                    isActive={isAuthRoute}
+                    variant="desktop"
+                  />
+                )}
+
+                <ArcaneNavItem
+                  to="/cart"
+                  label={`Cart (${cartTotalItems})`}
+                  isActive={isCartRoute}
+                  variant="desktop"
+                />
               </nav>
 
               {/* ✅ Logout */}
@@ -529,6 +667,7 @@ function App() {
                     removeFromCart={removeFromCart}
                     updateQuantity={updateQuantity}
                     cartTotalPrice={cartTotalPrice}
+                    clearCart={() => setCart([])}
                   />
                 </PageWrap>
               }

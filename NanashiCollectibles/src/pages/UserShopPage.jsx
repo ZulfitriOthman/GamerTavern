@@ -158,7 +158,7 @@ export default function UserShopPage({
 
   const activeTcg = useMemo(
     () => TCG_LIST.find((t) => t.id === selectedTcg),
-    [selectedTcg]
+    [selectedTcg],
   );
 
   const handleSelectTcg = (id) => {
@@ -208,6 +208,8 @@ export default function UserShopPage({
       return {
         id: r.id ?? r.ID,
         vendor_id: r.vendor_id ?? r.VENDOR_ID,
+        seller_name: toStr(r.seller_name ?? r.SELLER_NAME),
+        seller_phone: toStr(r.seller_phone ?? r.SELLER_PHONE),
         name: toStr(r.name ?? r.NAME),
         code: toStr(r.code ?? r.CODE),
         conditional: toStr(r.conditional ?? r.CONDITIONAL),
@@ -285,15 +287,11 @@ export default function UserShopPage({
   // ----------------------------
   // ✅ TCG FILTER (same spirit as vendor: CATEGORY is the TCG name)
   // ----------------------------
-  const tcgCategoryName = useMemo(() => toStr(activeTcg?.name), [activeTcg]);
-
   const tcgFilteredProducts = useMemo(() => {
-    // If no active tcg found, just show all (failsafe)
-    if (!tcgCategoryName) return products;
-
-    // Exact match against CATEGORY
-    return products.filter((p) => toStr(p.category) === tcgCategoryName);
-  }, [products, tcgCategoryName]);
+    const selected = toStr(selectedTcg);
+    if (!selected) return products;
+    return products.filter((p) => toStr(p.category) === selected);
+  }, [products, selectedTcg]);
 
   // ----------------------------
   // Filters / Sort (applies after TCG filter)
@@ -308,7 +306,11 @@ export default function UserShopPage({
     const q = search.trim().toLowerCase();
 
     const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfToday = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    );
 
     const passDate = (p) => {
       if (dateFilter === DATE_FILTER.ALL) return true;
@@ -345,7 +347,8 @@ export default function UserShopPage({
 
     const byName = (a, b) => a.name.localeCompare(b.name);
     const byPrice = (a, b) => a.price - b.price;
-    const byCategory = (a, b) => (a.category || "").localeCompare(b.category || "");
+    const byCategory = (a, b) =>
+      (a.category || "").localeCompare(b.category || "");
 
     const sorted = [...list];
     switch (sortMode) {
@@ -461,7 +464,9 @@ export default function UserShopPage({
               </span>
 
               <span className="rounded-full border border-amber-700/40 bg-amber-950/20 px-3 py-1 font-serif text-[10px] uppercase tracking-wide text-amber-200">
-                {loadingProducts ? "Loading..." : `${filteredProducts.length} item(s)`}
+                {loadingProducts
+                  ? "Loading..."
+                  : `${filteredProducts.length} item(s)`}
               </span>
             </div>
           </div>
@@ -545,7 +550,8 @@ export default function UserShopPage({
         {/* Products */}
         {filteredProducts.length === 0 ? (
           <div className="rounded-xl border border-amber-900/40 bg-gradient-to-br from-slate-950 to-purple-950/40 p-6 text-sm italic text-amber-100/70">
-            No products found for this TCG (CATEGORY = "{tcgCategoryName || "-"}").
+            No products found for this TCG (CATEGORY = "{selectedTcg || "-"}
+            ").
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -596,6 +602,21 @@ export default function UserShopPage({
                       {p.code || "-"}
                     </span>
                   </div>
+
+                  {p.seller_name || p.seller_phone ? (
+                    <div className="flex flex-wrap gap-1.5 text-[10px]">
+                      {p.seller_name ? (
+                        <span className="rounded-full border border-sky-600/40 bg-sky-950/20 px-2 py-0.5 font-serif text-sky-200/90">
+                          Seller: {p.seller_name}
+                        </span>
+                      ) : null}
+                      {p.seller_phone ? (
+                        <span className="rounded-full border border-sky-600/40 bg-sky-950/20 px-2 py-0.5 font-serif text-sky-200/90">
+                          Phone: {p.seller_phone}
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : null}
 
                   <button
                     onClick={() =>

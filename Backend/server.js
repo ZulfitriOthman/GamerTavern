@@ -13,6 +13,7 @@ import { initDB, dbPing } from "./modules/db.module.js";
 // routes (optional)
 import createHealthRoutes from "./routes/api/health.routes.js";
 import createAuthRoutes from "./routes/api/auth.routes.js";
+import createPaymentRoutes from "./routes/api/payment.routes.js";
 
 // sockets
 import accountSocketController from "./sockets/account.socket.js";
@@ -206,6 +207,7 @@ app.use(
 );
 
 app.use("/api/auth", createAuthRoutes({ db, io }));
+app.use("/api/payments", createPaymentRoutes());
 
 /* ------------------------------ Socket Wiring ------------------------------ */
 io.on("connection", (socket) => {
