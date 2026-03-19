@@ -84,7 +84,7 @@ app.set("trust proxy", 1);
 const httpServer = createServer(app);
 
 /* ------------------------------ Environment ------------------------------ */
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3002;
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
 
 const EXTRA_ORIGINS = (process.env.EXTRA_ORIGINS || "")
