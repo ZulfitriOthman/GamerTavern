@@ -619,6 +619,7 @@ export default function UserShopPage({
                   ) : null}
 
                   <button
+                    type="button"
                     onClick={() =>
                       addToCart({
                         id: p.id,
@@ -629,9 +630,25 @@ export default function UserShopPage({
                       })
                     }
                     disabled={toInt(p.stock) === 0}
-                    className="mt-2 inline-flex items-center justify-center rounded-xl border border-amber-500/60 bg-gradient-to-r from-amber-950/60 to-purple-950/60 px-3 py-2 font-serif text-[11px] font-semibold uppercase tracking-wide text-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    className={[
+                      "mt-2 relative inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 font-serif text-[11px] font-semibold uppercase tracking-wide",
+                      toInt(p.stock) > 0
+                        ? "hologram-btn border-amber-500/60 bg-gradient-to-r from-amber-950/60 to-purple-950/60 text-amber-100"
+                        : "hologram-btn hologram-btn-rose border-rose-500/50 bg-gradient-to-r from-rose-950/50 to-slate-950 text-rose-100",
+                      "disabled:cursor-not-allowed",
+                    ].join(" ")}
                   >
-                    {toInt(p.stock) === 0 ? "Out of Stock" : "Add to Cart"}
+                    {toInt(p.stock) === 0 ? (
+                      <span className="holo-text" data-text="Out of Stock">
+                        Out of Stock
+                      </span>
+                    ) : (
+                      <span className="holo-text" data-text="Add to Cart">
+                        Add to Cart
+                      </span>
+                    )}
+
+                    <span className="holo-scan-line" aria-hidden="true" />
                   </button>
 
                   <button
@@ -719,9 +736,12 @@ export default function UserShopPage({
 
                 <Link
                   to="/cart"
-                  className="mt-4 block w-full rounded-lg border border-amber-500/70 bg-gradient-to-r from-amber-950/70 via-purple-950/70 to-slate-950 py-2.5 text-center font-serif text-[11px] font-bold uppercase tracking-[0.2em] text-amber-50"
+                  className="hologram-btn mt-4 relative block w-full rounded-lg border border-amber-500/70 bg-gradient-to-r from-amber-950/70 via-purple-950/70 to-slate-950 py-2.5 text-center font-serif text-[11px] font-bold uppercase tracking-[0.2em] text-amber-50"
                 >
-                  Go to Checkout
+                  <span className="holo-text" data-text="Go to Checkout">
+                    Go to Checkout
+                  </span>
+                  <span className="holo-scan-line" aria-hidden="true" />
                 </Link>
               </div>
             </div>
