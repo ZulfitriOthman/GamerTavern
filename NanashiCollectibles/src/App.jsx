@@ -18,6 +18,7 @@ import NewsPage from "./pages/NewsPage";
 import SocketDemo from "./pages/SocketDemo";
 import SignUpPage from "./pages/SignUpPage";
 import LoginPage from "./pages/LoginPage";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ChatPage from "./pages/ChatPage";
 import UserShopPage from "./pages/UserShopPage";
 import VendorShopPage from "./pages/VendorShopPage";
@@ -645,6 +646,15 @@ function App() {
               element={
                 <PageWrap>
                   <SignUpPage />
+                </PageWrap>
+              }
+            />
+
+            <Route
+              path="/forgot-password"
+              element={
+                <PageWrap>
+                  <ForgotPasswordPage />
                 </PageWrap>
               }
             />

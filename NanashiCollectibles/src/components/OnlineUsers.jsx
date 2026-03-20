@@ -8,13 +8,11 @@ function readCurrentUser() {
 }
 
 function OnlineUsers() {
-  // ✅ keep a local username that updates after login/logout (no refresh)
   const [username, setUsername] = useState(() => {
     const u = readCurrentUser();
     return u?.name || getUsername("Guest") || "Guest";
   });
 
-  // ✅ sync username when auth changes
   useEffect(() => {
     const syncAuth = () => {
       const u = readCurrentUser();
@@ -30,13 +28,10 @@ function OnlineUsers() {
     };
   }, []);
 
-  // ✅ IMPORTANT: pass username so this component joins presence correctly too
   const { onlineUsers, isConnected } = useSocket(username);
 
-  // ✅ Safety: ensure array
   const users = useMemo(() => (Array.isArray(onlineUsers) ? onlineUsers : []), [onlineUsers]);
 
-  // ✅ Optional: de-duplicate by username (or socketId)
   const uniqueUsers = useMemo(() => {
     const seen = new Set();
     return users.filter((u) => {
@@ -61,7 +56,6 @@ function OnlineUsers() {
         </span>
       </div>
 
-      {/* ✅ shows who YOU are */}
       <div className="mb-3 rounded-lg border border-amber-900/20 bg-slate-950/40 px-3 py-2">
         <p className="font-serif text-[11px] text-amber-100/60">
           You are:{" "}

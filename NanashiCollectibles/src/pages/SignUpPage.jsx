@@ -21,7 +21,7 @@ export default function SignUpPage() {
   const [formData, setFormData] = useState({
     username: "",
     email: "",
-    phone: "+673",
+    phone: "",
     role: ROLES.USER, // ✅ new
     password: "",
     confirmPassword: "",
@@ -104,7 +104,7 @@ export default function SignUpPage() {
       const payload = {
         name: formData.username.trim(),
         email: formData.email.trim().toLowerCase(),
-        phone: (formData.phone || "+673").trim(),
+        phone: formData.phone.trim() || null,
         role: formData.role, // ✅ send role to backend (backend only allows USER/VENDOR)
         password: formData.password,
         confirmPassword: formData.confirmPassword,

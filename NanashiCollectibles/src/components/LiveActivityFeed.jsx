@@ -4,15 +4,9 @@ import { useSocket } from "../hooks/useSocket";
 
 function LiveActivityFeed() {
   const { activities, isConnected } = useSocket();
-
-  // Limit to last 10 activities (memoized for performance)
   const visibleActivities = useMemo(() => {
     return (activities || []).slice(0, 10);
   }, [activities]);
-
-  /* -----------------------------------------------------------
-     Helpers
-     ----------------------------------------------------------- */
 
   const getActivityIcon = (type) => {
     switch (type) {
@@ -45,10 +39,6 @@ function LiveActivityFeed() {
     return date.toLocaleDateString();
   };
 
-  /* -----------------------------------------------------------
-     Empty state
-     ----------------------------------------------------------- */
-
   if (!visibleActivities.length) {
     return (
       <div className="relative overflow-hidden rounded-xl border border-amber-900/30 bg-gradient-to-br from-slate-950 to-purple-950/30 p-4 shadow-lg shadow-purple-900/20">
@@ -79,10 +69,6 @@ function LiveActivityFeed() {
       </div>
     );
   }
-
-  /* -----------------------------------------------------------
-     Main render
-     ----------------------------------------------------------- */
 
   return (
     <div className="relative overflow-hidden rounded-xl border border-amber-900/30 bg-gradient-to-br from-slate-950 to-purple-950/30 p-4 shadow-lg shadow-purple-900/20">

@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createChart, LineSeries } from "lightweight-charts";
-/* ------------------------------------------------------------------ */
 
 const CATEGORIES = ["All", "Magic", "Yu-Gi-Oh", "Pokemon", "Vanguard", "General"];
 
-// Mock data (replace with your API later)
 const NEWS = [
   {
     id: "news-001",
@@ -94,9 +92,6 @@ const NEWS = [
   },
 ];
 
-/* ------------------------------------------------------------------ */
-/* Tournament Calendar (mock – replace with API later)                 */
-/* ------------------------------------------------------------------ */
 const TOURNAMENTS = [
   {
     id: "evt-001",
@@ -152,10 +147,6 @@ const TOURNAMENTS = [
   },
 ];
 
-/* ------------------------------------------------------------------ */
-/* Demand Candles (mock OHLC – replace with API later)                 */
-/* time must be YYYY-MM-DD for lightweight-charts (business day).      */
-/* ------------------------------------------------------------------ */
 const DEMAND_CANDLES = {
   All: [
     { time: "2025-12-01", open: 78, high: 85, low: 74, close: 82 },
@@ -200,9 +191,6 @@ const DEMAND_CANDLES = {
   ],
 };
 
-/* ------------------------------------------------------------------ */
-/* Trend of Purchases (mock – replace with API later)                  */
-/* ------------------------------------------------------------------ */
 const PURCHASE_TRENDS = [
   {
     id: "trend-001",

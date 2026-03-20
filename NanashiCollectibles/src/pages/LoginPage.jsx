@@ -11,14 +11,12 @@ const ROLES = {
 
 export default function LoginPage() {
   const navigate = useNavigate();
-
-  // ✅ socket-only auth
   const { isConnected, connect, emitAccountLogin } = useSocket(null);
 
   const [formData, setFormData] = useState({
-    name: "",
+    identifier: "",
     password: "",
-    role: ROLES.USER, // ✅ new
+    role: ROLES.USER, 
   });
 
   const [errors, setErrors] = useState({});
@@ -27,7 +25,7 @@ export default function LoginPage() {
 
   const canSubmit = useMemo(() => {
     return (
-      formData.name.trim().length >= 3 &&
+      formData.identifier.trim().length > 0 &&
       formData.password.length > 0 &&
       (formData.role === ROLES.USER || formData.role === ROLES.VENDOR) &&
       !isSubmitting
@@ -46,9 +44,9 @@ export default function LoginPage() {
   const validate = () => {
     const newErrors = {};
 
-    if (!formData.name.trim()) newErrors.name = "Name is required";
-    else if (formData.name.trim().length < 3)
-      newErrors.name = "Name must be at least 3 characters";
+    if (!formData.identifier.trim()) {
+      newErrors.identifier = "Name or email is required";
+    }
 
     if (!formData.password) newErrors.password = "Password is required";
 
@@ -72,11 +70,10 @@ export default function LoginPage() {
     setServerError("");
 
     try {
-      // ✅ ensure socket
       connect?.();
 
       const payload = {
-        name: formData.name.trim(),
+        identifier: formData.identifier.trim(),
         password: formData.password,
       };
 
@@ -89,29 +86,16 @@ export default function LoginPage() {
       }
 
       const user = res.data;
-
-      // ✅ IMPORTANT: enforce role at login UI level
-      // If user selected VENDOR but account is USER -> reject
       if (formData.role === ROLES.VENDOR && user?.role !== ROLES.VENDOR) {
         setServerError("This account is not a Vendor account.");
         return;
       }
-
-      // (Optional) if selected USER but account is VENDOR, you may still allow it
-      // If you want strict, uncomment:
-      // if (formData.role === ROLES.USER && user?.role !== ROLES.USER) {
-      //   setServerError("This account is not a User account.");
-      //   return;
-      // }
-
-      // ✅ store user
+      
       setCurrentUser(user);
       setUsername(user?.name || "Traveler");
 
-      // ✅ notify App.jsx (same tab) so navbar updates without refresh
       window.dispatchEvent(new Event("tavern:authChanged"));
 
-      // ✅ route based on role
       if (user?.role === ROLES.VENDOR) navigate("/vendor");
       else navigate("/shop");
     } catch (err) {
@@ -123,7 +107,6 @@ export default function LoginPage() {
 
   return (
     <div className="mx-auto max-w-md space-y-6">
-      {/* Header */}
       <div className="relative overflow-hidden rounded-2xl border border-amber-900/30 bg-gradient-to-br from-slate-950 via-purple-950/40 to-slate-950 p-8 text-center shadow-2xl shadow-purple-900/20">
         <span className="mb-4 block text-5xl">🏰</span>
         <h1 className="font-serif text-3xl font-bold text-amber-100">
@@ -141,7 +124,6 @@ export default function LoginPage() {
         </div>
       </div>
 
-      {/* Login Form */}
       <div className="relative overflow-hidden rounded-2xl border border-amber-900/30 bg-gradient-to-br from-slate-950 to-purple-950/30 p-8 shadow-lg shadow-purple-900/20">
         {serverError && (
           <div className="mb-4 rounded-xl border border-red-500/30 bg-red-950/30 px-4 py-3 text-sm text-red-200">
@@ -150,7 +132,6 @@ export default function LoginPage() {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-5">
-          {/* ✅ Role */}
           <div>
             <label className="mb-2 block font-serif text-sm font-semibold text-amber-100">
               Login as
@@ -205,30 +186,28 @@ export default function LoginPage() {
             )}
           </div>
 
-          {/* Name */}
           <div>
             <label className="mb-2 block font-serif text-sm font-semibold text-amber-100">
-              Name
+              Name or Email
             </label>
             <input
               type="text"
-              name="name"
-              value={formData.name}
+              name="identifier"
+              value={formData.identifier}
               onChange={handleChange}
-              placeholder="Enter your name"
+              placeholder="Enter your name or email"
               autoComplete="username"
               className={`w-full rounded-lg border ${
-                errors.name ? "border-red-500" : "border-amber-900/30"
+                errors.identifier ? "border-red-500" : "border-amber-900/30"
               } bg-slate-950 px-4 py-3 font-serif text-sm text-amber-100 placeholder-amber-100/40 focus:outline-none focus:ring-2 ${
-                errors.name ? "focus:ring-red-500" : "focus:ring-amber-600"
+                errors.identifier ? "focus:ring-red-500" : "focus:ring-amber-600"
               }`}
             />
-            {errors.name && (
-              <p className="mt-1 font-serif text-xs text-red-400">{errors.name}</p>
+            {errors.identifier && (
+              <p className="mt-1 font-serif text-xs text-red-400">{errors.identifier}</p>
             )}
           </div>
 
-          {/* Password */}
           <div>
             <label className="mb-2 block font-serif text-sm font-semibold text-amber-100">
               Password
@@ -253,7 +232,6 @@ export default function LoginPage() {
             )}
           </div>
 
-          {/* Actions */}
           <div className="flex items-center justify-between">
             <label className="flex items-center gap-2">
               <input

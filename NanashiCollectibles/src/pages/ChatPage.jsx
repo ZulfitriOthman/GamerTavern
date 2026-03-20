@@ -17,23 +17,18 @@ function ChatPage() {
   const [currentUser, setCurrentUser] = useState(() => {
     const u = readCurrentUser();
     const fallback = getUsername("Guest") || "Guest";
-    // normalize so we always have { username }
     return u ? { ...u, username: u?.name || u?.username || fallback } : { username: fallback };
   });
 
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const inputRef = useRef(null);
-
-  // ✅ username should reflect login changes (without refresh)
   const username = useMemo(() => {
     return currentUser?.username || getUsername("Guest") || "Guest";
   }, [currentUser]);
 
-  // ✅ Pass username so the hook joins presence correctly
   const { isConnected, socket } = useSocket(username);
 
-  // ✅ Keep current user synced when login/logout happens (same tab + other tabs)
   useEffect(() => {
     const syncAuth = () => {
       const u = readCurrentUser();
@@ -52,7 +47,6 @@ function ChatPage() {
     };
   }, []);
 
-  // Enhanced connection handling
   useEffect(() => {
     if (!socket) return;
 
@@ -80,18 +74,15 @@ function ChatPage() {
     };
   }, [socket]);
 
-  // ✅ Listen for chat messages and typing
   useEffect(() => {
     if (!socket) return;
 
     function onChatMessage(message) {
       console.log("📨 Received:", message);
       setMessages((prev) => {
-        // Prevent duplicates
         if (prev.some(m => m.id === message.id)) return prev;
         return [...prev, message];
       });
-      // Clear typing for this user
       setTypingUsers(prev => {
         const next = new Set(prev);
         next.delete(message.username);
@@ -119,12 +110,10 @@ function ChatPage() {
     };
   }, [socket, username]);
 
-  // ✅ Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Handle typing indicator
   const handleTyping = () => {
     if (!socket || !isConnected) return;
     if (!isTyping) {
@@ -140,7 +129,6 @@ function ChatPage() {
     if (!newMessage.trim() || !isConnected || !socket) return;
 
     console.log("📤 Sending:", newMessage.trim());
-    // Backend expects STRING
     socket.emit("chat:message", newMessage.trim());
 
     setNewMessage("");
@@ -160,9 +148,7 @@ function ChatPage() {
   return (
     <div className="mx-auto max-w-6xl">
       <div className="grid gap-6 lg:grid-cols-[1fr_300px]">
-        {/* Chat Area */}
         <div className="space-y-4">
-          {/* Header */}
           <div className="relative overflow-hidden rounded-2xl border border-amber-900/30 bg-gradient-to-br from-slate-950 via-purple-950/40 to-slate-950 p-6 shadow-2xl shadow-purple-900/20">
             <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-500/50 to-transparent" />
 
@@ -207,11 +193,9 @@ function ChatPage() {
             <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-amber-500/50 to-transparent" />
           </div>
 
-          {/* Messages Area */}
           <div className="relative overflow-hidden rounded-2xl border border-amber-900/30 bg-gradient-to-br from-slate-950 to-purple-950/30 shadow-lg shadow-purple-900/20">
             <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-500/30 to-transparent" />
 
-            {/* Messages Container */}
             <div className="h-[500px] overflow-y-auto p-6 space-y-4">
               {messages.length === 0 ? (
                 <div className="flex h-full items-center justify-center">
@@ -221,7 +205,6 @@ function ChatPage() {
                 </div>
               ) : (
                 messages.map((msg) => {
-                  // support both shapes: {username, message} OR {message, user} etc.
                   const msgUsername = msg?.username || msg?.user || "Unknown";
                   const msgText = msg?.message ?? msg?.text ?? "";
                   const msgTime = msg?.timestamp || msg?.created_at || Date.now();
@@ -259,7 +242,6 @@ function ChatPage() {
                 })
               )}
               
-              {/* Typing Indicator */}
               {typingUsers.size > 0 && (
                 <div className="flex items-center gap-2 px-3 py-2">
                   <div className="flex gap-1">
@@ -276,7 +258,6 @@ function ChatPage() {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Message Input */}
             <div className="border-t border-amber-900/30 bg-slate-950/50 p-4">
               <form onSubmit={handleSendMessage} className="flex gap-3">
                 <div className="relative flex-1">
@@ -319,10 +300,8 @@ function ChatPage() {
           </div>
         </div>
 
-        {/* Sidebar */}
         <div className="space-y-4">
           <OnlineUsers />
-          {/* Chat Rules / Quick Tips unchanged */}
         </div>
       </div>
     </div>

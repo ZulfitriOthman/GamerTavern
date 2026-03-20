@@ -1,0 +1,309 @@
+// ============================================
+// CORE ACCOUNTS & AUTHENTICATION
+// ============================================
+
+Table PERSONAL_USER {
+    ID int [pk, increment]
+    ROLE varchar [default: 'USER']
+    NAME varchar
+    EMAIL varchar
+    PHONE varchar
+    PASSWORD varchar
+    CONFIRM_PASSWORD varchar
+    PROFILE_ICON varchar
+    CREATED_AT timestamp [default: 'CURRENT_TIMESTAMP']
+    UPDATED_AT timestamp
+}
+
+Table RESET_PASSWORD {
+    ID int [pk, increment]
+    USER_ID int [ref: > PERSONAL_USER.ID]
+    TOKEN_HASH varchar
+    EXPIRES_AT datetime
+    USED boolean [default: 0]
+    NEW_PASSWORD varchar
+    CONFIRM_PASSWORD varchar
+    CREATED_AT timestamp [default: 'CURRENT_TIMESTAMP']
+    UPDATED_AT timestamp
+}
+
+// Legacy alias for compatibility
+Table ACCOUNTS {
+    ID varchar [pk]
+    NAME varchar
+    EMAIL varchar
+    PASSWORD varchar
+    ROLE varchar
+    Note: "Core user accounts table"
+}
+
+// ============================================
+// PRODUCTS & SHOP MANAGEMENT
+// ============================================
+
+Table SHOP {
+    ID int [pk, increment]
+    NAME varchar
+    DESCRIPTION text
+    LOCATION varchar
+    OWNER varchar
+    OPENING_HOURS varchar
+    CONTACT_EMAIL varchar
+    CONTACT_PHONE varchar
+    CREATED_AT timestamp [default: 'CURRENT_TIMESTAMP']
+    UPDATED_AT timestamp
+}
+
+Table PRODUCTS {
+    ID int [pk, increment]
+    VENDOR_ID int [ref: > PERSONAL_USER.ID]
+    ACCOUNT_ID varchar
+    NAME varchar
+    CODE varchar
+    IMAGE_URL text
+    DESCRIPTION text
+    CONDITIONAL varchar
+    CATEGORY varchar
+    PRICE int
+    STOCK_QUANTITY int
+    CREATED_AT timestamp [default: 'CURRENT_TIMESTAMP']
+    UPDATED_AT timestamp
+}
+
+Table MANAGE_INVENTORY {
+    ID int [pk, increment]
+    PRODUCT_ID int [ref: > PRODUCTS.ID]
+    QUANTITY int
+    LAST_UPDATED timestamp
+}
+
+Table CATEGORIES {
+    ID varchar [pk]
+    PRODUCT_ID varchar [ref: > PRODUCTS.ID]
+    NAME varchar
+    DESCRIPTION text
+}
+
+Table DISCOUNTS {
+    ID varchar [pk]
+    PRODUCT_ID varchar [ref: > PRODUCTS.ID]
+    DISCOUNT_PERCENTAGE decimal
+    START_DATE datetime
+    END_DATE datetime
+}
+
+// ============================================
+// SHOPPING & ORDERS
+// ============================================
+
+Table ORDERS {
+    ID varchar [pk]
+    ACCOUNT_ID varchar [ref: > ACCOUNTS.ID]
+    PRODUCT_ID varchar [ref: > PRODUCTS.ID]
+    QUANTITY int
+    TOTAL_PRICE decimal
+    ORDER_DATE datetime
+}
+
+Table CARTS {
+    ID varchar [pk]
+    ACCOUNT_ID varchar [ref: > ACCOUNTS.ID]
+    PRODUCT_ID varchar [ref: > PRODUCTS.ID]
+    QUANTITY int
+}
+
+Table WISHLISTS {
+    ID varchar [pk]
+    ACCOUNT_ID varchar [ref: > ACCOUNTS.ID]
+    PRODUCT_ID varchar [ref: > PRODUCTS.ID]
+}
+
+Table REVIEWS {
+    ID varchar [pk]
+    ACCOUNT_ID varchar [ref: > ACCOUNTS.ID]
+    PRODUCT_ID varchar [ref: > PRODUCTS.ID]
+    RATING int
+    COMMENT text
+    REVIEW_DATE datetime
+}
+
+// ============================================
+// PAYMENTS & DELIVERY
+// ============================================
+
+Table PAYMENTS {
+    ID varchar [pk]
+    ACCOUNT_ID varchar [ref: > ACCOUNTS.ID]
+    ORDER_ID varchar [ref: > ORDERS.ID]
+    AMOUNT decimal
+    PAYMENT_DATE datetime
+    PAYMENT_METHOD varchar
+}
+
+Table DELIVERIES {
+    ID varchar [pk]
+    ORDER_ID varchar [ref: > ORDERS.ID]
+    DELIVERIES_DATE datetime
+    DELIVERY_DATE datetime
+    STATUS varchar
+}
+
+// ============================================
+// TRADING SYSTEM
+// ============================================
+
+Table TRADE_LISTINGS {
+    ID int [pk, increment]
+    USER_ID int [ref: > PERSONAL_USER.ID]
+    PRODUCT_ID int
+    TITLE varchar
+    GAME varchar
+    CONDITION_LABEL varchar
+    TYPE varchar [default: 'trade']
+    WANT_TEXT text
+    NOTES text
+    STATUS varchar [default: 'active']
+    CREATED_AT datetime [default: 'CURRENT_TIMESTAMP']
+    UPDATED_AT datetime
+}
+
+Table TRADE_OFFERS {
+    ID int [pk, increment]
+    LISTING_ID int [ref: > TRADE_LISTINGS.ID]
+    OFFER_USER_ID int [ref: > PERSONAL_USER.ID]
+    MESSAGE text
+    STATUS varchar [default: 'pending']
+    CREATED_AT datetime [default: 'CURRENT_TIMESTAMP']
+}
+
+// ============================================
+// CARD GAMES & SINGLES
+// ============================================
+
+Table CARD_GAMES {
+    ID int [pk, increment]
+    TITLE varchar
+    DESCRIPTION text
+    RELEASE_DATE timestamp
+    GENRE varchar
+    PLATFORM varchar
+    IMAGE_URL text
+    CREATED_AT timestamp [default: 'CURRENT_TIMESTAMP']
+    UPDATED_AT timestamp
+}
+
+Table SINGLES {
+    ID int [pk, increment]
+    CARD_ID int [ref: > CARD_GAMES.ID]
+    ACCOUNT_ID varchar [ref: > ACCOUNTS.ID]
+    CONDITION varchar
+    SHOP_ID int [ref: > SHOP.ID]
+    TITLE varchar
+    DESCRIPTION text
+    PUBLISHER varchar
+    RELEASE_DATE timestamp
+    CATEGORY varchar
+    PLATFORM varchar
+    RARITY varchar
+    PRICE decimal
+    STOCK_QUANTITY int
+    IMAGE_URL text
+    CREATED_AT timestamp [default: 'CURRENT_TIMESTAMP']
+    UPDATED_AT timestamp
+}
+
+// ============================================
+// PURCHASE HISTORY
+// ============================================
+
+Table HISTORY_PURCHASE {
+    ID int [pk, increment]
+    SINGLE_ID int [ref: > SINGLES.ID]
+    ACCOUNT_ID varchar [ref: > ACCOUNTS.ID]
+    SHOP_ITEM_ID varchar
+    ITEM_NAME varchar
+    ITEM_TYPE varchar
+    QUANTITY int
+    PRICE decimal
+    PURCHASE_DATE timestamp [default: 'CURRENT_TIMESTAMP']
+    PAYMENT_METHOD varchar
+    TRANSACTION_ID varchar [unique]
+    STATUS varchar
+    CREATED_AT timestamp [default: 'CURRENT_TIMESTAMP']
+    UPDATED_AT timestamp
+}
+
+// ============================================
+// TOURNAMENTS & POINTS
+// ============================================
+
+Table TOURNAMENT {
+    ID int [pk, increment]
+    PRIZE_ID varchar
+    NAME varchar
+    DESCRIPTION text
+    START_DATE timestamp
+    END_DATE timestamp
+    LOCATION varchar
+    ENTRY_FEE decimal
+    GAME_TITLE varchar
+    ORGANIZER varchar
+    RULES text
+    REGISTRATION_DEADLINE timestamp
+    MAX_TEAMS int
+    CREATED_AT timestamp [default: 'CURRENT_TIMESTAMP']
+    UPDATED_AT timestamp
+}
+
+Table PARTICIPANTS {
+    ID int [pk, increment]
+    TOURNAMENT_ID int [ref: > TOURNAMENT.ID]
+    ACCOUNT_ID varchar [ref: > ACCOUNTS.ID]
+    NICKNAME varchar
+    TEAM_NAME varchar
+    REGISTRATION_DATE timestamp [default: 'CURRENT_TIMESTAMP']
+}
+
+Table POINT_SYSTEM {
+    ID int [pk, increment]
+    ACCOUNT_ID varchar [ref: > ACCOUNTS.ID]
+    TOURNAMENT_ID int [ref: > TOURNAMENT.ID]
+    POINTS int [default: 0]
+    LAST_UPDATED timestamp [default: 'CURRENT_TIMESTAMP']
+}
+
+Table PRIZES {
+    ID int [pk, increment]
+    TOURNAMENT_ID int [ref: > TOURNAMENT.ID]
+    POSITION int
+    DESCRIPTION text
+    AMOUNT decimal
+    CREATED_AT timestamp [default: 'CURRENT_TIMESTAMP']
+    UPDATED_AT timestamp
+}
+
+Table PRIZE_POINT {
+    ID int [pk, increment]
+    PRIZE_ID int [ref: > PRIZES.ID]
+    POINT_SYSTEM_ID int [ref: > POINT_SYSTEM.ID]
+    DESCRIPTION text
+    AMOUNT decimal
+}
+
+// ============================================
+// NEWS & UPDATES
+// ============================================
+
+Table NEWS {
+    ID int [pk, increment]
+    TITLE varchar
+    CONTENT text
+    DATE_POSTED timestamp
+    AUTHOR varchar
+    CATEGORY varchar
+    IMAGE_URL text
+    TAGS varchar
+    CREATED_AT timestamp [default: 'CURRENT_TIMESTAMP']
+    UPDATED_AT timestamp
+}
+

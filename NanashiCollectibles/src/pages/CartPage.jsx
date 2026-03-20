@@ -68,7 +68,6 @@ function CartPage({
 
   return (
     <div className="mx-auto w-full max-w-4xl space-y-6">
-      {/* Fantasy Header */}
       <div className="relative overflow-hidden rounded-2xl border border-amber-900/30 bg-gradient-to-br from-slate-950 via-purple-950/40 to-slate-950 p-6 shadow-2xl shadow-purple-900/20">
         <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-500/50 to-transparent" />
         <h2 className="font-serif text-3xl font-bold text-amber-100">Your Cart</h2>
@@ -86,7 +85,6 @@ function CartPage({
         </div>
       ) : (
         <>
-          {/* Cart Items */}
           <div className="space-y-4">
             {cart.map((item) => (
               <div
@@ -134,7 +132,6 @@ function CartPage({
             ))}
           </div>
 
-          {/* Total & Checkout */}
           <div className="relative overflow-hidden rounded-2xl border border-amber-900/30 bg-gradient-to-br from-slate-950 via-purple-950/40 to-slate-950 p-6 shadow-2xl shadow-purple-900/20">
             <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-500/50 to-transparent" />
             

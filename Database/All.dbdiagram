@@ -1,0 +1,627 @@
+{
+  "version": "1.0.0",
+  "darkMode": true,
+  "gridEnabling": false,
+  "detailLevel": "All",
+  "tablePositions": [
+    {
+      "name": "PERSONAL_USER",
+      "schemaName": "public",
+      "x": -432.1825153085939,
+      "y": 216.01657717656246
+    },
+    {
+      "name": "RESET_PASSWORD",
+      "schemaName": "public",
+      "x": -127.2879840585939,
+      "y": 216.01657717656246
+    },
+    {
+      "name": "ACCOUNTS",
+      "schemaName": "public",
+      "x": 208.62657869687501,
+      "y": -25.983422823437536
+    },
+    {
+      "name": "SHOP",
+      "schemaName": "public",
+      "x": 216.1177776601561,
+      "y": 216.01657717656246
+    },
+    {
+      "name": "PRODUCTS",
+      "schemaName": "public",
+      "x": -698.7473265991036,
+      "y": -577.8480727972549
+    },
+    {
+      "name": "MANAGE_INVENTORY",
+      "schemaName": "public",
+      "x": 542.4312542226561,
+      "y": 216.01657717656246
+    },
+    {
+      "name": "CATEGORIES",
+      "schemaName": "public",
+      "x": -114.38105465000005,
+      "y": -48.51830228281278
+    },
+    {
+      "name": "DISCOUNTS",
+      "schemaName": "public",
+      "x": 471.0218626070315,
+      "y": -528.7028561296879
+    },
+    {
+      "name": "ORDERS",
+      "schemaName": "public",
+      "x": -118.39912105625005,
+      "y": -312.51830228281267
+    },
+    {
+      "name": "CARTS",
+      "schemaName": "public",
+      "x": 507.6510129976565,
+      "y": -294.0298206132983
+    },
+    {
+      "name": "WISHLISTS",
+      "schemaName": "public",
+      "x": -115.10786129062505,
+      "y": -481.9052324609379
+    },
+    {
+      "name": "REVIEWS",
+      "schemaName": "public",
+      "x": 191.48558977629585,
+      "y": -312.51830228281267
+    },
+    {
+      "name": "PAYMENTS",
+      "schemaName": "public",
+      "x": 182.30919588437501,
+      "y": -560.7028561296879
+    },
+    {
+      "name": "DELIVERIES",
+      "schemaName": "public",
+      "x": -432.1825153085939,
+      "y": -312.51830228281267
+    },
+    {
+      "name": "TRADE_LISTINGS",
+      "schemaName": "public",
+      "x": -432.1825153085939,
+      "y": 618.0165771765625
+    },
+    {
+      "name": "TRADE_OFFERS",
+      "schemaName": "public",
+      "x": -127.2879840585939,
+      "y": 490.01657717656246
+    },
+    {
+      "name": "CARD_GAMES",
+      "schemaName": "public",
+      "x": 216.1177776601561,
+      "y": 618.0165771765625
+    },
+    {
+      "name": "SINGLES",
+      "schemaName": "public",
+      "x": 542.4312542226561,
+      "y": 426.01657717656246
+    },
+    {
+      "name": "HISTORY_PURCHASE",
+      "schemaName": "public",
+      "x": -432.1825153085939,
+      "y": 1084.0165771765624
+    },
+    {
+      "name": "TOURNAMENT",
+      "schemaName": "public",
+      "x": -127.2879840585939,
+      "y": 764.0165771765625
+    },
+    {
+      "name": "PARTICIPANTS",
+      "schemaName": "public",
+      "x": 216.1177776601561,
+      "y": 988.0165771765625
+    },
+    {
+      "name": "POINT_SYSTEM",
+      "schemaName": "public",
+      "x": 542.4312542226561,
+      "y": 1052.0165771765624
+    },
+    {
+      "name": "PRIZES",
+      "schemaName": "public",
+      "x": -432.1825153085939,
+      "y": 1614.0165771765624
+    },
+    {
+      "name": "PRIZE_POINT",
+      "schemaName": "public",
+      "x": -127.2879840585939,
+      "y": 1326.0165771765624
+    },
+    {
+      "name": "NEWS",
+      "schemaName": "public",
+      "x": 311.15449443324746,
+      "y": 1518.0165771765624
+    }
+  ],
+  "tableGroupCollapseStates": [],
+  "stickyNoteLayouts": [],
+  "referencePaths": [
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "PERSONAL_USER",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "USER_ID"
+      ],
+      "secondTableName": "RESET_PASSWORD",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "PERSONAL_USER",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "VENDOR_ID"
+      ],
+      "secondTableName": "PRODUCTS",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "PRODUCTS",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "PRODUCT_ID"
+      ],
+      "secondTableName": "MANAGE_INVENTORY",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "PRODUCTS",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "PRODUCT_ID"
+      ],
+      "secondTableName": "CATEGORIES",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "PRODUCTS",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "PRODUCT_ID"
+      ],
+      "secondTableName": "DISCOUNTS",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "ACCOUNTS",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "ACCOUNT_ID"
+      ],
+      "secondTableName": "ORDERS",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "PRODUCTS",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "PRODUCT_ID"
+      ],
+      "secondTableName": "ORDERS",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "ACCOUNTS",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "ACCOUNT_ID"
+      ],
+      "secondTableName": "CARTS",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "PRODUCTS",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "PRODUCT_ID"
+      ],
+      "secondTableName": "CARTS",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "ACCOUNTS",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "ACCOUNT_ID"
+      ],
+      "secondTableName": "WISHLISTS",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "PRODUCTS",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "PRODUCT_ID"
+      ],
+      "secondTableName": "WISHLISTS",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "ACCOUNTS",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "ACCOUNT_ID"
+      ],
+      "secondTableName": "REVIEWS",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "PRODUCTS",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "PRODUCT_ID"
+      ],
+      "secondTableName": "REVIEWS",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "ACCOUNTS",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "ACCOUNT_ID"
+      ],
+      "secondTableName": "PAYMENTS",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "ORDERS",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "ORDER_ID"
+      ],
+      "secondTableName": "PAYMENTS",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "ORDERS",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "ORDER_ID"
+      ],
+      "secondTableName": "DELIVERIES",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "PERSONAL_USER",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "USER_ID"
+      ],
+      "secondTableName": "TRADE_LISTINGS",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "TRADE_LISTINGS",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "LISTING_ID"
+      ],
+      "secondTableName": "TRADE_OFFERS",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "PERSONAL_USER",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "OFFER_USER_ID"
+      ],
+      "secondTableName": "TRADE_OFFERS",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "CARD_GAMES",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "CARD_ID"
+      ],
+      "secondTableName": "SINGLES",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "ACCOUNTS",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "ACCOUNT_ID"
+      ],
+      "secondTableName": "SINGLES",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "SHOP",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "SHOP_ID"
+      ],
+      "secondTableName": "SINGLES",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "SINGLES",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "SINGLE_ID"
+      ],
+      "secondTableName": "HISTORY_PURCHASE",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "ACCOUNTS",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "ACCOUNT_ID"
+      ],
+      "secondTableName": "HISTORY_PURCHASE",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "TOURNAMENT",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "TOURNAMENT_ID"
+      ],
+      "secondTableName": "PARTICIPANTS",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "ACCOUNTS",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "ACCOUNT_ID"
+      ],
+      "secondTableName": "PARTICIPANTS",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "ACCOUNTS",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "ACCOUNT_ID"
+      ],
+      "secondTableName": "POINT_SYSTEM",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "TOURNAMENT",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "TOURNAMENT_ID"
+      ],
+      "secondTableName": "POINT_SYSTEM",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "TOURNAMENT",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "TOURNAMENT_ID"
+      ],
+      "secondTableName": "PRIZES",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "PRIZES",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "PRIZE_ID"
+      ],
+      "secondTableName": "PRIZE_POINT",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": [
+        "ID"
+      ],
+      "firstTableName": "POINT_SYSTEM",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": [
+        "POINT_SYSTEM_ID"
+      ],
+      "secondTableName": "PRIZE_POINT",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    }
+  ]
+}

@@ -60,7 +60,8 @@ export default function accountSocketController({
 
     const name = toStr(payload.name);
     const email = toStr(payload.email).toLowerCase();
-    const phone = toStr(payload.phone) || "+673";
+    const phoneRaw = toStr(payload.phone);
+    const phone = phoneRaw || null;
 
     const password = toPassword(payload.password);
     const confirmPassword = toPassword(payload.confirmPassword);
@@ -79,15 +80,21 @@ export default function accountSocketController({
       return ack({ success: false, message: "Passwords do not match." });
     }
 
-    // ✅ TEMP debug (remove later)
-    console.log("[account:create] pw debug", {
-      name,
-      email,
-      role,
-      passwordLen: password.length,
-      confirmLen: confirmPassword.length,
-      pwEqConfirm: password === confirmPassword,
-    });
+    if (password.length < 6) {
+      return ack({ success: false, message: "Password must be at least 6 characters." });
+    }
+
+    const emailRegex = /^\S+@\S+\.\S+$/;
+    if (!emailRegex.test(email)) {
+      return ack({ success: false, message: "Email is invalid." });
+    }
+
+    if (phone && !/^\+\d{6,15}$/.test(phone)) {
+      return ack({
+        success: false,
+        message: "Phone must be in international format e.g. +673xxxxxxx.",
+      });
+    }
 
     try {
       const rounds = Number(process.env.BCRYPT_ROUNDS || 10);
@@ -162,8 +169,14 @@ export default function accountSocketController({
       params.push(name);
     }
     if (phone !== null) {
+      if (phone && !/^\+\d{6,15}$/.test(phone)) {
+        return ack({
+          success: false,
+          message: "Phone must be in international format e.g. +673xxxxxxx.",
+        });
+      }
       fields.push("PHONE = ?");
-      params.push(phone);
+      params.push(phone || null);
     }
     if (profileIcon !== null) {
       fields.push("PROFILE_ICON = ?");
@@ -256,21 +269,9 @@ export default function accountSocketController({
       const [rows] = await db.execute(sql, [identifier]);
       const row = rows?.[0];
 
-      console.log("[account:login] lookup", {
-        identifier,
-        isEmail,
-        found: !!row,
-        id: row?.ID,
-        dbName: row?.NAME,
-        dbEmail: row?.EMAIL,
-        dbRole: row?.ROLE,
-        incomingPasswordLen: password.length, // ✅ TEMP debug
-      });
-
       if (!row) return ack({ success: false, message: "Invalid credentials." });
 
       const ok = await bcrypt.compare(password, row.PASSWORD);
-      console.log("[account:login] passwordCheck", { ok, id: row.ID });
 
       if (!ok) return ack({ success: false, message: "Invalid credentials." });
 

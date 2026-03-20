@@ -2,9 +2,6 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { getSocket, connectSocket, disconnectSocket } from "../socket/socketClient";
 
-/**
- * Module-level (global) store so multiple components don't attach duplicate listeners.
- */
 let listenersAttached = false;
 
 let globalState = {
@@ -61,7 +58,6 @@ function attachListenersOnce() {
   s.on("activity:new", onActivityNew);
   s.on("activities:list", onActivitiesList);
 
-  // initialize if already connected
   if (s.connected) onConnect();
 }
 
@@ -74,11 +70,6 @@ export function useSocket(username = null) {
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [activities, setActivities] = useState([]);
 
-  /**
-   * Public connect/disconnect for pages (SignUp/Login/Chat/OnlineUsers)
-   * - This does NOT attach duplicate listeners.
-   * - This updates username join safely via socketClient.
-   */
   const connect = useCallback(
     (joinName = username) => {
       connectSocket(joinName);
@@ -89,7 +80,7 @@ export function useSocket(username = null) {
 
   const disconnect = useCallback(() => {
     disconnectSocket();
-    listenersAttached = false; // allow re-attach if a new socket is created later
+    listenersAttached = false; 
 
     globalState = {
       isConnected: false,
@@ -99,18 +90,15 @@ export function useSocket(username = null) {
     notify();
   }, []);
 
-  // Auto-connect if username is provided (ChatPage / OnlineUsers usage)
   useEffect(() => {
     if (username) {
       connect(username);
     } else {
-      // still ensure listeners if socket already exists
       const s = getSocket();
       if (s) attachListenersOnce();
     }
   }, [username, connect]);
 
-  // Subscribe this hook instance to global store updates
   useEffect(() => {
     const handler = (state) => {
       setIsConnected(!!state.isConnected);
@@ -120,15 +108,12 @@ export function useSocket(username = null) {
 
     subscribers.add(handler);
 
-    // push latest immediately
     handler(globalState);
 
     return () => {
       subscribers.delete(handler);
     };
   }, []);
-
-  /* ---------------- Socket emit helpers ---------------- */
 
   const emitWithAck = useCallback((eventName, payload, timeoutMs = 8000) => {
     const s = getSocket();

@@ -6,7 +6,7 @@ const API_BASE =
   ENV_API_BASE ||
   (typeof window !== "undefined" &&
   (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
-    ? "http://localhost:3001"
+    ? "http://localhost:3002"
     : window.location.origin);
 
 export async function register({ name, email, phone, password }) {
@@ -17,7 +17,7 @@ export async function register({ name, email, phone, password }) {
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.message || "Register failed");
-  return data; // { ok, user, token }
+  return data; 
 }
 
 export async function login({ email, password }) {
@@ -28,7 +28,7 @@ export async function login({ email, password }) {
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.message || "Login failed");
-  return data; // { ok, user, token }
+  return data; 
 }
 
 export async function me(token) {
@@ -37,5 +37,5 @@ export async function me(token) {
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.message || "Not authenticated");
-  return data; // { ok, user }
+  return data; 
 }
