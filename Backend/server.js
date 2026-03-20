@@ -17,8 +17,11 @@ import createPaymentRoutes from "./routes/api/payment.routes.js";
 
 // sockets
 import accountSocketController from "./sockets/account.socket.js";
+import chatSocketController from "./sockets/chat.socket.js";
 import productSocketController from "./sockets/product.socket.js";
+import shopSocketController from "./sockets/shop.socket.js";
 import tradeSocketController from "./sockets/trade.socket.js";
+import newsSocketController from "./sockets/news.socket.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -113,6 +116,20 @@ const io = new Server(httpServer, {
   maxHttpBufferSize: 1e8,
 });
 
+const stores = {
+  onlineUsers: new Map(),
+  activeTrades: new Map(),
+  recentActivities: [],
+  recentChatMessages: [],
+};
+
+function pushActivity(activity) {
+  if (!activity) return;
+
+  stores.recentActivities = [activity, ...(stores.recentActivities || [])].slice(0, 50);
+  io.emit("activity:new", activity);
+}
+
 io.engine.on("initial_headers", (_headers, req) => {
   console.log("[engine.io] origin:", req.headers.origin);
 });
@@ -202,7 +219,7 @@ app.use(
   "/api",
   createHealthRoutes({
     dbPing,
-    stores: {},
+    stores,
   })
 );
 
@@ -220,9 +237,12 @@ io.on("connection", (socket) => {
     console.log(`[socket] ${event} payloadKeys=${summary}`);
   });
 
-  accountSocketController({ socket, io, db, pushActivity: () => {} });
-  productSocketController({ socket, io, db, pushActivity: () => {} });
+  shopSocketController({ socket, io, stores, pushActivity });
+  chatSocketController({ socket, io, stores, pushActivity });
+  accountSocketController({ socket, io, db, pushActivity });
+  productSocketController({ socket, io, db, pushActivity });
   tradeSocketController({ socket, io, db });
+  newsSocketController({ socket, io, db });
 });
 
 /* ------------------------------ Error handler ------------------------------ */

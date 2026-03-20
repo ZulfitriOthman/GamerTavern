@@ -1,4 +1,8 @@
-export default function chatSocketController({ socket, io, stores }) {
+export default function chatSocketController({ socket, io, stores, pushActivity = () => {} }) {
+  socket.on("chat:history", () => {
+    socket.emit("chat:history", stores.recentChatMessages || []);
+  });
+
   // Handle chat messages
   socket.on("chat:message", (message) => {
     const user = stores.onlineUsers.get(socket.id);
@@ -17,6 +21,18 @@ export default function chatSocketController({ socket, io, stores }) {
       message: messageText,
       timestamp: new Date().toISOString(),
     };
+
+    stores.recentChatMessages = [
+      ...(stores.recentChatMessages || []),
+      chatMessage,
+    ].slice(-100);
+
+    pushActivity({
+      id: Date.now(),
+      type: "chat",
+      message: `${chatMessage.username} sent a message in Tavern Chat`,
+      timestamp: chatMessage.timestamp,
+    });
 
     console.log("📨 Broadcasting chat message:", chatMessage);
     io.emit("chat:message", chatMessage);

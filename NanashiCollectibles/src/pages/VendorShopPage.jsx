@@ -100,9 +100,35 @@ const SORT = {
   ZA: "ZA",
   PRICE_ASC: "PRICE_ASC",
   PRICE_DESC: "PRICE_DESC",
-  CATEGORY_AZ: "CATEGORY_AZ",
-  CATEGORY_ZA: "CATEGORY_ZA",
+  STOCK_ASC: "STOCK_ASC",
+  STOCK_DESC: "STOCK_DESC",
 };
+
+const LOW_STOCK_THRESHOLD = 3;
+
+function formatCurrency(value) {
+  return `BND ${toInt(value).toFixed(2)}`;
+}
+
+function formatDateShort(value) {
+  if (!value) return "-";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+  });
+}
+
+function getStockTone(stock) {
+  const qty = toInt(stock);
+  if (qty <= 0) return "border-rose-600/40 bg-rose-950/20 text-rose-200";
+  if (qty <= LOW_STOCK_THRESHOLD) {
+    return "border-amber-600/40 bg-amber-950/20 text-amber-200";
+  }
+  return "border-emerald-600/40 bg-emerald-950/20 text-emerald-200";
+}
 
 export default function VendorShopPage({
   cart,
@@ -128,7 +154,7 @@ export default function VendorShopPage({
 
   // Search / filter / sort
   const [search, setSearch] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("ALL");
+  const [conditionFilter, setConditionFilter] = useState("ALL");
   const [dateFilter, setDateFilter] = useState(DATE_FILTER.ALL);
   const [sortMode, setSortMode] = useState(SORT.NEWEST);
 
@@ -148,6 +174,11 @@ export default function VendorShopPage({
   // Manage Inventory UI state (per product)
   const [stockInput, setStockInput] = useState({});
   const getQty = (productId) => toInt(stockInput[productId], 0);
+
+  // Edit listing UI state
+  const [editingProductId, setEditingProductId] = useState(null);
+  const [editDraft, setEditDraft] = useState(null);
+  const [savingEdit, setSavingEdit] = useState(false);
 
   // ----------------------------
   // Guard: must be logged in AND vendor/admin
@@ -345,6 +376,104 @@ export default function VendorShopPage({
     return applyDeltaStock(productId, delta);
   };
 
+  const uploadProductImage = async (file) => {
+    if (!file) return null;
+
+    const fileName = file.name.toLowerCase();
+    const imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
+    const hasImageExt = imageExtensions.some((ext) => fileName.endsWith(ext));
+    const hasImageType = file.type && file.type.startsWith("image/");
+
+    if (!hasImageExt && !hasImageType) {
+      throw new Error(
+        `Invalid file. Expected image but got: ${file.type || "unknown"}`
+      );
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      throw new Error("Max image size is 5MB.");
+    }
+
+    const base64Data = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result;
+        const base64 = String(result).split(",")[1];
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+    const result = await emitAsync("image:upload", {
+      currentUser: { id: currentUser.id, role: currentUser.role },
+      fileName: file.name,
+      base64: base64Data,
+    });
+
+    if (!result?.success) {
+      throw new Error(result?.message || "Upload failed on server");
+    }
+
+    return result.imageUrl;
+  };
+
+  const openEditProduct = (product) => {
+    setEditingProductId(product.id);
+    setEditDraft({
+      name: product.name,
+      code: product.code,
+      conditional: product.conditional || "NEW",
+      price: toInt(product.price),
+      category: product.category || selectedTcg || "mtg",
+      image_url: product.image_url || "",
+      description: product.description || "",
+    });
+    setServerError("");
+  };
+
+  const closeEditProduct = () => {
+    setEditingProductId(null);
+    setEditDraft(null);
+    setSavingEdit(false);
+  };
+
+  const submitEditProduct = async (productId) => {
+    if (!currentUser?.id || !editDraft) return;
+
+    const payload = {
+      currentUser: { id: currentUser.id, role: currentUser.role },
+      id: productId,
+      name: toStr(editDraft.name),
+      code: toStr(editDraft.code),
+      conditional: toStr(editDraft.conditional),
+      price: toInt(editDraft.price),
+      category: toStr(editDraft.category),
+      image_url: toStr(editDraft.image_url),
+      description: toStr(editDraft.description),
+    };
+
+    if (!payload.name || !payload.code) {
+      setServerError("Product name and code are required.");
+      return;
+    }
+
+    setSavingEdit(true);
+    setServerError("");
+
+    const res = await emitAsync("product:update", payload);
+
+    setSavingEdit(false);
+
+    if (!res?.success) {
+      setServerError(res?.message || "Failed to update product.");
+      return;
+    }
+
+    closeEditProduct();
+    loadProducts();
+  };
+
   // ----------------------------
   // Product actions
   // ----------------------------
@@ -413,11 +542,35 @@ export default function VendorShopPage({
   // ----------------------------
   // Filters / Sort
   // ----------------------------
-  const categories = useMemo(() => {
+  const conditionOptions = useMemo(() => {
     const set = new Set();
-    for (const p of products) set.add(p.category || "Uncategorized");
+    for (const p of products) set.add(p.conditional || "Unknown");
     return ["ALL", ...Array.from(set).sort((a, b) => a.localeCompare(b))];
   }, [products]);
+
+  const vendorStats = useMemo(() => {
+    const scoped = products.filter((p) =>
+      selectedTcg ? toStr(p.category) === toStr(selectedTcg) : true
+    );
+
+    const inventoryUnits = scoped.reduce((sum, item) => sum + toInt(item.stock), 0);
+    const inventoryValue = scoped.reduce(
+      (sum, item) => sum + toInt(item.stock) * toInt(item.price),
+      0
+    );
+    const lowStockCount = scoped.filter(
+      (item) => toInt(item.stock) > 0 && toInt(item.stock) <= LOW_STOCK_THRESHOLD
+    ).length;
+    const soldOutCount = scoped.filter((item) => toInt(item.stock) <= 0).length;
+
+    return {
+      listingCount: scoped.length,
+      inventoryUnits,
+      inventoryValue,
+      lowStockCount,
+      soldOutCount,
+    };
+  }, [products, selectedTcg]);
 
   const filteredProducts = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -441,15 +594,16 @@ export default function VendorShopPage({
       .filter((p) => (selectedTcg ? toStr(p.category) === toStr(selectedTcg) : true))
       .filter((p) => passDate(p))
       .filter((p) => {
-        if (categoryFilter === "ALL") return true;
-        return (p.category || "Uncategorized") === categoryFilter;
+        if (conditionFilter === "ALL") return true;
+        return (p.conditional || "Unknown") === conditionFilter;
       })
       .filter((p) => {
         if (!q) return true;
         return (
           p.name.toLowerCase().includes(q) ||
           p.code.toLowerCase().includes(q) ||
-          (p.category || "").toLowerCase().includes(q)
+          (p.category || "").toLowerCase().includes(q) ||
+          (p.description || "").toLowerCase().includes(q)
         );
       });
 
@@ -460,7 +614,7 @@ export default function VendorShopPage({
     };
     const byName = (a, b) => a.name.localeCompare(b.name);
     const byPrice = (a, b) => a.price - b.price;
-    const byCategory = (a, b) => (a.category || "").localeCompare(b.category || "");
+    const byStock = (a, b) => toInt(a.stock) - toInt(b.stock);
 
     const sorted = [...list];
     switch (sortMode) {
@@ -476,11 +630,11 @@ export default function VendorShopPage({
       case SORT.PRICE_DESC:
         sorted.sort((a, b) => byPrice(b, a) || byName(a, b));
         break;
-      case SORT.CATEGORY_AZ:
-        sorted.sort((a, b) => byCategory(a, b) || byName(a, b));
+      case SORT.STOCK_ASC:
+        sorted.sort((a, b) => byStock(a, b) || byName(a, b));
         break;
-      case SORT.CATEGORY_ZA:
-        sorted.sort((a, b) => byCategory(b, a) || byName(a, b));
+      case SORT.STOCK_DESC:
+        sorted.sort((a, b) => byStock(b, a) || byName(a, b));
         break;
       case SORT.NEWEST:
       default:
@@ -489,7 +643,7 @@ export default function VendorShopPage({
     }
 
     return sorted;
-  }, [products, selectedTcg, search, categoryFilter, dateFilter, sortMode]);
+  }, [products, selectedTcg, search, conditionFilter, dateFilter, sortMode]);
 
   if (!currentUser) return null;
 
@@ -672,62 +826,10 @@ export default function VendorShopPage({
 
                       try {
                         setServerError("");
-
-                        const fileName = file.name.toLowerCase();
-                        const imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
-                        const hasImageExt = imageExtensions.some((ext) =>
-                          fileName.endsWith(ext)
-                        );
-                        const hasImageType = file.type && file.type.startsWith("image/");
-
-                        if (!hasImageExt && !hasImageType) {
-                          throw new Error(
-                            `Invalid file. Expected image but got: ${file.type || "unknown"}`
-                          );
-                        }
-
-                        if (file.size > 5 * 1024 * 1024) {
-                          throw new Error("Max image size is 5MB.");
-                        }
-
-                        const base64Data = await new Promise((resolve, reject) => {
-                          const reader = new FileReader();
-                          reader.onload = () => {
-                            const result = reader.result;
-                            const base64 = String(result).split(",")[1];
-                            resolve(base64);
-                          };
-                          reader.onerror = reject;
-                          reader.readAsDataURL(file);
-                        });
-
-                        const result = await new Promise((resolve) => {
-                          const s = getSocket();
-                          if (!s?.connected) {
-                            return resolve({
-                              success: false,
-                              message: "Socket not connected",
-                            });
-                          }
-
-                          s.emit(
-                            "image:upload",
-                            {
-                              currentUser: { id: currentUser.id, role: currentUser.role },
-                              fileName: file.name,
-                              base64: base64Data,
-                            },
-                            (res) => resolve(res)
-                          );
-                        });
-
-                        if (!result?.success) {
-                          throw new Error(result?.message || "Upload failed on server");
-                        }
-
+                        const imageUrl = await uploadProductImage(file);
                         setNewProduct((p) => ({
                           ...p,
-                          image_url: result.imageUrl,
+                          image_url: imageUrl,
                         }));
 
                         e.target.value = "";
@@ -785,6 +887,46 @@ export default function VendorShopPage({
               </div>
             </form>
           ) : null}
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {[
+            {
+              label: "Active Listings",
+              value: vendorStats.listingCount,
+              tone: "text-amber-100",
+            },
+            {
+              label: "Inventory Units",
+              value: vendorStats.inventoryUnits,
+              tone: "text-emerald-200",
+            },
+            {
+              label: "Inventory Value",
+              value: formatCurrency(vendorStats.inventoryValue),
+              tone: "text-sky-200",
+            },
+            {
+              label: "Low / Sold Out",
+              value: `${vendorStats.lowStockCount} / ${vendorStats.soldOutCount}`,
+              tone: "text-rose-200",
+            },
+          ].map((item) => (
+            <div
+              key={item.label}
+              className="rounded-2xl border border-amber-900/40 bg-gradient-to-br from-slate-950/90 via-purple-950/35 to-slate-950 p-4 shadow-lg shadow-purple-900/15"
+            >
+              <p className="font-serif text-[10px] uppercase tracking-[0.24em] text-amber-300/70">
+                {item.label}
+              </p>
+              <p className={`mt-3 font-serif text-2xl font-bold ${item.tone}`}>
+                {item.value}
+              </p>
+              <p className="mt-1 text-[11px] text-amber-100/55">
+                Scoped to {activeTcg?.name || "your current TCG"}.
+              </p>
+            </div>
+          ))}
         </div>
 
         {/* ✅ TCG selector */}
@@ -861,13 +1003,13 @@ export default function VendorShopPage({
 
             <div className="md:col-span-3">
               <select
-                value={categoryFilter}
-                onChange={(e) => setCategoryFilter(e.target.value)}
+                value={conditionFilter}
+                onChange={(e) => setConditionFilter(e.target.value)}
                 className="w-full rounded-xl border border-amber-900/40 bg-slate-950/60 px-3 py-2 font-serif text-sm text-amber-50"
               >
-                {categories.map((c) => (
-                  <option key={c} value={c}>
-                    {c === "ALL" ? "All Categories" : c}
+                {conditionOptions.map((condition) => (
+                  <option key={condition} value={condition}>
+                    {condition === "ALL" ? "All Conditions" : condition}
                   </option>
                 ))}
               </select>
@@ -894,8 +1036,8 @@ export default function VendorShopPage({
               { key: SORT.ZA, label: "Z–A" },
               { key: SORT.PRICE_ASC, label: "Price ↑" },
               { key: SORT.PRICE_DESC, label: "Price ↓" },
-              { key: SORT.CATEGORY_AZ, label: "Category A–Z" },
-              { key: SORT.CATEGORY_ZA, label: "Category Z–A" },
+              { key: SORT.STOCK_ASC, label: "Stock ↑" },
+              { key: SORT.STOCK_DESC, label: "Stock ↓" },
             ].map((b) => {
               const active = sortMode === b.key;
               return (
@@ -962,16 +1104,31 @@ export default function VendorShopPage({
                     </h4>
 
                     <div className="flex items-center justify-between text-[11px] text-amber-100/70">
-                      <span className="italic">
-                        Stock:{" "}
-                        <span className="font-semibold text-amber-300">
-                          {toInt(p.stock)}
-                        </span>
+                      <span
+                        className={[
+                          "rounded-full border px-2 py-0.5 font-serif text-[10px] uppercase tracking-wide",
+                          getStockTone(p.stock),
+                        ].join(" ")}
+                      >
+                        {toInt(p.stock) <= 0
+                          ? "Sold Out"
+                          : toInt(p.stock) <= LOW_STOCK_THRESHOLD
+                          ? `Low Stock: ${toInt(p.stock)}`
+                          : `In Stock: ${toInt(p.stock)}`}
                       </span>
 
                       <span className="rounded-full border border-amber-900/40 bg-slate-950/50 px-2 py-0.5 font-serif text-[10px] uppercase tracking-wide text-amber-200/80">
                         {p.code || "-"}
                       </span>
+                    </div>
+
+                    <p className="line-clamp-2 text-xs leading-relaxed text-amber-100/65">
+                      {p.description || "No description added yet."}
+                    </p>
+
+                    <div className="flex items-center justify-between text-[10px] text-amber-100/55">
+                      <span>Created {formatDateShort(p.created_at)}</span>
+                      <span>Vendor #{p.vendor_id}</span>
                     </div>
 
                     {p.seller_name || p.seller_phone ? (
@@ -1031,6 +1188,205 @@ export default function VendorShopPage({
                     >
                       View More →
                     </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        editingProductId === p.id
+                          ? closeEditProduct()
+                          : openEditProduct(p)
+                      }
+                      className="inline-flex items-center justify-center rounded-xl border border-sky-700/40 bg-sky-950/15 px-3 py-2 font-serif text-[11px] font-semibold uppercase tracking-wide text-sky-200 transition hover:border-sky-500/60 hover:text-sky-100"
+                    >
+                      {editingProductId === p.id ? "Close Editor" : "Edit Listing"}
+                    </button>
+
+                    {editingProductId === p.id && editDraft ? (
+                      <div className="rounded-2xl border border-sky-900/40 bg-slate-950/40 p-3">
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                          <div>
+                            <p className="font-serif text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-200">
+                              Edit Listing
+                            </p>
+                            <p className="text-[10px] text-amber-100/55">
+                              Update fields stored in PRODUCTS.
+                            </p>
+                          </div>
+                          <span className="rounded-full border border-sky-700/40 bg-sky-950/20 px-2.5 py-1 text-[10px] uppercase tracking-wide text-sky-200">
+                            ID {p.id}
+                          </span>
+                        </div>
+
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <div>
+                            <label className="mb-1 block text-[10px] uppercase tracking-[0.18em] text-amber-200/65">
+                              Name
+                            </label>
+                            <input
+                              value={editDraft.name}
+                              onChange={(e) =>
+                                setEditDraft((draft) => ({
+                                  ...draft,
+                                  name: e.target.value,
+                                }))
+                              }
+                              className="w-full rounded-lg border border-sky-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-amber-50"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="mb-1 block text-[10px] uppercase tracking-[0.18em] text-amber-200/65">
+                              Code
+                            </label>
+                            <input
+                              value={editDraft.code}
+                              onChange={(e) =>
+                                setEditDraft((draft) => ({
+                                  ...draft,
+                                  code: e.target.value,
+                                }))
+                              }
+                              className="w-full rounded-lg border border-sky-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-amber-50"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="mb-1 block text-[10px] uppercase tracking-[0.18em] text-amber-200/65">
+                              Condition
+                            </label>
+                            <select
+                              value={editDraft.conditional}
+                              onChange={(e) =>
+                                setEditDraft((draft) => ({
+                                  ...draft,
+                                  conditional: e.target.value,
+                                }))
+                              }
+                              className="w-full rounded-lg border border-sky-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-amber-50"
+                            >
+                              <option value="NEW">NEW</option>
+                              <option value="USED">USED</option>
+                              <option value="SEALED">SEALED</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="mb-1 block text-[10px] uppercase tracking-[0.18em] text-amber-200/65">
+                              Price
+                            </label>
+                            <input
+                              type="number"
+                              min={0}
+                              value={editDraft.price}
+                              onChange={(e) =>
+                                setEditDraft((draft) => ({
+                                  ...draft,
+                                  price: e.target.value,
+                                }))
+                              }
+                              className="w-full rounded-lg border border-sky-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-amber-50"
+                            />
+                          </div>
+
+                          <div className="sm:col-span-2">
+                            <label className="mb-1 block text-[10px] uppercase tracking-[0.18em] text-amber-200/65">
+                              TCG Category
+                            </label>
+                            <select
+                              value={editDraft.category}
+                              onChange={(e) =>
+                                setEditDraft((draft) => ({
+                                  ...draft,
+                                  category: e.target.value,
+                                }))
+                              }
+                              className="w-full rounded-lg border border-sky-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-amber-50"
+                            >
+                              {TCG_LIST.map((tcg) => (
+                                <option key={tcg.id} value={tcg.id}>
+                                  {tcg.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="sm:col-span-2">
+                            <label className="mb-1 block text-[10px] uppercase tracking-[0.18em] text-amber-200/65">
+                              Product Image
+                            </label>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+
+                                try {
+                                  setServerError("");
+                                  const imageUrl = await uploadProductImage(file);
+                                  setEditDraft((draft) => ({
+                                    ...draft,
+                                    image_url: imageUrl,
+                                  }));
+                                  e.target.value = "";
+                                } catch (err) {
+                                  setServerError(err?.message || "Failed to upload image.");
+                                }
+                              }}
+                              className="w-full rounded-lg border border-sky-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-amber-50"
+                            />
+
+                            {editDraft.image_url ? (
+                              <div className="mt-2 flex items-center gap-3 rounded-xl border border-sky-900/30 bg-slate-950/50 p-2">
+                                <img
+                                  src={resolveImageSrc(editDraft.image_url)}
+                                  alt="Edit preview"
+                                  className="h-12 w-12 rounded-lg border border-sky-900/40 object-cover"
+                                  onError={(e) => (e.currentTarget.src = PLACEHOLDER)}
+                                />
+                                <span className="text-[10px] text-amber-100/65">
+                                  {editDraft.image_url}
+                                </span>
+                              </div>
+                            ) : null}
+                          </div>
+
+                          <div className="sm:col-span-2">
+                            <label className="mb-1 block text-[10px] uppercase tracking-[0.18em] text-amber-200/65">
+                              Description
+                            </label>
+                            <textarea
+                              value={editDraft.description}
+                              onChange={(e) =>
+                                setEditDraft((draft) => ({
+                                  ...draft,
+                                  description: e.target.value,
+                                }))
+                              }
+                              className="min-h-[88px] w-full rounded-lg border border-sky-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-amber-50"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="mt-3 flex flex-wrap justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={closeEditProduct}
+                            className="rounded-lg border border-amber-900/40 bg-slate-950/50 px-3 py-2 font-serif text-[11px] text-amber-100/80"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => submitEditProduct(p.id)}
+                            disabled={savingEdit}
+                            className="rounded-lg border border-sky-500/50 bg-sky-950/20 px-3 py-2 font-serif text-[11px] font-semibold uppercase tracking-wide text-sky-100 transition hover:border-sky-400 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {savingEdit ? "Saving..." : "Save Changes"}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
 
                     {isVendor ? (
                       <details className="group mt-1 rounded-2xl border border-amber-900/40 bg-slate-950/35">
@@ -1147,15 +1503,6 @@ export default function VendorShopPage({
                               Delete Product
                             </button>
                           </div>
-
-                          <button
-                            type="button"
-                            onClick={() => alert(`Sell / listing flow for: ${p.name}`)}
-                            className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-amber-500/50 bg-gradient-to-r from-amber-950/25 to-slate-950 px-3 py-2 font-serif text-[11px] font-semibold uppercase tracking-wide text-amber-100 transition hover:border-amber-400 hover:shadow-lg hover:shadow-amber-900/20 active:translate-y-[1px]"
-                          >
-                            Sell / List Item
-                            <span className="text-amber-200/70">↗</span>
-                          </button>
                         </div>
                       </details>
                     ) : null}

@@ -95,9 +95,35 @@ const SORT = {
   ZA: "ZA",
   PRICE_ASC: "PRICE_ASC",
   PRICE_DESC: "PRICE_DESC",
-  CATEGORY_AZ: "CATEGORY_AZ",
-  CATEGORY_ZA: "CATEGORY_ZA",
+  STOCK_ASC: "STOCK_ASC",
+  STOCK_DESC: "STOCK_DESC",
 };
+
+const LOW_STOCK_THRESHOLD = 3;
+
+function formatCurrency(value) {
+  return `BND ${toInt(value).toFixed(2)}`;
+}
+
+function formatDateShort(value) {
+  if (!value) return "-";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+  });
+}
+
+function getStockTone(stock) {
+  const qty = toInt(stock);
+  if (qty <= 0) return "border-rose-600/40 bg-rose-950/20 text-rose-200";
+  if (qty <= LOW_STOCK_THRESHOLD) {
+    return "border-amber-600/40 bg-amber-950/20 text-amber-200";
+  }
+  return "border-emerald-600/40 bg-emerald-950/20 text-emerald-200";
+}
 
 export default function UserShopPage({
   cart,
@@ -125,7 +151,7 @@ export default function UserShopPage({
   });
 
   const [search, setSearch] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("ALL");
+  const [conditionFilter, setConditionFilter] = useState("ALL");
   const [dateFilter, setDateFilter] = useState(DATE_FILTER.ALL);
   const [sortMode, setSortMode] = useState(SORT.NEWEST);
 
@@ -296,10 +322,35 @@ export default function UserShopPage({
   // ----------------------------
   // Filters / Sort (applies after TCG filter)
   // ----------------------------
-  const categories = useMemo(() => {
+  const conditionOptions = useMemo(() => {
     const set = new Set();
-    for (const p of tcgFilteredProducts) set.add(p.category || "Uncategorized");
+    for (const p of tcgFilteredProducts) set.add(p.conditional || "Unknown");
     return ["ALL", ...Array.from(set).sort((a, b) => a.localeCompare(b))];
+  }, [tcgFilteredProducts]);
+
+  const shopperStats = useMemo(() => {
+    const inventoryUnits = tcgFilteredProducts.reduce(
+      (sum, item) => sum + toInt(item.stock),
+      0,
+    );
+    const readyToBuyCount = tcgFilteredProducts.filter(
+      (item) => toInt(item.stock) > 0,
+    ).length;
+    const lowStockCount = tcgFilteredProducts.filter(
+      (item) => toInt(item.stock) > 0 && toInt(item.stock) <= LOW_STOCK_THRESHOLD,
+    ).length;
+    const averagePrice = tcgFilteredProducts.length
+      ? tcgFilteredProducts.reduce((sum, item) => sum + toInt(item.price), 0) /
+        tcgFilteredProducts.length
+      : 0;
+
+    return {
+      listingCount: tcgFilteredProducts.length,
+      inventoryUnits,
+      readyToBuyCount,
+      lowStockCount,
+      averagePrice,
+    };
   }, [tcgFilteredProducts]);
 
   const filteredProducts = useMemo(() => {
@@ -327,15 +378,16 @@ export default function UserShopPage({
     const list = tcgFilteredProducts
       .filter((p) => passDate(p))
       .filter((p) => {
-        if (categoryFilter === "ALL") return true;
-        return (p.category || "Uncategorized") === categoryFilter;
+        if (conditionFilter === "ALL") return true;
+        return (p.conditional || "Unknown") === conditionFilter;
       })
       .filter((p) => {
         if (!q) return true;
         return (
           p.name.toLowerCase().includes(q) ||
           p.code.toLowerCase().includes(q) ||
-          (p.category || "").toLowerCase().includes(q)
+          (p.category || "").toLowerCase().includes(q) ||
+          (p.description || "").toLowerCase().includes(q)
         );
       });
 
@@ -347,8 +399,7 @@ export default function UserShopPage({
 
     const byName = (a, b) => a.name.localeCompare(b.name);
     const byPrice = (a, b) => a.price - b.price;
-    const byCategory = (a, b) =>
-      (a.category || "").localeCompare(b.category || "");
+    const byStock = (a, b) => toInt(a.stock) - toInt(b.stock);
 
     const sorted = [...list];
     switch (sortMode) {
@@ -364,11 +415,11 @@ export default function UserShopPage({
       case SORT.PRICE_DESC:
         sorted.sort((a, b) => byPrice(b, a) || byName(a, b));
         break;
-      case SORT.CATEGORY_AZ:
-        sorted.sort((a, b) => byCategory(a, b) || byName(a, b));
+      case SORT.STOCK_ASC:
+        sorted.sort((a, b) => byStock(a, b) || byName(a, b));
         break;
-      case SORT.CATEGORY_ZA:
-        sorted.sort((a, b) => byCategory(b, a) || byName(a, b));
+      case SORT.STOCK_DESC:
+        sorted.sort((a, b) => byStock(b, a) || byName(a, b));
         break;
       case SORT.NEWEST:
       default:
@@ -377,7 +428,7 @@ export default function UserShopPage({
     }
 
     return sorted;
-  }, [tcgFilteredProducts, search, categoryFilter, dateFilter, sortMode]);
+  }, [tcgFilteredProducts, search, conditionFilter, dateFilter, sortMode]);
 
   if (!currentUser) return null;
 
@@ -438,6 +489,46 @@ export default function UserShopPage({
           })}
         </div>
 
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {[
+            {
+              label: "Listings",
+              value: shopperStats.listingCount,
+              tone: "text-amber-100",
+            },
+            {
+              label: "Ready To Buy",
+              value: shopperStats.readyToBuyCount,
+              tone: "text-emerald-200",
+            },
+            {
+              label: "Units In Stock",
+              value: shopperStats.inventoryUnits,
+              tone: "text-sky-200",
+            },
+            {
+              label: "Avg Price / Low Stock",
+              value: `${formatCurrency(shopperStats.averagePrice)} / ${shopperStats.lowStockCount}`,
+              tone: "text-rose-200",
+            },
+          ].map((item) => (
+            <div
+              key={item.label}
+              className="rounded-2xl border border-amber-900/40 bg-gradient-to-br from-slate-950/90 via-purple-950/35 to-slate-950 p-4 shadow-lg shadow-purple-900/15"
+            >
+              <p className="font-serif text-[10px] uppercase tracking-[0.24em] text-amber-300/70">
+                {item.label}
+              </p>
+              <p className={`mt-3 font-serif text-2xl font-bold ${item.tone}`}>
+                {item.value}
+              </p>
+              <p className="mt-1 text-[11px] text-amber-100/55">
+                Based on {activeTcg?.name || "your selected TCG"} listings.
+              </p>
+            </div>
+          ))}
+        </div>
+
         {/* Marketplace header + controls */}
         <div className="rounded-2xl border border-amber-900/40 bg-gradient-to-br from-slate-950 via-purple-950/45 to-slate-950 p-5 shadow-lg shadow-purple-900/20">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -489,13 +580,13 @@ export default function UserShopPage({
             {/* Category */}
             <div className="md:col-span-3">
               <select
-                value={categoryFilter}
-                onChange={(e) => setCategoryFilter(e.target.value)}
+                value={conditionFilter}
+                onChange={(e) => setConditionFilter(e.target.value)}
                 className="w-full rounded-xl border border-amber-900/40 bg-slate-950/60 px-3 py-2 font-serif text-sm text-amber-50"
               >
-                {categories.map((c) => (
-                  <option key={c} value={c}>
-                    {c === "ALL" ? "All Categories" : c}
+                {conditionOptions.map((condition) => (
+                  <option key={condition} value={condition}>
+                    {condition === "ALL" ? "All Conditions" : condition}
                   </option>
                 ))}
               </select>
@@ -524,8 +615,8 @@ export default function UserShopPage({
               { key: SORT.ZA, label: "Z–A" },
               { key: SORT.PRICE_ASC, label: "Price ↑" },
               { key: SORT.PRICE_DESC, label: "Price ↓" },
-              { key: SORT.CATEGORY_AZ, label: "Category A–Z" },
-              { key: SORT.CATEGORY_ZA, label: "Category Z–A" },
+              { key: SORT.STOCK_ASC, label: "Stock ↑" },
+              { key: SORT.STOCK_DESC, label: "Stock ↓" },
             ].map((b) => {
               const active = sortMode === b.key;
               return (
@@ -591,16 +682,31 @@ export default function UserShopPage({
                   </h4>
 
                   <div className="flex items-center justify-between text-[11px] text-amber-100/70">
-                    <span className="italic">
-                      Stock:{" "}
-                      <span className="font-semibold text-amber-300">
-                        {toInt(p.stock)}
-                      </span>
+                    <span
+                      className={[
+                        "rounded-full border px-2 py-0.5 font-serif text-[10px] uppercase tracking-wide",
+                        getStockTone(p.stock),
+                      ].join(" ")}
+                    >
+                      {toInt(p.stock) <= 0
+                        ? "Sold Out"
+                        : toInt(p.stock) <= LOW_STOCK_THRESHOLD
+                          ? `Low Stock: ${toInt(p.stock)}`
+                          : `In Stock: ${toInt(p.stock)}`}
                     </span>
 
                     <span className="rounded-full border border-amber-900/40 bg-slate-950/50 px-2 py-0.5 font-serif text-[10px] uppercase tracking-wide text-amber-200/80">
                       {p.code || "-"}
                     </span>
+                  </div>
+
+                  <p className="line-clamp-2 text-xs leading-relaxed text-amber-100/65">
+                    {p.description || "No description added yet."}
+                  </p>
+
+                  <div className="flex items-center justify-between text-[10px] text-amber-100/55">
+                    <span>Created {formatDateShort(p.created_at)}</span>
+                    <span>{formatCurrency(p.price)}</span>
                   </div>
 
                   {p.seller_name || p.seller_phone ? (

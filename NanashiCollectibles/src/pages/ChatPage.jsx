@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useSocket } from "../hooks/useSocket";
 import OnlineUsers from "../components/OnlineUsers";
+import LiveActivityFeed from "../components/LiveActivityFeed";
 import { getCurrentUser, getUsername } from "../authStorage";
 
 function readCurrentUser() {
@@ -27,7 +28,41 @@ function ChatPage() {
     return currentUser?.username || getUsername("Guest") || "Guest";
   }, [currentUser]);
 
-  const { isConnected, socket } = useSocket(username);
+  const { isConnected, socket, onlineUsers } = useSocket(username);
+
+  const normalizedMessages = useMemo(() => {
+    return messages.map((message) => {
+      const messageUsername = message?.username || message?.user || "Unknown";
+      const messageText = message?.message ?? message?.text ?? "";
+      const messageTime = message?.timestamp || message?.created_at || Date.now();
+
+      return {
+        id: message.id || `${messageUsername}-${messageTime}-${messageText.slice(0, 8)}`,
+        username: messageUsername,
+        text: String(messageText || ""),
+        timestamp: messageTime,
+        isOwnMessage: messageUsername === (currentUser?.username || username),
+      };
+    });
+  }, [messages, currentUser, username]);
+
+  const chatStats = useMemo(() => {
+    const uniqueParticipants = new Set(
+      normalizedMessages.map((message) => message.username).filter(Boolean),
+    );
+
+    (Array.isArray(onlineUsers) ? onlineUsers : []).forEach((user) => {
+      if (user?.username) uniqueParticipants.add(user.username);
+    });
+
+    const latestMessage = normalizedMessages.at(-1);
+
+    return {
+      totalMessages: normalizedMessages.length,
+      activeCollectors: uniqueParticipants.size,
+      latestMessageTime: latestMessage?.timestamp || null,
+    };
+  }, [normalizedMessages, onlineUsers]);
 
   useEffect(() => {
     const syncAuth = () => {
@@ -77,6 +112,11 @@ function ChatPage() {
   useEffect(() => {
     if (!socket) return;
 
+    function onChatHistory(history) {
+      const nextMessages = Array.isArray(history) ? history : [];
+      setMessages(nextMessages);
+    }
+
     function onChatMessage(message) {
       console.log("📨 Received:", message);
       setMessages((prev) => {
@@ -101,14 +141,24 @@ function ChatPage() {
       }
     }
 
+    socket.on("chat:history", onChatHistory);
     socket.on("chat:message", onChatMessage);
     socket.on("chat:typing", onUserTyping);
 
+    socket.emit("chat:history");
+
     return () => {
+      socket.off("chat:history", onChatHistory);
       socket.off("chat:message", onChatMessage);
       socket.off("chat:typing", onUserTyping);
     };
   }, [socket, username]);
+
+  useEffect(() => {
+    if (!socket || !isConnected) return;
+
+    socket.emit("activities:request");
+  }, [socket, isConnected]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -143,6 +193,18 @@ function ChatPage() {
       hour: "2-digit",
       minute: "2-digit",
     });
+  };
+
+  const formatLastSeen = (timestamp) => {
+    if (!timestamp) return "Waiting for the first message";
+
+    const date = new Date(timestamp);
+    const diff = Date.now() - date.getTime();
+
+    if (diff < 60_000) return "Updated just now";
+    if (diff < 3_600_000) return `Updated ${Math.floor(diff / 60_000)}m ago`;
+
+    return `Updated at ${formatTime(timestamp)}`;
   };
 
   return (
@@ -190,52 +252,136 @@ function ChatPage() {
               </div>
             </div>
 
+            <div className="mt-6 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-xl border border-amber-900/30 bg-slate-950/40 px-4 py-3">
+                <p className="font-serif text-[11px] uppercase tracking-[0.24em] text-amber-100/45">
+                  Message Log
+                </p>
+                <p className="mt-2 font-serif text-2xl font-semibold text-amber-100">
+                  {chatStats.totalMessages}
+                </p>
+                <p className="font-serif text-xs text-amber-100/55">
+                  Messages in this live session
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-amber-900/30 bg-slate-950/40 px-4 py-3">
+                <p className="font-serif text-[11px] uppercase tracking-[0.24em] text-amber-100/45">
+                  Active Collectors
+                </p>
+                <p className="mt-2 font-serif text-2xl font-semibold text-amber-100">
+                  {chatStats.activeCollectors}
+                </p>
+                <p className="font-serif text-xs text-amber-100/55">
+                  Players visible in chat or online now
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-amber-900/30 bg-slate-950/40 px-4 py-3">
+                <p className="font-serif text-[11px] uppercase tracking-[0.24em] text-amber-100/45">
+                  Channel Pulse
+                </p>
+                <p className="mt-2 font-serif text-sm font-semibold text-amber-100">
+                  {formatLastSeen(chatStats.latestMessageTime)}
+                </p>
+                <p className="font-serif text-xs text-amber-100/55">
+                  Realtime socket activity snapshot
+                </p>
+              </div>
+            </div>
+
             <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-amber-500/50 to-transparent" />
           </div>
 
           <div className="relative overflow-hidden rounded-2xl border border-amber-900/30 bg-gradient-to-br from-slate-950 to-purple-950/30 shadow-lg shadow-purple-900/20">
             <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-500/30 to-transparent" />
 
-            <div className="h-[500px] overflow-y-auto p-6 space-y-4">
-              {messages.length === 0 ? (
-                <div className="flex h-full items-center justify-center">
-                  <p className="font-serif text-sm italic text-amber-100/50">
-                    No messages yet. Start the conversation! ✨
+            <div className="border-b border-amber-900/20 bg-slate-950/40 px-6 py-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="font-serif text-lg font-semibold text-amber-100">
+                    Collector Hall
+                  </h2>
+                  <p className="font-serif text-xs text-amber-100/55">
+                    Live discussion for trades, card checks, and marketplace chatter.
                   </p>
                 </div>
-              ) : (
-                messages.map((msg) => {
-                  const msgUsername = msg?.username || msg?.user || "Unknown";
-                  const msgText = msg?.message ?? msg?.text ?? "";
-                  const msgTime = msg?.timestamp || msg?.created_at || Date.now();
 
-                  const isOwnMessage = msgUsername === (currentUser?.username || username);
+                <div className="flex flex-wrap gap-2">
+                  <span className="rounded-full border border-amber-700/30 bg-amber-950/20 px-3 py-1 font-serif text-[11px] text-amber-200/85">
+                    {isConnected ? "Socket ready" : "Socket offline"}
+                  </span>
+                  <span className="rounded-full border border-amber-700/30 bg-slate-950/60 px-3 py-1 font-serif text-[11px] text-amber-100/70">
+                    {typingUsers.size > 0
+                      ? `${typingUsers.size} collector${typingUsers.size === 1 ? "" : "s"} typing`
+                      : "Quiet chamber"}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="h-[500px] overflow-y-auto p-6 space-y-4">
+              {normalizedMessages.length === 0 ? (
+                <div className="flex h-full items-center justify-center">
+                  <div className="max-w-md rounded-2xl border border-amber-900/20 bg-slate-950/40 px-6 py-8 text-center">
+                    <p className="font-serif text-base font-semibold text-amber-100">
+                      The hall is quiet.
+                    </p>
+                    <p className="mt-2 font-serif text-sm italic text-amber-100/50">
+                      {isConnected
+                        ? "Open the conversation with a trade question, card lookup, or collector update."
+                        : "Reconnect to the socket to start sending messages."}
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                normalizedMessages.map((msg) => {
+                  const initials = (msg.username || "?")
+                    .split(/\s+/)
+                    .filter(Boolean)
+                    .slice(0, 2)
+                    .map((part) => part[0]?.toUpperCase())
+                    .join("");
 
                   return (
                     <div
-                      key={msg.id || `${msgUsername}-${msgTime}-${msgText.slice(0, 8)}`}
+                      key={msg.id}
                       className={`flex ${
-                        isOwnMessage ? "justify-end" : "justify-start"
+                        msg.isOwnMessage ? "justify-end" : "justify-start"
                       }`}
                     >
                       <div
-                        className={`max-w-[70%] rounded-lg p-3 ${
-                          isOwnMessage
-                            ? "bg-gradient-to-r from-amber-950/50 to-purple-950/50 border border-amber-600/40"
-                            : "bg-slate-950/70 border border-amber-900/20"
+                        className={`flex max-w-[78%] items-start gap-3 rounded-2xl p-3 ${
+                          msg.isOwnMessage
+                            ? "border border-amber-600/40 bg-gradient-to-r from-amber-950/50 to-purple-950/50"
+                            : "border border-amber-900/20 bg-slate-950/70"
                         }`}
                       >
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="font-serif text-xs font-semibold text-amber-400">
-                            {msgUsername}
-                          </span>
-                          <span className="font-serif text-[10px] text-amber-100/40">
-                            {formatTime(msgTime)}
-                          </span>
+                        {!msg.isOwnMessage && (
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-amber-700/30 bg-amber-950/25 font-serif text-xs font-semibold text-amber-300">
+                            {initials || "?"}
+                          </div>
+                        )}
+
+                        <div className="min-w-0 flex-1">
+                          <div className="mb-1 flex items-center gap-2">
+                            <span className="font-serif text-xs font-semibold text-amber-400">
+                              {msg.username}
+                            </span>
+                            <span className="font-serif text-[10px] text-amber-100/40">
+                              {formatTime(msg.timestamp)}
+                            </span>
+                            {msg.isOwnMessage && (
+                              <span className="rounded-full border border-amber-600/30 bg-amber-950/30 px-2 py-0.5 font-serif text-[10px] text-amber-200/80">
+                                You
+                              </span>
+                            )}
+                          </div>
+
+                          <p className="whitespace-pre-wrap break-words font-serif text-sm leading-6 text-amber-100/90">
+                            {msg.text}
+                          </p>
                         </div>
-                        <p className="font-serif text-sm text-amber-100/90">
-                          {msgText}
-                        </p>
                       </div>
                     </div>
                   );
@@ -302,6 +448,22 @@ function ChatPage() {
 
         <div className="space-y-4">
           <OnlineUsers />
+          <LiveActivityFeed />
+
+          <div className="relative overflow-hidden rounded-xl border border-amber-900/30 bg-gradient-to-br from-slate-950 to-purple-950/30 p-4 shadow-lg shadow-purple-900/20">
+            <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-500/30 to-transparent" />
+
+            <h3 className="font-serif text-sm font-bold text-amber-100">
+              Hall Etiquette
+            </h3>
+            <ul className="mt-3 space-y-2 font-serif text-xs text-amber-100/65">
+              <li>Keep trade details clear so other collectors can verify condition and price.</li>
+              <li>Use the live activity feed to spot shop, stock, and trade movement while chatting.</li>
+              <li>Short updates land faster when the socket reconnects after a network drop.</li>
+            </ul>
+
+            <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-amber-500/30 to-transparent" />
+          </div>
         </div>
       </div>
     </div>

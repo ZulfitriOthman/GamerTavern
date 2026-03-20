@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createChart, LineSeries } from "lightweight-charts";
+import { getSocket, connectSocket } from "../socket/socketClient";
+import { getUsername } from "../authStorage";
 
 const CATEGORIES = ["All", "Magic", "Yu-Gi-Oh", "Pokemon", "Vanguard", "General"];
 
-const NEWS = [
+const FALLBACK_NEWS = [
   {
     id: "news-001",
     title: "Weekly Market Watch: Staple Singles Holding Strong",
@@ -92,7 +94,7 @@ const NEWS = [
   },
 ];
 
-const TOURNAMENTS = [
+const FALLBACK_TOURNAMENTS = [
   {
     id: "evt-001",
     title: "Friday Night Magic — Commander Pods",
@@ -146,6 +148,80 @@ const TOURNAMENTS = [
     notes: "Bring sleeves + deck list recommended.",
   },
 ];
+
+// --- DB row normalizers ---
+function normalizeDbNews(row) {
+  if (!row) return null;
+  const rawContent = row.content || "";
+  const paragraphs = rawContent
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const excerpt =
+    rawContent.length > 180
+      ? rawContent.slice(0, 180).replace(/\s+\S*$/, "") + "\u2026"
+      : rawContent;
+
+  const words = rawContent.split(/\s+/).length;
+  const readMin = Math.max(1, Math.round(words / 200));
+
+  const rawDate = row.date_posted || row.created_at;
+  const date = rawDate
+    ? new Date(rawDate).toISOString().slice(0, 10)
+    : new Date().toISOString().slice(0, 10);
+
+  return {
+    id: `db-news-${row.id}`,
+    title: row.title || "Untitled",
+    excerpt,
+    category: row.category || "General",
+    date,
+    readTime: `${readMin} min`,
+    featured: false,
+    image:
+      row.image_url ||
+      "https://images.unsplash.com/photo-1612036781124-847f8939c3f3?auto=format&fit=crop&w=1200&q=70",
+    content: paragraphs.length ? paragraphs : [rawContent],
+    source: row.author || "Gamer Tavern Scribe Desk",
+    tags: row.tags || "",
+  };
+}
+
+function normalizeDbTournament(row) {
+  if (!row) return null;
+
+  const parseDt = (val) => {
+    if (!val) return null;
+    const d = new Date(val);
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+
+  const startDt = parseDt(row.start_date);
+  const endDt = parseDt(row.end_date);
+
+  const _pad = (n) => String(n).padStart(2, "0");
+  const date = startDt
+    ? `${startDt.getFullYear()}-${_pad(startDt.getMonth() + 1)}-${_pad(startDt.getDate())}`
+    : new Date().toISOString().slice(0, 10);
+  const startTime = startDt ? `${_pad(startDt.getHours())}:${_pad(startDt.getMinutes())}` : "00:00";
+  const endTime = endDt ? `${_pad(endDt.getHours())}:${_pad(endDt.getMinutes())}` : "00:00";
+  const fee = row.entry_fee != null ? `BND ${Number(row.entry_fee).toFixed(2)}` : "Free";
+
+  return {
+    id: `db-evt-${row.id}`,
+    title: row.name || "Untitled Event",
+    game: row.game_title || "General",
+    date,
+    startTime,
+    endTime,
+    location: row.location || "Gamer Tavern",
+    format: row.rules ? row.rules.slice(0, 80) : "",
+    entryFee: fee,
+    prize: "",
+    notes: row.description || "",
+  };
+}
 
 const DEMAND_CANDLES = {
   All: [
@@ -557,6 +633,17 @@ export default function NewsPage() {
   const [query, setQuery] = useState("");
   const [openId, setOpenId] = useState(null);
 
+  // DB-sourced data
+  const [dbNews, setDbNews] = useState([]);
+  const [dbTournaments, setDbTournaments] = useState([]);
+  const [newsLoading, setNewsLoading] = useState(false);
+  const [tournamentsLoading, setTournamentsLoading] = useState(false);
+  const didInitRef = useRef(false);
+
+  // Active data: prefer DB when it has rows
+  const news = dbNews.length > 0 ? dbNews : FALLBACK_NEWS;
+  const tournaments = dbTournaments.length > 0 ? dbTournaments : FALLBACK_TOURNAMENTS;
+
   /* Trend filters */
   const TREND_GAMES = ["All", "Magic", "Yu-Gi-Oh", "Pokemon", "Vanguard"];
   const [trendGame, setTrendGame] = useState("All");
@@ -567,32 +654,94 @@ export default function NewsPage() {
     return DEMAND_CANDLES[key] || DEMAND_CANDLES.All;
   }, [trendGame]);
 
+  // --- Socket loading ---
+  const emitAsync = (event, payload) =>
+    new Promise((resolve) => {
+      const s = getSocket();
+      if (!s?.connected) return resolve({ success: false });
+      s.emit(event, payload, (res) => resolve(res));
+    });
+
+  const loadNews = async () => {
+    setNewsLoading(true);
+    const res = await emitAsync("news:list", { limit: 50 });
+    setNewsLoading(false);
+    if (res?.success && Array.isArray(res.data) && res.data.length > 0) {
+      setDbNews(res.data.map(normalizeDbNews).filter(Boolean));
+    }
+  };
+
+  const loadTournaments = async () => {
+    setTournamentsLoading(true);
+    const res = await emitAsync("tournament:list", {});
+    setTournamentsLoading(false);
+    if (res?.success && Array.isArray(res.data) && res.data.length > 0) {
+      setDbTournaments(res.data.map(normalizeDbTournament).filter(Boolean));
+    }
+  };
+
+  useEffect(() => {
+    if (didInitRef.current) return;
+    didInitRef.current = true;
+    connectSocket(getUsername() || "guest");
+  }, []);
+
+  useEffect(() => {
+    const s = getSocket();
+    if (!s) return;
+
+    const onConnect = () => {
+      loadNews();
+      loadTournaments();
+    };
+
+    s.on("connect", onConnect);
+    if (s.connected) {
+      loadNews();
+      loadTournaments();
+    }
+
+    return () => {
+      s.off("connect", onConnect);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Calendar month state
   const months = useMemo(() => {
-    const keys = Array.from(new Set(TOURNAMENTS.map((e) => toMonthKey(e.date))))
+    const keys = Array.from(new Set(tournaments.map((e) => toMonthKey(e.date))))
       .sort((a, b) => (a < b ? -1 : 1));
     return keys.length
       ? keys
       : [toMonthKey(new Date().toISOString().slice(0, 10))];
-  }, []);
+  }, [tournaments]);
 
-  const [activeMonth, setActiveMonth] = useState(months[0]);
+  const [activeMonth, setActiveMonth] = useState(() =>
+    toMonthKey(new Date().toISOString().slice(0, 10))
+  );
+
+  // keep activeMonth in sync if months list changes
+  useEffect(() => {
+    if (months.length > 0 && !months.includes(activeMonth)) {
+      setActiveMonth(months[0]);
+    }
+  }, [months, activeMonth]);
 
   const eventsThisMonth = useMemo(() => {
-    return TOURNAMENTS.filter((e) => toMonthKey(e.date) === activeMonth).sort(
+    return tournaments.filter((e) => toMonthKey(e.date) === activeMonth).sort(
       (a, b) => (a.date < b.date ? -1 : 1)
     );
-  }, [activeMonth]);
+  }, [tournaments, activeMonth]);
 
-  const featured = useMemo(() => NEWS.find((n) => n.featured) || NEWS[0], []);
+  const featured = useMemo(() => news.find((n) => n.featured) || news[0], [news]);
   const selectedArticle = useMemo(
-    () => NEWS.find((n) => n.id === openId) || null,
-    [openId]
+    () => news.find((n) => n.id === openId) || null,
+    [news, openId]
   );
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return NEWS.filter((n) => {
+    return news.filter((n) => {
       const catOk = category === "All" ? true : n.category === category;
       const qOk =
         !q ||
@@ -601,7 +750,7 @@ export default function NewsPage() {
         n.category.toLowerCase().includes(q);
       return catOk && qOk;
     }).sort((a, b) => (a.date < b.date ? 1 : -1));
-  }, [category, query]);
+  }, [news, category, query]);
 
   const trending = useMemo(() => {
     const base =
@@ -899,7 +1048,12 @@ export default function NewsPage() {
               </h3>
               <p className="mt-2 max-w-2xl text-sm text-amber-100/70">
                 Upcoming tournaments and weekly gatherings. Add events to your
-                calendar so you never miss a round.
+                calendar so you never miss a round.{" "}
+                {tournamentsLoading
+                  ? "(Loading…)"
+                  : dbTournaments.length > 0
+                  ? "(Live from DB)"
+                  : "(Demo data)"}
               </p>
               <div className="mt-4 flex flex-wrap gap-2">
                 <Pill>Weekly Play</Pill>
@@ -970,10 +1124,12 @@ export default function NewsPage() {
                           <span className="text-amber-200/70">Time:</span>{" "}
                           {e.startTime}–{e.endTime}
                         </p>
-                        <p>
-                          <span className="text-amber-200/70">Format:</span>{" "}
-                          {e.format}
-                        </p>
+                        {e.format && (
+                          <p>
+                            <span className="text-amber-200/70">Format:</span>{" "}
+                            {e.format}
+                          </p>
+                        )}
                         <p>
                           <span className="text-amber-200/70">Entry:</span>{" "}
                           {e.entryFee}
@@ -1024,8 +1180,9 @@ export default function NewsPage() {
               Latest Dispatches
             </h4>
             <p className="text-xs text-amber-100/60">
-              Showing {filtered.length} item(s)
-              {category !== "All" ? ` in ${category}` : ""}.
+              {newsLoading
+                ? "Loading…"
+                : `Showing ${filtered.length} item(s)${category !== "All" ? ` in ${category}` : ""}${dbNews.length > 0 ? " · Live from DB" : " · Demo data"}.`}
             </p>
           </div>
 
