@@ -123,6 +123,17 @@ function readCurrentUser() {
   return getCurrentUser();
 }
 
+function RequireAuth({ children }) {
+  const location = useLocation();
+  const user = getCurrentUser();
+
+  if (!user?.id) {
+    return <Navigate to="/login" replace state={{ from: location }} />;
+  }
+
+  return children;
+}
+
 function ShopEntryRedirect() {
   const navigate = useNavigate();
   const { tcgId } = useParams();
@@ -294,31 +305,22 @@ function App() {
     );
   };
 
-  const desktopNavItems = useMemo(
-    () => [
-      { to: "/shop", label: "Shop" },
-      { to: "/trade", label: "Trade" },
-      { to: "/chat", label: "Chat" },
-      { to: "/news", label: "News" },
-      isLoggedIn
-        ? { to: "/account", label: displayName }
-        : { to: "/login", label: "Login" },
-      { to: "/cart", label: `Cart (${cartTotalItems})` },
-    ],
-    [isLoggedIn, displayName, cartTotalItems],
-  );
-
   const mobileNavItems = useMemo(
-    () => [
-      { to: "/shop", label: "Shop" },
-      { to: "/trade", label: "Trade" },
-      { to: "/chat", label: "Chat" },
-      { to: "/news", label: "News" },
+    () =>
       isLoggedIn
-        ? { to: "/account", label: displayName }
-        : { to: "/login", label: "Login" },
-      { to: "/cart", label: `Cart (${cartTotalItems})` },
-    ],
+        ? [
+            { to: "/shop", label: "Shop" },
+            { to: "/trade", label: "Trade" },
+            { to: "/chat", label: "Chat" },
+            { to: "/news", label: "News" },
+            { to: "/account", label: displayName },
+            { to: "/cart", label: `Cart (${cartTotalItems})` },
+          ]
+        : [
+            { to: "/news", label: "News" },
+            { to: "/login", label: "Login" },
+            { to: "/signup", label: "Sign Up" },
+          ],
     [isLoggedIn, displayName, cartTotalItems],
   );
 
@@ -365,27 +367,33 @@ function App() {
             {/* Desktop nav */}
             <div className="hidden md:flex items-center gap-2">
               <nav className="flex items-center gap-1">
-                <ArcaneNavItem
-                  to="/shop"
-                  label="Shop"
-                  isActive={isShopRoute}
-                  variant="desktop"
-                  onClick={() => setMobileMenuOpen(false)}
-                />
+                {isLoggedIn ? (
+                  <ArcaneNavItem
+                    to="/shop"
+                    label="Shop"
+                    isActive={isShopRoute}
+                    variant="desktop"
+                    onClick={() => setMobileMenuOpen(false)}
+                  />
+                ) : null}
 
-                <ArcaneNavItem
-                  to="/trade"
-                  label="Trade"
-                  isActive={isTradeRoute}
-                  variant="desktop"
-                />
+                {isLoggedIn ? (
+                  <ArcaneNavItem
+                    to="/trade"
+                    label="Trade"
+                    isActive={isTradeRoute}
+                    variant="desktop"
+                  />
+                ) : null}
 
-                <ArcaneNavItem
-                  to="/chat"
-                  label="Chat"
-                  isActive={isChatRoute}
-                  variant="desktop"
-                />
+                {isLoggedIn ? (
+                  <ArcaneNavItem
+                    to="/chat"
+                    label="Chat"
+                    isActive={isChatRoute}
+                    variant="desktop"
+                  />
+                ) : null}
 
                 <ArcaneNavItem
                   to="/news"
@@ -410,12 +418,14 @@ function App() {
                   />
                 )}
 
-                <ArcaneNavItem
-                  to="/cart"
-                  label={`Cart (${cartTotalItems})`}
-                  isActive={isCartRoute}
-                  variant="desktop"
-                />
+                {isLoggedIn ? (
+                  <ArcaneNavItem
+                    to="/cart"
+                    label={`Cart (${cartTotalItems})`}
+                    isActive={isCartRoute}
+                    variant="desktop"
+                  />
+                ) : null}
               </nav>
 
               {/* ✅ Logout */}
@@ -431,13 +441,15 @@ function App() {
 
             {/* Mobile controls */}
             <div className="flex items-center gap-2 md:hidden">
-              <Link
-                to="/cart"
-                onClick={() => setMobileMenuOpen(false)}
-                className="relative rounded-lg border border-amber-600/50 bg-gradient-to-r from-amber-950/50 to-purple-950/50 px-3 py-2 font-serif text-sm font-semibold tracking-wide text-amber-100"
-              >
-                Cart ({cartTotalItems})
-              </Link>
+              {isLoggedIn ? (
+                <Link
+                  to="/cart"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="relative rounded-lg border border-amber-600/50 bg-gradient-to-r from-amber-950/50 to-purple-950/50 px-3 py-2 font-serif text-sm font-semibold tracking-wide text-amber-100"
+                >
+                  Cart ({cartTotalItems})
+                </Link>
+              ) : null}
 
               <button
                 type="button"
@@ -516,9 +528,11 @@ function App() {
             <Route
               path="/shop"
               element={
-                <PageWrap>
-                  <ShopEntryRedirect />
-                </PageWrap>
+                <RequireAuth>
+                  <PageWrap>
+                    <ShopEntryRedirect />
+                  </PageWrap>
+                </RequireAuth>
               }
             />
 
@@ -526,9 +540,11 @@ function App() {
             <Route
               path="/tcg/:tcgId"
               element={
-                <PageWrap>
-                  <ShopEntryRedirect />
-                </PageWrap>
+                <RequireAuth>
+                  <PageWrap>
+                    <ShopEntryRedirect />
+                  </PageWrap>
+                </RequireAuth>
               }
             />
 
@@ -536,81 +552,97 @@ function App() {
             <Route
               path="/user/shop"
               element={
-                <PageWrap>
-                  <UserShopPage
-                    cart={cart}
-                    addToCart={addToCart}
-                    removeFromCart={removeFromCart}
-                    updateQuantity={updateQuantity}
-                    cartTotalItems={cartTotalItems}
-                    cartTotalPrice={cartTotalPrice}
-                  />
-                </PageWrap>
+                <RequireAuth>
+                  <PageWrap>
+                    <UserShopPage
+                      cart={cart}
+                      addToCart={addToCart}
+                      removeFromCart={removeFromCart}
+                      updateQuantity={updateQuantity}
+                      cartTotalItems={cartTotalItems}
+                      cartTotalPrice={cartTotalPrice}
+                    />
+                  </PageWrap>
+                </RequireAuth>
               }
             />
 
             <Route
               path="/user/tcg/:tcgId"
               element={
-                <PageWrap>
-                  <UserShopPage
-                    cart={cart}
-                    addToCart={addToCart}
-                    removeFromCart={removeFromCart}
-                    updateQuantity={updateQuantity}
-                    cartTotalItems={cartTotalItems}
-                    cartTotalPrice={cartTotalPrice}
-                  />
-                </PageWrap>
+                <RequireAuth>
+                  <PageWrap>
+                    <UserShopPage
+                      cart={cart}
+                      addToCart={addToCart}
+                      removeFromCart={removeFromCart}
+                      updateQuantity={updateQuantity}
+                      cartTotalItems={cartTotalItems}
+                      cartTotalPrice={cartTotalPrice}
+                    />
+                  </PageWrap>
+                </RequireAuth>
               }
             />
 
             {/* ✅ VENDOR SHOP */}
             <Route
               path="/vendor"
-              element={<Navigate to="/vendor/tcg/mtg" replace />}
+              element={
+                <RequireAuth>
+                  <Navigate to="/vendor/tcg/mtg" replace />
+                </RequireAuth>
+              }
             />
 
             <Route
               path="/vendor/tcg/:tcgId"
               element={
-                <PageWrap>
-                  <VendorShopPage
-                    cart={cart}
-                    addToCart={addToCart}
-                    removeFromCart={removeFromCart}
-                    updateQuantity={updateQuantity}
-                    cartTotalItems={cartTotalItems}
-                    cartTotalPrice={cartTotalPrice}
-                  />
-                </PageWrap>
+                <RequireAuth>
+                  <PageWrap>
+                    <VendorShopPage
+                      cart={cart}
+                      addToCart={addToCart}
+                      removeFromCart={removeFromCart}
+                      updateQuantity={updateQuantity}
+                      cartTotalItems={cartTotalItems}
+                      cartTotalPrice={cartTotalPrice}
+                    />
+                  </PageWrap>
+                </RequireAuth>
               }
             />
 
             <Route
               path="/vendor/product/:id"
               element={
-                <PageWrap>
-                  <ProductDetailPage addToCart={addToCart} />
-                </PageWrap>
+                <RequireAuth>
+                  <PageWrap>
+                    <ProductDetailPage addToCart={addToCart} />
+                  </PageWrap>
+                </RequireAuth>
               }
             />
 
             <Route
               path="/product/:id"
               element={
-                <PageWrap>
-                  <ProductDetailPage addToCart={addToCart} />
-                </PageWrap>
+                <RequireAuth>
+                  <PageWrap>
+                    <ProductDetailPage addToCart={addToCart} />
+                  </PageWrap>
+                </RequireAuth>
               }
             />
 
             <Route
               path="/trade"
               element={
-                <PageWrap>
-                  <TradePage />
-                </PageWrap>
+                <RequireAuth>
+                  <PageWrap>
+                    <TradePage />
+                  </PageWrap>
+                </RequireAuth>
               }
             />
 
@@ -626,9 +658,11 @@ function App() {
             <Route
               path="/chat"
               element={
-                <PageWrap>
-                  <ChatPage />
-                </PageWrap>
+                <RequireAuth>
+                  <PageWrap>
+                    <ChatPage />
+                  </PageWrap>
+                </RequireAuth>
               }
             />
 
@@ -671,15 +705,17 @@ function App() {
             <Route
               path="/cart"
               element={
-                <PageWrap>
-                  <CartPage
-                    cart={cart}
-                    removeFromCart={removeFromCart}
-                    updateQuantity={updateQuantity}
-                    cartTotalPrice={cartTotalPrice}
-                    clearCart={() => setCart([])}
-                  />
-                </PageWrap>
+                <RequireAuth>
+                  <PageWrap>
+                    <CartPage
+                      cart={cart}
+                      removeFromCart={removeFromCart}
+                      updateQuantity={updateQuantity}
+                      cartTotalPrice={cartTotalPrice}
+                      clearCart={() => setCart([])}
+                    />
+                  </PageWrap>
+                </RequireAuth>
               }
             />
 
@@ -687,23 +723,25 @@ function App() {
             <Route
               path="/account"
               element={
-                <PageWrap>
-                  <div className="rounded-2xl border border-amber-900/30 bg-slate-950/60 p-8">
-                    <h2 className="font-serif text-2xl font-bold text-amber-100">
-                      Account
-                    </h2>
-                    <p className="mt-2 font-serif text-amber-100/70">
-                      Logged in as{" "}
-                      <span className="text-amber-300">{displayName}</span>
-                    </p>
-                    <button
-                      onClick={handleLogout}
-                      className="mt-6 rounded-xl border border-amber-600/40 bg-amber-950/20 px-4 py-2 font-serif text-sm text-amber-100 hover:border-amber-500 hover:bg-amber-950/30 transition"
-                    >
-                      Logout
-                    </button>
-                  </div>
-                </PageWrap>
+                <RequireAuth>
+                  <PageWrap>
+                    <div className="rounded-2xl border border-amber-900/30 bg-slate-950/60 p-8">
+                      <h2 className="font-serif text-2xl font-bold text-amber-100">
+                        Account
+                      </h2>
+                      <p className="mt-2 font-serif text-amber-100/70">
+                        Logged in as{" "}
+                        <span className="text-amber-300">{displayName}</span>
+                      </p>
+                      <button
+                        onClick={handleLogout}
+                        className="mt-6 rounded-xl border border-amber-600/40 bg-amber-950/20 px-4 py-2 font-serif text-sm text-amber-100 hover:border-amber-500 hover:bg-amber-950/30 transition"
+                      >
+                        Logout
+                      </button>
+                    </div>
+                  </PageWrap>
+                </RequireAuth>
               }
             />
           </Routes>
