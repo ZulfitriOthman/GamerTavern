@@ -1,0 +1,33 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  font-family: "Sora", sans-serif;
+  color: #ebf2f8;
+  background:
+    radial-gradient(circle at 14% 12%, rgba(39, 210, 255, 0.2), transparent 40%),
+    radial-gradient(circle at 88% 22%, rgba(255, 143, 63, 0.18), transparent 45%),
+    linear-gradient(180deg, #0a0f15 0%, #0c131b 35%, #0d141d 100%);
+}
+
+::selection {
+  background: rgba(39, 210, 255, 0.35);
+}
+
+.reveal {
+  opacity: 0;
+  transform: translateY(26px);
+  transition: opacity 0.7s ease, transform 0.7s ease;
+  transition-delay: var(--delay, 0ms);
+}
+
+.reveal.show {
+  opacity: 1;
+  transform: translateY(0);
+}
