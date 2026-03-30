@@ -1,16 +1,29 @@
+import { useState } from "react";
 import { Link, NavLink } from "react-router-dom";
 
 function SiteHeader({ menuOpen, setMenuOpen }) {
+  const [logoImageFailed, setLogoImageFailed] = useState(false);
+  const logoImage = "/assets/images/profile-izrat.jpg";
+
   const navLinkClass = ({ isActive }) =>
     isActive ? "text-skyaccent" : "hover:text-skyaccent";
 
   return (
     <header className="fixed inset-x-0 top-0 z-40 flex items-center justify-between gap-4 bg-gradient-to-b from-black/80 to-black/10 px-4 py-4 backdrop-blur md:px-10">
       <Link to="/" className="inline-flex items-center gap-3 text-slate-100">
-        <span className="grid h-9 w-9 place-content-center rounded-full bg-gradient-to-br from-skyaccent to-cyan-200 font-display text-lg tracking-wide text-slate-900">
-          SO
-        </span>
-        <span className="font-display text-2xl tracking-wider">Skyline Ops</span>
+        {!logoImageFailed ? (
+          <img
+            src={logoImage}
+            alt="Profile"
+            className="h-9 w-9 rounded-full border border-white/35 object-cover"
+            onError={() => setLogoImageFailed(true)}
+          />
+        ) : (
+          <span className="grid h-9 w-9 place-content-center rounded-full bg-gradient-to-br from-skyaccent to-cyan-200 font-display text-lg tracking-wide text-slate-900">
+            MI
+          </span>
+        )}
+        <span className="font-display text-2xl tracking-wider">Recce Ops</span>
       </Link>
 
       <button
