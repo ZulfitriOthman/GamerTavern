@@ -13,19 +13,19 @@ function ContactPage() {
         </p>
         <div className="mt-5 flex flex-wrap gap-4 text-slate-100">
           <a
-            href="mailto:hello@skylineops.com"
+            href="mailto:muhd.izrat@gmail.com"
             className="underline decoration-skyaccent decoration-2 underline-offset-4"
           >
-            hello@skylineops.com
+            muhd.izrat@gmail.com
           </a>
           <a
             href="tel:+1234567890"
             className="underline decoration-skyaccent decoration-2 underline-offset-4"
           >
-            +1 (234) 567-890
+            +673 879 3875
           </a>
           <a href="/" className="underline decoration-skyaccent decoration-2 underline-offset-4">
-            Instagram / YouTube
+            Instagram: @flybyrecce / YouTube
           </a>
         </div>
       </div>

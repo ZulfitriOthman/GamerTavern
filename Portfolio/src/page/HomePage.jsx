@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { heroReel } from "./pageData";
 
 function HomePage() {
   return (
@@ -9,9 +10,8 @@ function HomePage() {
         muted
         loop
         playsInline
-        poster="/assets/images/hero-poster.jpg"
       >
-        <source src="/assets/videos/hero-reel.mp4" type="video/mp4" />
+        <source src={heroReel} type="video/mp4" />
       </video>
       <div className="absolute inset-0 bg-[linear-gradient(130deg,rgba(10,15,22,0.65)_0%,rgba(10,15,22,0.15)_50%,rgba(10,15,22,0.60)_100%),linear-gradient(180deg,rgba(10,15,22,0)_0%,rgba(10,15,22,0.55)_100%)]" />
 
@@ -22,9 +22,13 @@ function HomePage() {
         <h1 className="max-w-[13ch] font-display text-5xl leading-[0.95] tracking-wide md:text-8xl">
           Aerial Storytelling with Precision and Edge.
         </h1>
-        <p className="mt-4 max-w-2xl text-sm text-slate-300 md:text-base">
+        {/* <p className="mt-4 max-w-2xl text-sm text-slate-300 md:text-base">
           I fly for brands, real estate, events, inspections, and mapping missions. Every frame is
           captured with safe operations and cinematic intent.
+        </p> */}
+        <p className="mt-4 max-w-2xl text-sm text-slate-300 md:text-base">
+          I fly for brands, real estate, events and inspections. Every frame is captured with safe operations and cinematic
+          intent.
         </p>
         <div className="mt-6 flex flex-wrap gap-3">
           <Link

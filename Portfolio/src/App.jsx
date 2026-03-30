@@ -9,7 +9,7 @@ import HomePage from "./page/HomePage";
 import NotFoundPage from "./page/NotFoundPage";
 import ServicesPage from "./page/ServicesPage";
 import WorkPage from "./page/WorkPage";
-import { fleet, galleryItems, services } from "./page/pageData";
+import { fleet, galleryItems, highlights, services } from "./page/pageData";
 
 function App() {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -68,7 +68,7 @@ function App() {
           <Route path="/home" element={<Navigate to="/" replace />} />
           <Route
             path="/work"
-            element={<WorkPage galleryItems={galleryItems} onImageOpen={setLightboxImage} />}
+            element={<WorkPage galleryItems={galleryItems} highlights={highlights} onImageOpen={setLightboxImage} />}
           />
           <Route path="/fleet" element={<FleetPage fleet={fleet} />} />
           <Route path="/services" element={<ServicesPage services={services} />} />

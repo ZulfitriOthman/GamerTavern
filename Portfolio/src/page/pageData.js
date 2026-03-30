@@ -1,3 +1,7 @@
+import heroReel from "../assets/videos/hero-reel.mp4";
+
+export { heroReel };
+
 export const galleryItems = [
   {
     src: "/assets/images/work-1.jpg",
@@ -41,6 +45,29 @@ export const fleet = [
       "Wind Resistance: up to 43 kph",
       "Use Cases: roof checks, construction, surveys",
     ],
+  },
+];
+
+export const highlights = [
+  {
+    src: "/assets/videos/highlight-1.mp4",
+    caption: "City Tourism Campaign",
+    thumb: "/assets/images/work-1.jpg",
+  },
+  {
+    src: "/assets/videos/highlight-2.mp4",
+    caption: "Real Estate Showcase",
+    thumb: "/assets/images/work-2.jpg",
+  },
+  {
+    src: "/assets/videos/highlight-3.mp4",
+    caption: "Infrastructure Inspection",
+    thumb: "/assets/images/work-3.jpg",
+  },
+  {
+    src: "/assets/videos/highlight-4.mp4",
+    caption: "Event Coverage",
+    thumb: "/assets/images/work-4.jpg",
   },
 ];
 
