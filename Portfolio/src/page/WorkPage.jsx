@@ -1,44 +1,12 @@
 import { useState } from "react";
 
-function WorkPage({ galleryItems, highlights, onImageOpen }) {
+function WorkPage({ highlights }) {
   const [activeVideo, setActiveVideo] = useState(null);
+  const [failedThumbs, setFailedThumbs] = useState({});
 
   return (
     <>
     <section className="px-4 pb-14 pt-28 md:px-10 md:pb-20 md:pt-32">
-      <div className="mb-7 reveal">
-        <p className="mb-1 text-xs font-semibold uppercase tracking-[0.12em] text-skyaccent md:text-sm">
-          Featured Work
-        </p>
-        <h2 className="font-display text-4xl tracking-wide md:text-6xl">Recent Missions</h2>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        {galleryItems.map((item, index) => (
-          <figure
-            key={item.src}
-            data-delay={index * 100}
-            className="reveal overflow-hidden rounded-2xl border border-white/15 bg-slate-900 shadow-panel"
-          >
-            <button
-              type="button"
-              className="group block w-full"
-              onClick={() => onImageOpen(item)}
-              aria-label={`Open ${item.caption}`}
-            >
-              <img
-                src={item.src}
-                alt={item.alt}
-                className="h-64 w-full object-cover transition duration-500 group-hover:scale-105"
-              />
-            </button>
-            <figcaption className="px-4 py-3 text-slate-300">{item.caption}</figcaption>
-          </figure>
-        ))}
-      </div>
-    </section>
-
-    <section className="px-4 pb-14 md:px-10 md:pb-20">
       <div className="mb-7 reveal">
         <p className="mb-1 text-xs font-semibold uppercase tracking-[0.12em] text-skyaccent md:text-sm">
           Highlight Reels
@@ -59,11 +27,28 @@ function WorkPage({ galleryItems, highlights, onImageOpen }) {
               onClick={() => setActiveVideo(clip)}
               aria-label={`Play ${clip.caption}`}
             >
-              <img
-                src={clip.thumb}
-                alt={clip.caption}
-                className="h-64 w-full object-cover transition duration-500 group-hover:scale-105 group-hover:brightness-75"
-              />
+              {clip.thumb && !failedThumbs[clip.src] ? (
+                <img
+                  src={clip.thumb}
+                  alt={clip.caption}
+                  className="h-64 w-full object-cover transition duration-500 group-hover:scale-105 group-hover:brightness-75"
+                  onError={() =>
+                    setFailedThumbs((prev) => ({
+                      ...prev,
+                      [clip.src]: true,
+                    }))
+                  }
+                />
+              ) : (
+                <video
+                  className="h-64 w-full object-cover transition duration-500 group-hover:scale-105 group-hover:brightness-75"
+                  src={clip.src}
+                  muted
+                  loop
+                  autoPlay
+                  playsInline
+                />
+              )}
               <span className="absolute inset-0 grid place-content-center">
                 <span className="grid h-14 w-14 place-content-center rounded-full bg-white/20 backdrop-blur transition duration-300 group-hover:bg-white/35">
                   <svg className="ml-1 h-6 w-6 fill-white" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
