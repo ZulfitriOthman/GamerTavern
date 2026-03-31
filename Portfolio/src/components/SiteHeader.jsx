@@ -57,7 +57,7 @@ function SiteHeader({ menuOpen, setMenuOpen }) {
           to="/contact"
           className="rounded-full bg-gradient-to-r from-skyaccent to-cyan-200 px-4 py-2 text-sm font-semibold text-slate-950"
         >
-          Book Flight
+          Contact
         </NavLink>
       </nav>
     </header>

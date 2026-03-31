@@ -35,7 +35,7 @@ function HomePage() {
             to="/contact"
             className="rounded-full bg-gradient-to-r from-skyaccent to-cyan-200 px-5 py-3 font-semibold text-slate-950"
           >
-            Start a Project
+            Move to contact
           </Link>
           <Link
             to="/work"

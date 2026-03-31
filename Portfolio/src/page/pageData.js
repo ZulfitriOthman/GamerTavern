@@ -63,17 +63,17 @@ export const fleet = [
 export const highlights = [
   {
     src: "/assets/videos/highlight-1.mp4",
-    caption: "City Tourism Campaign",
+    caption: "Jerudong Garden Night Flyover",
     thumb: "/assets/images/work-1.jpg",
   },
   {
     src: "/assets/videos/highlight-2.mp4",
-    caption: "Real Estate Showcase",
+    caption: "Jerudong Garden Daytime Aerials",
     thumb: "/assets/images/work-2.jpg",
   },
   {
     src: "/assets/videos/highlight-3.mp4",
-    caption: "Infrastructure Inspection",
+    caption: "Eco Corridor Frame Night Capture",
     thumb: "/assets/images/work-3.jpg",
   },
   {
