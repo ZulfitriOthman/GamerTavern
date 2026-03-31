@@ -1,23 +1,27 @@
 import { useEffect, useMemo, useState } from "react";
+import { TbDrone } from "react-icons/tb";
+import { FaCheckCircle, FaInstagram, FaYoutube } from "react-icons/fa";
+import { MdOutlineHighQuality } from "react-icons/md";
+import { AiOutlineSafety } from "react-icons/ai";
 
 const galleryItems = [
   {
-    src: "/assets/images/work-1.jpg",
+    src: "/assets/Featured Work/Drone-Photography-for-Beginners-1.jpg",
     alt: "Aerial city skyline at golden hour",
     caption: "City Tourism Campaign",
   },
   {
-    src: "/assets/images/work-2.jpg",
+    src: "/assets/Featured Work/Drone-Photography-for-Beginners-2.jpg",
     alt: "Luxury house roof and landscape from above",
     caption: "Real Estate Showcase",
   },
   {
-    src: "/assets/images/work-3.jpg",
+    src: "/assets/Featured Work/Drone-Photography-for-Beginners-4.jpg",
     alt: "Bridge inspection with drone support",
     caption: "Infrastructure Inspection",
   },
   {
-    src: "/assets/images/work-4.jpg",
+    src: "/assets/Featured Work/Drone-Photography-for-Beginners-8.jpg",
     alt: "Outdoor wedding venue from drone perspective",
     caption: "Event Coverage",
   },
@@ -105,10 +109,38 @@ function App() {
     <div className="min-h-screen text-slate-100 font-body">
       <header className="fixed inset-x-0 top-0 z-40 flex items-center justify-between gap-4 bg-gradient-to-b from-black/80 to-black/10 px-4 py-4 backdrop-blur md:px-10">
         <a href="#top" className="inline-flex items-center gap-3 text-slate-100">
-          <span className="grid h-9 w-9 place-content-center rounded-full bg-gradient-to-br from-skyaccent to-cyan-200 font-display text-lg tracking-wide text-slate-900">
-            SO
-          </span>
-          <span className="font-display text-2xl tracking-wider">Skyline Ops</span>
+          <TbDrone className="w-7 h-7 text-white"/>
+          {/* <span className="font-display text-2xl tracking-wider">Skyline Ops</span> */}
+          <button
+            className="
+              group relative cursor-pointer bg-transparent border-none p-0 m-0 text-left
+              text-transparent
+              [-webkit-text-stroke:1px_rgba(255,255,255,1)]
+            "
+          >
+            {/* Base text */}
+            <span className="block max-w-[13ch] font-display text-2xl leading-[0.95] tracking-wider md:text-3xl md:mt-1">
+              Skyline Ops
+            </span>
+
+            {/* Hover reveal */}
+            <span
+              className="
+                absolute inset-0
+                text-[#27d2ff]
+                transition-all duration-700 ease-out
+
+                [clip-path:inset(0_100%_0_0)]
+                group-hover:[clip-path:inset(0_0%_0_0)]
+
+                [-webkit-text-stroke:1px_#27d2ff]
+
+                block max-w-[13ch] font-display text-2xl leading-[0.95] tracking-wider md:text-3xl md:mt-1
+              "
+            >
+              Skyline Ops
+            </span>
+          </button>
         </a>
 
         <button
@@ -127,7 +159,9 @@ function App() {
           id="mainNav"
           className={`${
             menuOpen ? "flex" : "hidden"
-          } absolute right-4 top-16 min-w-52 flex-col gap-3 rounded-xl border border-white/15 bg-slate-900/95 p-3 md:static md:flex md:min-w-0 md:flex-row md:items-center md:gap-5 md:border-0 md:bg-transparent md:p-0`}
+          } absolute right-4 top-16 min-w-52 flex-col gap-3 rounded-xl border border-white/15 bg-slate-900/95 p-3 
+            md:static md:flex md:min-w-0 md:flex-row md:items-center md:gap-5 md:border-0 md:bg-transparent md:p-0
+          `}
         >
           <a href="#work" className="hover:text-skyaccent" onClick={() => setMenuOpen(false)}>
             Work
@@ -138,135 +172,212 @@ function App() {
           <a href="#services" className="hover:text-skyaccent" onClick={() => setMenuOpen(false)}>
             Services
           </a>
-          <a
+        </nav>
+
+        <a
             href="#contact"
             className="rounded-full bg-gradient-to-r from-skyaccent to-cyan-200 px-4 py-2 text-sm font-semibold text-slate-950"
             onClick={() => setMenuOpen(false)}
           >
             Book Flight
-          </a>
-        </nav>
+        </a>
       </header>
 
       <main id="top">
-        <section className="relative min-h-[92vh] overflow-hidden px-4 pb-12 pt-32 md:px-10">
-          <video
-            className="absolute inset-0 h-full w-full object-cover opacity-35"
-            autoPlay
-            muted
-            loop
-            playsInline
-            poster="/assets/images/hero-poster.jpg"
-          >
-            <source src="/assets/videos/hero-reel.mp4" type="video/mp4" />
-          </video>
-          <div className="absolute inset-0 bg-[linear-gradient(130deg,rgba(10,15,22,0.88)_6%,rgba(10,15,22,0.36)_48%,rgba(10,15,22,0.85)_100%),linear-gradient(180deg,rgba(10,15,22,0)_0%,rgba(10,15,22,0.7)_80%)]" />
+        <div className="bg-[#0a0f16] text-white font-body overflow-x-hidden">
+      
+          {/* HERO */}
+          <section className="relative min-h-screen flex flex-col justify-center px-6 md:px-16">
 
-          <div className="relative z-10 reveal">
-            <p className="mb-1 text-xs font-semibold uppercase tracking-[0.12em] text-skyaccent md:text-sm">
-              Licensed Drone Operator
-            </p>
-            <h1 className="max-w-[13ch] font-display text-5xl leading-[0.95] tracking-wide md:text-8xl">
-              Aerial Storytelling with Precision and Edge.
-            </h1>
-            <p className="mt-4 max-w-2xl text-sm text-slate-300 md:text-base">
-              I fly for brands, real estate, events, inspections, and mapping missions. Every
-              frame is captured with safe operations and cinematic intent.
-            </p>
-            <div className="mt-6 flex flex-wrap gap-3">
-              <a
-                href="#contact"
-                className="rounded-full bg-gradient-to-r from-skyaccent to-cyan-200 px-5 py-3 font-semibold text-slate-950"
-              >
-                Start a Project
-              </a>
-              <a
-                href="#work"
-                className="rounded-full border border-white/25 bg-white/10 px-5 py-3 font-semibold text-white"
-              >
-                Watch Highlights
-              </a>
+            {/* Video */}
+            <video
+              className="absolute inset-0 w-full h-full object-cover opacity-40"
+              autoPlay
+              muted
+              loop
+              playsInline
+            >
+              <source src="/assets/Featured Work/vecteezy_drone-flying.mp4" />
+            </video>
+
+            {/* Depth Layers */}
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(39,210,255,0.08),transparent)]" />
+            <div className="absolute inset-0 bg-gradient-to-b from-black/80 via-black/40 to-black/90" />
+
+            {/* Scan Effect */}
+            <div className="pointer-events-none absolute inset-0">
+              <div className="scan-line" />
             </div>
-          </div>
 
-          <div className="relative z-10 mt-12 grid gap-4 md:mt-24 md:grid-cols-3 reveal">
-            {[
-              ["230+", "Completed Flights"],
-              ["4K/5.1K", "Capture Quality"],
-              ["100%", "Safety First Workflow"],
-            ].map(([value, label]) => (
-              <article key={label} className="rounded-2xl border border-white/20 bg-slate-900/65 p-4 shadow-panel">
-                <h2 className="font-display text-4xl tracking-wide">{value}</h2>
-                <p className="text-sm text-slate-300">{label}</p>
-              </article>
-            ))}
-          </div>
-        </section>
+            {/* CONTENT */}
+            <div className="relative z-10 max-w-4xl reveal my-20">
+              <p className="text-sky-400 uppercase text-xs md:text-sm tracking-widest mb-2">
+                Licensed Drone Operator
+              </p>
 
-        <section id="work" className="px-4 py-14 md:px-10 md:py-20">
-          <div className="mb-7 reveal">
-            <p className="mb-1 text-xs font-semibold uppercase tracking-[0.12em] text-skyaccent md:text-sm">
-              Featured Work
-            </p>
-            <h2 className="font-display text-4xl tracking-wide md:text-6xl">Recent Missions</h2>
-          </div>
+              <h1 className="text-5xl md:text-7xl font-bold leading-tight max-w-[14ch]">
+                Aerial Storytelling with Precision & Edge
+              </h1>
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            {galleryItems.map((item, index) => (
-              <figure
-                key={item.src}
-                data-delay={index * 100}
-                className="reveal overflow-hidden rounded-2xl border border-white/15 bg-slate-900 shadow-panel"
-              >
-                <button
-                  type="button"
-                  className="group block w-full"
+              <p className="mt-4 text-slate-300 max-w-xl">
+                Cinematic drone footage for brands, real estate, and events —
+                executed with precision and safety.
+              </p>
+
+              <div className="mt-6 flex gap-4">
+                <button className="btn-primary">Start Project</button>
+                <button className="btn-outline">View Work</button>
+              </div>
+            </div>
+
+            {/* STATS */}
+            <div className="relative z-10 mt-20 grid md:grid-cols-3 gap-6 reveal">
+              {[
+                {
+                  value: "230+",
+                  label: "Completed Flights",
+                  icon: (
+                    <div className="relative">
+                      <TbDrone className="text-5xl"/>
+                      <FaCheckCircle className="absolute left-10 bottom-0.5 text-xl" />
+                    </div>
+                  ),
+                },
+                {
+                  value: "4K / 5.1K",
+                  label: "Capture Quality",
+                  icon: <MdOutlineHighQuality className="text-6xl"/>,
+                },
+                {
+                  value: "100%",
+                  label: "Safety Workflow",
+                  icon: <AiOutlineSafety className="text-5xl"/>,
+                },
+              ].map((item) => (
+                <div key={item.label} className="stat-card group">
+                  
+                  {/* Glow */}
+                  <div className="stat-glow" />
+
+                  <div className="relative z-10 flex flex-row gap-10">
+                    <div className="icon-box">{item.icon}</div>
+
+                    <div>
+                      <h2 className="text-3xl font-bold">{item.value}</h2>
+                      <p className="text-xs uppercase tracking-widest text-slate-400">
+                        {item.label}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Bottom line */}
+                  <div className="stat-line" />
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* GALLERY */}
+          <section id="work" className="px-6 md:px-16 py-20">
+            <div className="mb-7 reveal">
+              <p className="mb-1 text-xs font-semibold uppercase tracking-[0.12em] text-skyaccent md:text-sm">
+                Featured Work
+              </p>
+              <h2 className="font-display text-4xl tracking-wide md:text-6xl">Recent Missions</h2>
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-6">
+              {galleryItems.map((item) => (
+                <div
+                  key={item.src}
+                  className="group relative overflow-hidden rounded-xl cursor-pointer"
                   onClick={() => setLightboxImage(item)}
-                  aria-label={`Open ${item.caption}`}
                 >
                   <img
                     src={item.src}
-                    alt={item.alt}
-                    className="h-64 w-full object-cover transition duration-500 group-hover:scale-105"
+                    className="w-full h-64 object-cover transition duration-500 group-hover:scale-110"
                   />
-                </button>
-                <figcaption className="px-4 py-3 text-slate-300">{item.caption}</figcaption>
-              </figure>
-            ))}
-          </div>
-        </section>
 
-        <section id="fleet" className="px-4 py-14 md:px-10 md:py-20">
-          <div className="mb-7 reveal">
-            <p className="mb-1 text-xs font-semibold uppercase tracking-[0.12em] text-skyaccent md:text-sm">
+                  {/* Overlay */}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent opacity-0 group-hover:opacity-100 transition" />
+
+                  <p className="absolute bottom-4 left-4 text-white translate-y-4 group-hover:translate-y-0 transition">
+                    {item.caption}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* LIGHTBOX */}
+          {lightboxImage && (
+            <div
+              className="fixed inset-0 bg-black/90 flex items-center justify-center z-50"
+              onClick={() => setLightboxImage(null)}
+            >
+              <img
+                src={lightboxImage.src}
+                className="max-h-[80vh] rounded-lg"
+              />
+            </div>
+          )}
+        </div>
+
+        <section id="fleet" className="px-4 py-20 md:px-10">
+          <div className="mb-12 reveal">
+            <p className="mb-1 text-xs font-semibold uppercase tracking-[0.2em] text-skyaccent">
               Drone Fleet
             </p>
-            <h2 className="font-display text-4xl tracking-wide md:text-6xl">
-              Two Platforms, Two Mission Styles
+            <h2 className="font-display text-4xl md:text-6xl tracking-wide">
+              Flight Systems
             </h2>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="grid gap-6 md:grid-cols-2">
             {fleet.map((drone, index) => (
               <article
                 key={drone.name}
-                data-delay={index * 120}
-                className="reveal rounded-2xl border border-white/15 bg-gradient-to-br from-slate-900 to-slate-800 p-5 shadow-panel"
+                className="group relative overflow-hidden rounded-2xl border border-white/10 bg-black/60 p-6 backdrop-blur-xl transition hover:-translate-y-2 hover:shadow-[0_30px_80px_rgba(0,0,0,0.7)]"
               >
-                <h3 className="font-display text-4xl tracking-wide">{drone.name}</h3>
-                <p className="mb-3 text-warmaccent">{drone.role}</p>
-                <ul className="list-disc space-y-2 pl-5 text-slate-300">
+                {/* Glow */}
+                <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition">
+                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_0%,rgba(39,210,255,0.25),transparent_60%)]" />
+                </div>
+
+                {/* Header */}
+                <div className="relative z-10 mb-5 flex items-center gap-3">
+                  <TbDrone className="text-skyaccent text-2xl" />
+                  
+                  <h3 className="font-display text-xl md:text-3xl tracking-wide">
+                    {drone.name}
+                  </h3>
+                </div>
+
+                <p className="relative z-10 text-skyaccent/80 text-sm md:text-xl mb-5">
+                  {drone.role}
+                </p>
+
+                {/* Specs as chips */}
+                <div className="relative z-10 flex flex-wrap gap-2">
                   {drone.specs.map((spec) => (
-                    <li key={spec}>{spec}</li>
+                    <span
+                      key={spec}
+                      className="text-xs md:text-sm px-3 py-1 rounded-full border border-white/10 bg-white/5"
+                    >
+                      {spec}
+                    </span>
                   ))}
-                </ul>
+                </div>
+
+                {/* Bottom line */}
+                <div className="absolute bottom-0 left-0 h-[2px] w-0 bg-skyaccent group-hover:w-full transition-all duration-500" />
               </article>
             ))}
           </div>
         </section>
 
-        <section id="services" className="px-4 py-14 md:px-10 md:py-20">
-          <div className="mb-7 reveal">
+        <section id="services" className="px-4 py-20 md:px-10">
+          <div className="mb-12 reveal">
             <p className="mb-1 text-xs font-semibold uppercase tracking-[0.12em] text-skyaccent md:text-sm">
               Services
             </p>
@@ -275,41 +386,98 @@ function App() {
             </h2>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div className="grid gap-8 md:grid-cols-3">
             {services.map((service, index) => (
               <article
                 key={service.title}
-                data-delay={index * 100}
-                className="reveal rounded-2xl border border-white/15 bg-gradient-to-br from-slate-900 to-slate-800 p-5 shadow-panel"
+                className="group relative p-6 rounded-2xl border border-white/10 bg-slate-900/60 backdrop-blur-xl hover:-translate-y-2 transition"
               >
-                <h3 className="mb-2 text-xl font-semibold">{service.title}</h3>
-                <p className="text-slate-300">{service.copy}</p>
+                {/* Big number background */}
+                <div className="absolute -top-2 right-4 text-[70px] font-bold text-white/5">
+                  0{index + 1}
+                </div>
+
+                <h3 className="relative z-10 text-xl font-semibold mb-2 mt-10">
+                  {service.title}
+                </h3>
+
+                <p className="relative z-10 text-slate-300 text-sm leading-relaxed">
+                  {service.copy}
+                </p>
+
+                {/* Animated line */}
+                <div className="absolute bottom-0 left-0 h-[2px] w-0 bg-gradient-to-r from-skyaccent to-cyan-200 group-hover:w-full transition-all duration-500" />
               </article>
             ))}
           </div>
         </section>
 
-        <section id="contact" className="px-4 pb-14 md:px-10 md:pb-20">
-          <div className="reveal max-w-4xl rounded-2xl border border-white/15 bg-gradient-to-br from-slate-900 to-slate-800 p-6 shadow-panel md:p-8">
+        <section id="contact" className="px-4 pt-20 pb-20 md:px-10">
+          <div className="reveal max-w-5xl mx-auto rounded-2xl border border-white/10 bg-gradient-to-br from-slate-900 to-black p-8 shadow-[0_20px_80px_rgba(0,0,0,0.6)]">
             <p className="mb-1 text-xs font-semibold uppercase tracking-[0.12em] text-skyaccent md:text-sm">
               Contact
             </p>
-            <h2 className="font-display text-4xl tracking-wide md:text-6xl">
-              Let Your Next Project Take Off
+
+            <h2 className="font-display text-4xl md:text-6xl tracking-wide">
+              Request a Flight
             </h2>
-            <p className="mt-3 text-slate-300">
-              Share your location, timeline, and goals. I will reply with a flight plan and quote.
+
+            <p className="mt-4 text-slate-300 max-w-xl">
+              Submit your mission parameters and we’ll respond with a flight plan, timeline, and cost estimation.
             </p>
-            <div className="mt-5 flex flex-wrap gap-4 text-slate-100">
-              <a href="mailto:hello@skylineops.com" className="underline decoration-skyaccent decoration-2 underline-offset-4">
-                hello@skylineops.com
-              </a>
-              <a href="tel:+1234567890" className="underline decoration-skyaccent decoration-2 underline-offset-4">
-                +1 (234) 567-890
-              </a>
-              <a href="#top" className="underline decoration-skyaccent decoration-2 underline-offset-4">
-                Instagram / YouTube
-              </a>
+
+            {/* Requirements */}
+            <div className="mt-8 grid gap-4 md:grid-cols-3 text-sm">
+              {["Location", "Timeline", "Mission Type"].map((item) => (
+                <div
+                  key={item}
+                  className="rounded-lg border border-white/10 bg-white/5 px-4 py-3 flex items-center gap-2"
+                >
+                  <span className="text-skyaccent">▸</span>
+                  {item}
+                </div>
+              ))}
+            </div>
+
+            {/* CTA */}
+            <div className="mt-8 flex flex-wrap gap-4 justify-between">
+              <div className="flex gap-4">
+                <a
+                  href="mailto:hello@skylineops.com"
+                  className="px-5 py-3 rounded-full bg-gradient-to-r from-skyaccent to-cyan-200 text-slate-950 font-semibold"
+                >
+                  Send Email
+                </a>
+
+                <a
+                  href="tel:+1234567890"
+                  className="px-5 py-3 rounded-full border border-white/20 bg-white/5"
+                >
+                  Call Now
+                </a>
+              </div>
+
+              <div className="flex gap-4">
+                {/* Instagram */}
+                <a
+                  href="https://instagram.com/yourusername"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group flex items-center gap-2 px-3 py-2 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 transition"
+                >
+                  <FaInstagram className="text-2xl text-pink-400 group-hover:scale-110 transition" />
+                </a>
+
+                {/* YouTube */}
+                <a
+                  href="https://youtube.com/yourchannel"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group flex items-center gap-2 px-3 py-2 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 transition"
+                >
+                  <FaYoutube className="text-2xl text-red-500 group-hover:scale-110 transition" />
+                </a>
+              </div>
             </div>
           </div>
         </section>
