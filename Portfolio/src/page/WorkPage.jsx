@@ -55,7 +55,10 @@ function WorkPage({ highlights }) {
                 </span>
               </span>
             </button>
-            <figcaption className="px-4 py-3 text-slate-300">{clip.caption}</figcaption>
+            <figcaption className="space-y-1 px-4 py-3">
+              <p className="text-slate-100">{clip.caption}</p>
+              <p className="text-sm text-slate-400">{clip.description}</p>
+            </figcaption>
           </figure>
         ))}
       </div>
@@ -79,7 +82,10 @@ function WorkPage({ highlights }) {
             playsInline
           />
           <div className="mt-3 flex items-center justify-between gap-3">
-            <p className="text-slate-200">{activeVideo.caption}</p>
+            <div>
+              <p className="text-slate-200">{activeVideo.caption}</p>
+              <p className="text-sm text-slate-400">{activeVideo.description}</p>
+            </div>
             <button
               type="button"
               onClick={() => setActiveVideo(null)}

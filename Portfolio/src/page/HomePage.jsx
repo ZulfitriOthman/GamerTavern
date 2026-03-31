@@ -61,32 +61,42 @@ function HomePage() {
       </section>
 
       <section className="px-4 pt-14 md:px-10 md:pt-20">
-        <div className="reveal mx-auto max-w-5xl rounded-3xl border border-white/15 bg-gradient-to-br from-slate-900/90 to-slate-800/80 p-6 shadow-panel md:p-8">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-skyaccent md:text-sm">
-            About Me
-          </p>
-          <div className="grid gap-6 md:grid-cols-[1fr_1.2fr] md:gap-8">
-            <div>
-              <h2 className="font-display text-4xl tracking-wide md:text-5xl">
-                I am drawn to challenges, and flying gave that drive a direction.
-              </h2>
-            </div>
-            <div className="space-y-4 text-slate-300">
-              <p>
-                Aviation was always part of my dream, even though it was not a path I could fully pursue. When I first
-                discovered drones, I saw them as a hobby, something exciting that let me experience a small part of that
-                dream from a different angle.
-              </p>
-              <p>
-                The more I learned, especially when I started flying manual, the more everything changed. It stopped being
-                just about having fun. Manual flying demanded focus, control, precision, and confidence, and that level of
-                challenge was exactly what pulled me in even deeper.
-              </p>
-              <p>
-                That is when I started thinking bigger. Instead of keeping drones as only a hobby, I wanted to take them
-                seriously and use them professionally. For me, this work is not only about visuals. It is about pushing my
-                skills, taking on more demanding flights, and turning passion into something meaningful.
-              </p>
+        <div className="reveal relative mx-auto max-w-5xl overflow-hidden rounded-3xl border border-white/15 shadow-panel">
+          <img
+            src="/assets/images/about-me.jpg"
+            alt=""
+            aria-hidden="true"
+            className="absolute inset-0 h-full w-full object-cover opacity-70"
+          />
+          <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(8,12,18,0.92)_0%,rgba(8,12,18,0.82)_42%,rgba(8,12,18,0.94)_100%)]" />
+
+          <div className="relative z-10 p-6 md:p-8">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-skyaccent md:text-sm">
+              About Me
+            </p>
+            <div className="grid gap-6 md:grid-cols-[1fr_1.2fr] md:gap-8">
+              <div>
+                <h2 className="font-display text-4xl tracking-wide md:text-5xl">
+                  I am drawn to challenges, and flying gave that drive a direction.
+                </h2>
+              </div>
+              <div className="space-y-4 text-justify text-slate-300">
+                <p>
+                  Aviation was always part of my dream, even though it was not a path I could fully pursue. When I first
+                  discovered drones, I saw them as a hobby, something exciting that let me experience a small part of that
+                  dream from a different angle.
+                </p>
+                <p>
+                  The more I learned, especially when I started flying manual, the more everything changed. It stopped being
+                  just about having fun. Manual flying demanded focus, control, precision, and confidence, and that level of
+                  challenge was exactly what pulled me in even deeper.
+                </p>
+                <p>
+                  That is when I started thinking bigger. Instead of keeping drones as only a hobby, I wanted to take them
+                  seriously and use them professionally. For me, this work is not only about visuals. It is about pushing my
+                  skills, taking on more demanding flights, and turning passion into something meaningful.
+                </p>
+              </div>
             </div>
           </div>
         </div>

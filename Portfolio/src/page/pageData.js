@@ -65,21 +65,25 @@ export const highlights = [
     src: "/assets/videos/highlight-1.mp4",
     caption: "Jerudong Garden Night Flyover",
     thumb: "/assets/images/work-1.jpg",
+    description: "A night aerial pass capturing the lighting, scale, and atmosphere of Jerudong Garden from a cinematic overhead perspective.",
   },
   {
     src: "/assets/videos/highlight-2.mp4",
     caption: "Jerudong Garden Daytime Aerials",
     thumb: "/assets/images/work-2.jpg",
+    description: "Bright daytime coverage focused on layout, movement, and clean establishing shots across the Jerudong Garden grounds.",
   },
   {
     src: "/assets/videos/highlight-3.mp4",
     caption: "Eco Corridor Frame Night Capture",
     thumb: "/assets/images/work-3.jpg",
+    description: "Low-light aerial footage designed to highlight structure, ambient lighting, and the visual rhythm of the Eco Corridor at night.",
   },
   {
     src: "/assets/videos/highlight-4.mp4",
     caption: "Event Coverage",
     thumb: "/assets/images/work-4.jpg",
+    description: "Dynamic event coverage combining sweeping overhead angles and crowd-energy moments for a more immersive final reel.",
   },
 ];
 
