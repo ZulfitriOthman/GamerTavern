@@ -8,12 +8,16 @@ body,
   min-height: 100%;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 body {
   font-family: 'Space Grotesk', sans-serif;
   background:
-    radial-gradient(circle at 12% 18%, rgba(234, 127, 45, 0.24), transparent 32%),
-    radial-gradient(circle at 86% 12%, rgba(31, 111, 120, 0.28), transparent 35%),
-    linear-gradient(150deg, #f6f2e8 0%, #efe6d3 100%);
+    radial-gradient(circle at 12% 18%, rgba(249, 115, 22, 0.18), transparent 35%),
+    radial-gradient(circle at 86% 12%, rgba(249, 115, 22, 0.08), transparent 40%),
+    linear-gradient(150deg, #0d0d0d 0%, #111111 100%);
 }
 
 @keyframes slideFade {
@@ -38,10 +42,131 @@ body {
   }
 }
 
+@keyframes profileFloat {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes profileGlow {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.94);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.03);
+  }
+}
+
+@keyframes sectionReveal {
+  from {
+    opacity: 0;
+    transform: translateY(26px) scale(0.985);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes badgePulse {
+  0%,
+  100% {
+    transform: translateY(0);
+    box-shadow: 0 0 0 rgba(249, 115, 22, 0);
+  }
+  50% {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 22px rgba(249, 115, 22, 0.18);
+  }
+}
+
+@keyframes ctaPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 rgba(249, 115, 22, 0);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(249, 115, 22, 0.1);
+  }
+}
+
 .animate-slide-fade {
   animation: slideFade 0.9s ease both;
 }
 
 .animate-rise-in {
   animation: riseIn 0.75s ease both;
+}
+
+.animate-profile-float {
+  animation: profileFloat 5s ease-in-out infinite;
+}
+
+.animate-profile-glow {
+  animation: profileGlow 4s ease-in-out infinite;
+}
+
+.animate-section-reveal {
+  animation: sectionReveal 0.85s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+.scroll-reveal {
+  opacity: 0;
+  transform: translateY(24px) scale(0.985);
+  filter: blur(3px);
+  transition:
+    opacity 0.8s cubic-bezier(0.22, 0.61, 0.36, 1),
+    transform 0.8s cubic-bezier(0.22, 0.61, 0.36, 1),
+    filter 0.8s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.scroll-reveal.is-visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  filter: blur(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scroll-reveal,
+  .scroll-reveal.is-visible {
+    opacity: 1;
+    transform: none;
+    filter: none;
+    transition: none;
+  }
+}
+
+.interactive-card {
+  transition: transform 260ms ease, border-color 260ms ease, box-shadow 260ms ease;
+}
+
+.interactive-card:hover {
+  transform: translateY(-6px);
+  border-color: rgba(249, 115, 22, 0.45);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.26);
+}
+
+.interactive-cta {
+  transition: transform 220ms ease, box-shadow 220ms ease;
+}
+
+.interactive-cta:hover {
+  transform: translateY(-2px);
+}
+
+.animate-cta-pulse {
+  animation: ctaPulse 2.8s ease-in-out infinite;
+}
+
+.animate-badge-pulse {
+  animation: badgePulse 3.4s ease-in-out infinite;
 }
