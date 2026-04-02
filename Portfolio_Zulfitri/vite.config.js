@@ -1,11 +1,28 @@
-import { defineConfig } from 'vite'
-import react, { reactCompilerPreset } from '@vitejs/plugin-react'
-import babel from '@rolldown/plugin-babel'
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
 
-// https://vite.dev/config/
 export default defineConfig({
-  plugins: [
-    react(),
-    babel({ presets: [reactCompilerPreset()] })
-  ],
-})
+  plugins: [react()],
+
+  server: {
+    host: true, // allow network access
+    port: 5174,
+    allowedHosts: [
+      "localhost",
+      "127.0.0.1",
+      "portfolio-zulfitri.nanashicollectibles.com",
+      ".nanashicollectibles.com",
+    ],
+  },
+
+  preview: {
+    host: true,
+    port: 5174,
+    allowedHosts: [
+      "localhost",
+      "127.0.0.1",
+      "portfolio-zulfitri.nanashicollectibles.com",
+      ".nanashicollectibles.com",
+    ],
+  },
+});
