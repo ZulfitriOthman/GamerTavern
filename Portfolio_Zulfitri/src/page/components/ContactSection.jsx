@@ -1,4 +1,17 @@
-function ContactSection() {
+function ContactSection({ contactInfo }) {
+  const {
+    description,
+    email,
+    cvFileName,
+    cvUrl,
+    hireDescription,
+    hireSubject,
+    subject,
+  } = contactInfo
+  const contactLink = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(description)}`
+  const hiringLink = `mailto:${email}?subject=${encodeURIComponent(hireSubject)}&body=${encodeURIComponent(hireDescription)}`
+  const downloadUrl = cvUrl || `/${cvFileName}`
+
   return (
     <>
       <section className="bg-linear-to-r from-[#f9731615] to-[#f9731608] px-5 py-6 md:px-12 md:py-11">
@@ -13,13 +26,20 @@ function ContactSection() {
         <div className="mt-6 flex flex-wrap gap-3">
           <a
             className="interactive-cta animate-cta-pulse rounded-full bg-[#f97316] px-5 py-2.5 text-sm font-bold text-[#0d0d0d]"
-            href="mailto:zulfitri@example.com"
+            href={contactLink}
           >
             Contact Me
           </a>
           <a
+            className="interactive-cta rounded-full border border-[#f97316]/50 bg-[#f97316]/10 px-5 py-2.5 text-sm font-bold text-[#f97316]"
+            href={hiringLink}
+          >
+            Hire Me
+          </a>
+          <a
             className="interactive-cta rounded-full border border-[#2a2a2a] bg-[#1a1a1a] px-5 py-2.5 text-sm font-bold text-[#ffffff]"
-            href="#"
+            download={cvFileName}
+            href={downloadUrl}
           >
             Download CV
           </a>

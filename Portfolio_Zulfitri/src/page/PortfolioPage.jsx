@@ -8,6 +8,7 @@ import ScrollReveal from './components/ScrollReveal'
 import ScrollToTopButton from './components/ScrollToTopButton'
 import {
   aboutMe,
+  contactInfo,
   databaseWork,
   projectSamples,
   skillCards,
@@ -36,7 +37,7 @@ function PortfolioPage() {
           <ProjectsSection projectSamples={projectSamples} />
         </ScrollReveal>
         <ScrollReveal delay={550}>
-          <ContactSection />
+          <ContactSection contactInfo={contactInfo} />
         </ScrollReveal>
       </main>
       <ScrollToTopButton />

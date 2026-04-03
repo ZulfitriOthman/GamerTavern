@@ -39,6 +39,18 @@ export const aboutMe = {
   ],
 }
 
+export const contactInfo = {
+  email: 'zulfitriothman31@gmail.com',
+  cvUrl: '/Zulfitri-CV.docx',
+  cvFileName: 'Zulfitri-CV.docx',
+  subject: 'Project Inquiry - Collaboration Opportunity',
+  description:
+    'Hi Zulfitri,\n\nI found your portfolio and would like to discuss a project with you.\n\nProject details:\n- Company / Name:\n- Project type:\n- Timeline:\n- Budget range:\n\nPlease let me know your availability.\n\nThank you.',
+  hireSubject: 'Hiring Inquiry - Full-time or Contract Role',
+  hireDescription:
+    'Hi Zulfitri,\n\nI am reaching out regarding a hiring opportunity at our company.\n\nRole details:\n- Company:\n- Position:\n- Employment type (Full-time / Contract):\n- Work setup (On-site / Hybrid / Remote):\n- Start timeline:\n\nPlease share your availability for a short discussion.\n\nThank you.',
+}
+
 export const projectSamples = [
   {
     name: 'B-jaur.com',
@@ -58,7 +70,7 @@ export const projectSamples = [
   {
     name: 'Pintar Smart Parking',
     stack: 'React.js, Node.js, Express, Socket.IO',
-    summary: 'Connects drivers with parking operators to pay tickets digitally — no cash needed.',
+    summary: 'Connects drivers with parking operators to pay tickets digitally & no cash needed.',
     url: 'https://pintarsmartparking.com',
     image: 'https://image.thum.io/get/width/800/crop/500/https://pintarsmartparking.com',
   },
@@ -74,7 +86,7 @@ export const projectSamples = [
     name: 'Pintar Smart Parking — Mobile App',
     stack: 'React Native, Expo',
     badge: 'Mobile App',
-    summary: 'iOS and Android app for cashless parking — scan, pay, extend, and track sessions on the go.',
+    summary: 'iOS and Android app for cashless parking & scan, pay, extend, and track sessions on the go.',
     image: 'https://pintarsmartparking.com/assets/CTA%20Phone%20Mockup-CLj9j0HE.png',
     playStore: 'https://play.google.com/store/apps/details?id=com.pintarsmartparking.bsb',
     appStore: 'https://apps.apple.com/us/app/pintar-smart-parking-app/id6749289069',
