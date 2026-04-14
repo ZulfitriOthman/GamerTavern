@@ -12,6 +12,7 @@ import jwt from "jsonwebtoken";
  */
 export default function createAuthRoutes({ db, io } = {}) {
   const router = express.Router();
+  const AUTH_TABLE = "PERSONAL_USER";
 
   // -------------------------
   // Helpers
@@ -63,14 +64,14 @@ export default function createAuthRoutes({ db, io } = {}) {
       const hashed = await bcrypt.hash(String(password), rounds);
 
       await db.query(
-        `INSERT INTO persona (NAME, EMAIL, PHONE, PASSWORD)
+        `INSERT INTO ${AUTH_TABLE} (NAME, EMAIL, PHONE, PASSWORD)
          VALUES (?, ?, ?, ?)`,
         [String(name).trim(), normalizedEmail, normalizedPhone, hashed]
       );
 
       const [rows] = await db.query(
         `SELECT ID, NAME, EMAIL, PHONE, CREATED_AT
-         FROM persona
+         FROM ${AUTH_TABLE}
          WHERE EMAIL = ?
          LIMIT 1`,
         [normalizedEmail]
@@ -108,7 +109,7 @@ export default function createAuthRoutes({ db, io } = {}) {
 
       const [rows] = await db.query(
         `SELECT ID, NAME, EMAIL, PHONE, PASSWORD, CREATED_AT
-         FROM persona
+         FROM ${AUTH_TABLE}
          WHERE EMAIL = ?
          LIMIT 1`,
         [normalizedEmail]
