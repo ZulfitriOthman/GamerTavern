@@ -41,13 +41,22 @@ function PortfolioPage({ aboutMeOverride, contactInfoOverride, onNavigate }) {
         </ScrollReveal>
       </main>
       <ScrollToTopButton />
-      <button
-        className="fixed bottom-5 left-5 z-40 rounded-full border border-[#ef4444]/40 bg-[#161616] px-4 py-2 text-xs font-bold text-[#ef4444] md:bottom-8 md:left-8"
-        onClick={() => onNavigate('/login')}
-        type="button"
-      >
-        Admin Login
-      </button>
+      <div className="fixed bottom-5 left-5 z-40 flex flex-wrap gap-2 md:bottom-8 md:left-8">
+        <button
+          className="interactive-cta rounded-full border border-[#ef4444]/40 bg-[#161616] px-4 py-2 text-xs font-bold text-[#ef4444] shadow-[0_10px_24px_rgba(0,0,0,0.35)]"
+          onClick={() => onNavigate('/login')}
+          type="button"
+        >
+          Admin Login
+        </button>
+        <button
+          className="interactive-cta rounded-full border border-[#ef4444]/40 bg-[#ef4444]/10 px-4 py-2 text-xs font-bold text-[#ef4444] shadow-[0_10px_24px_rgba(0,0,0,0.35)]"
+          onClick={() => onNavigate('/client/access')}
+          type="button"
+        >
+          Client Portal
+        </button>
+      </div>
     </>
   )
 }

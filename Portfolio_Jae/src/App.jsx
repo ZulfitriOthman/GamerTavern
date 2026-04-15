@@ -2,10 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 import PortfolioPage from './page/PortfolioPage'
 import AdminPage from './page/AdminPage'
 import LoginPage from './page/LoginPage'
+import ClientAccessPage from './page/ClientAccessPage'
+import ClientWorkspacePage from './page/ClientWorkspacePage'
 import { aboutMe, contactInfo } from './page/pageData'
 import {
+  getAuthUser,
   getAuthToken,
   getPortfolioOverrides,
+  isAuthenticated,
   isAdminAuthenticated,
 } from './page/portfolioStorage'
 import { connectAdminSocket } from './socket/adminSocket'
@@ -28,7 +32,7 @@ function App() {
 
   useEffect(() => {
     const token = getAuthToken()
-    if (token) {
+    if (token && isAdminAuthenticated()) {
       connectAdminSocket(token)
     }
   }, [])
@@ -39,6 +43,18 @@ function App() {
 
   if (path === '/login') {
     return <LoginPage onNavigate={navigate} />
+  }
+
+  if (path === '/client/access') {
+    return <ClientAccessPage onNavigate={navigate} />
+  }
+
+  if (path === '/client/portal') {
+    if (!isAuthenticated()) {
+      return <ClientAccessPage onNavigate={navigate} />
+    }
+
+    return <ClientWorkspacePage onNavigate={navigate} user={getAuthUser()} />
   }
 
   if (path === '/admin') {

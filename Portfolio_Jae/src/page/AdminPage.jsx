@@ -36,7 +36,7 @@ function AdminPage({ aboutMe, contactInfo, onNavigate }) {
   }
 
   return (
-    <main className="mx-auto my-6 w-[min(920px,calc(100%-2rem))] rounded-2xl border border-[#2a2a2a] bg-[#0d0d0d] p-6 shadow-[0_20px_36px_rgba(239,68,68,0.15)] md:p-8">
+    <main className="animate-page-fade mx-auto my-6 w-[min(920px,calc(100%-2rem))] rounded-2xl border border-[#2a2a2a] bg-[#0d0d0d] p-6 shadow-[0_20px_36px_rgba(239,68,68,0.15)] md:p-8">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#ef4444]">Admin Panel</p>

@@ -2,6 +2,7 @@
 import express from "express";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import crypto from "crypto";
 
 /**
  * Factory route
@@ -13,19 +14,49 @@ import jwt from "jsonwebtoken";
 export default function createAuthRoutes({ db, io } = {}) {
   const router = express.Router();
   const AUTH_TABLE = "PERSONAL_USER";
+  const PORTFOLIO_ROLE = "PORTFOLIO";
+  const REGISTER_ALLOWED_FIELDS = new Set(["name", "email", "phone", "password"]);
+  const LOGIN_ALLOWED_FIELDS = new Set(["email", "password"]);
+  const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const PHONE_REGEX = /^[0-9+()\- ]{8,20}$/;
+  let cachedDevJwtSecret = null;
 
   // -------------------------
   // Helpers
   // -------------------------
   function signToken(user) {
-    if (!process.env.JWT_SECRET) {
-      throw new Error("JWT_SECRET is not set in environment variables");
-    }
+    const jwtSecret = getJwtSecret();
     return jwt.sign(
-      { sub: user.ID, email: user.EMAIL, name: user.NAME },
-      process.env.JWT_SECRET,
+      { sub: user.ID, email: user.EMAIL, name: user.NAME, role: user.ROLE },
+      jwtSecret,
       { expiresIn: process.env.JWT_EXPIRES_IN || "7d" }
     );
+  }
+
+  function normalizeRole(role) {
+    return String(role || "").trim().toUpperCase();
+  }
+
+  function isPortfolioRole(role) {
+    return normalizeRole(role) === PORTFOLIO_ROLE;
+  }
+
+  function getJwtSecret() {
+    if (process.env.JWT_SECRET) {
+      return process.env.JWT_SECRET;
+    }
+
+    const isProduction = process.env.NODE_ENV === "production";
+    if (isProduction) {
+      throw new Error("JWT_SECRET is not set in environment variables");
+    }
+
+    if (!cachedDevJwtSecret) {
+      cachedDevJwtSecret = crypto.randomBytes(48).toString("hex");
+      console.warn("[auth] JWT_SECRET is missing. Using temporary in-memory dev secret. Tokens will reset when server restarts.");
+    }
+
+    return cachedDevJwtSecret;
   }
 
   function requireAuth(req, res, next) {
@@ -34,14 +65,16 @@ export default function createAuthRoutes({ db, io } = {}) {
     if (!token) return res.status(401).json({ message: "missing token" });
 
     try {
-      if (!process.env.JWT_SECRET) {
-        return res.status(500).json({ message: "server misconfigured (JWT_SECRET missing)" });
-      }
-      req.user = jwt.verify(token, process.env.JWT_SECRET);
+      req.user = jwt.verify(token, getJwtSecret());
       return next();
     } catch {
       return res.status(401).json({ message: "invalid token" });
     }
+  }
+
+  function hasOnlyAllowedFields(payload, allowedFields) {
+    const keys = Object.keys(payload || {});
+    return keys.every((field) => allowedFields.has(field));
   }
 
   // -------------------------
@@ -51,6 +84,10 @@ export default function createAuthRoutes({ db, io } = {}) {
     try {
       if (!db) return res.status(500).json({ message: "DB is not configured" });
 
+      if (!hasOnlyAllowedFields(req.body, REGISTER_ALLOWED_FIELDS)) {
+        return res.status(400).json({ message: "Unexpected fields in request" });
+      }
+
       const { name, email, phone, password } = req.body || {};
 
       if (!name || !email || !password) {
@@ -59,6 +96,23 @@ export default function createAuthRoutes({ db, io } = {}) {
 
       const normalizedEmail = String(email).trim().toLowerCase();
       const normalizedPhone = phone ? String(phone).trim() : null;
+      const normalizedName = String(name).trim();
+
+      if (!EMAIL_REGEX.test(normalizedEmail)) {
+        return res.status(400).json({ message: "invalid email format" });
+      }
+
+      if (normalizedPhone && !PHONE_REGEX.test(normalizedPhone)) {
+        return res.status(400).json({ message: "invalid phone format" });
+      }
+
+      if (normalizedName.length < 2 || normalizedName.length > 80) {
+        return res.status(400).json({ message: "name must be 2 to 80 characters" });
+      }
+
+      if (String(password).length < 8) {
+        return res.status(400).json({ message: "password must be at least 8 characters" });
+      }
 
       const rounds = Number(process.env.BCRYPT_ROUNDS || 10);
       const hashed = await bcrypt.hash(String(password), rounds);
@@ -66,11 +120,11 @@ export default function createAuthRoutes({ db, io } = {}) {
       await db.query(
         `INSERT INTO ${AUTH_TABLE} (NAME, EMAIL, PHONE, PASSWORD)
          VALUES (?, ?, ?, ?)`,
-        [String(name).trim(), normalizedEmail, normalizedPhone, hashed]
+        [normalizedName, normalizedEmail, normalizedPhone, hashed]
       );
 
       const [rows] = await db.query(
-        `SELECT ID, NAME, EMAIL, PHONE, CREATED_AT
+        `SELECT ID, ROLE, NAME, EMAIL, PHONE, CREATED_AT
          FROM ${AUTH_TABLE}
          WHERE EMAIL = ?
          LIMIT 1`,
@@ -78,6 +132,9 @@ export default function createAuthRoutes({ db, io } = {}) {
       );
 
       const user = rows?.[0];
+      if (user) {
+        user.ROLE = normalizeRole(user.ROLE);
+      }
       const token = signToken(user);
 
       // optional socket event
@@ -100,6 +157,10 @@ export default function createAuthRoutes({ db, io } = {}) {
     try {
       if (!db) return res.status(500).json({ message: "DB is not configured" });
 
+      if (!hasOnlyAllowedFields(req.body, LOGIN_ALLOWED_FIELDS)) {
+        return res.status(400).json({ message: "Unexpected fields in request" });
+      }
+
       const { email, password } = req.body || {};
       if (!email || !password) {
         return res.status(400).json({ message: "email and password are required" });
@@ -107,8 +168,12 @@ export default function createAuthRoutes({ db, io } = {}) {
 
       const normalizedEmail = String(email).trim().toLowerCase();
 
+      if (!EMAIL_REGEX.test(normalizedEmail)) {
+        return res.status(400).json({ message: "invalid email format" });
+      }
+
       const [rows] = await db.query(
-        `SELECT ID, NAME, EMAIL, PHONE, PASSWORD, CREATED_AT
+        `SELECT ID, ROLE, NAME, EMAIL, PHONE, PASSWORD, CREATED_AT
          FROM ${AUTH_TABLE}
          WHERE EMAIL = ?
          LIMIT 1`,
@@ -123,6 +188,7 @@ export default function createAuthRoutes({ db, io } = {}) {
 
       const user = {
         ID: userRow.ID,
+        ROLE: normalizeRole(userRow.ROLE),
         NAME: userRow.NAME,
         EMAIL: userRow.EMAIL,
         PHONE: userRow.PHONE,
@@ -132,7 +198,12 @@ export default function createAuthRoutes({ db, io } = {}) {
       const token = signToken(user);
 
       // optional socket event
-      io?.emit?.("auth:login", { userId: user?.ID, email: user?.EMAIL });
+      io?.emit?.("auth:login", {
+        userId: user?.ID,
+        email: user?.EMAIL,
+        role: user?.ROLE,
+        isPortfolio: isPortfolioRole(user?.ROLE),
+      });
 
       return res.json({ ok: true, user, token });
     } catch (err) {

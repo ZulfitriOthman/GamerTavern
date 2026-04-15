@@ -13,6 +13,7 @@ import { initDB, dbPing } from "./modules/db.module.js";
 // routes (optional)
 import createHealthRoutes from "./routes/api/health.routes.js";
 import createAuthRoutes from "./routes/api/auth.routes.js";
+import createClientPortfolioRoutes from "./routes/api/clientPortfolio.routes.js";
 import createPaymentRoutes from "./routes/api/payment.routes.js";
 
 // sockets
@@ -99,6 +100,7 @@ const DEFAULT_ORIGINS = [
   CLIENT_URL,
   "http://localhost:5173",
   "http://localhost:5174",
+  "http://localhost:5175",
   "https://nanashicollectibles.com",
   "https://www.nanashicollectibles.com",
 ];
@@ -224,6 +226,7 @@ app.use(
 );
 
 app.use("/api/auth", createAuthRoutes({ db, io }));
+app.use("/api/client-portfolio", createClientPortfolioRoutes());
 app.use("/api/payments", createPaymentRoutes());
 
 /* ------------------------------ Socket Wiring ------------------------------ */

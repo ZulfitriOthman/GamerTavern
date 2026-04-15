@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { login } from './portfolioStorage'
+import { loginAdmin } from './portfolioStorage'
 
 function LoginPage({ onNavigate }) {
   const [email, setEmail] = useState('')
@@ -11,7 +11,7 @@ function LoginPage({ onNavigate }) {
     setError('')
 
     try {
-      await login(email.trim(), password)
+      await loginAdmin(email.trim(), password)
       onNavigate('/admin')
     } catch (e) {
       setError(e.message || 'Invalid credentials. Please try again.')
@@ -19,7 +19,7 @@ function LoginPage({ onNavigate }) {
   }
 
   return (
-    <main className="mx-auto my-6 w-[min(560px,calc(100%-2rem))] rounded-2xl border border-[#2a2a2a] bg-[#0d0d0d] p-6 shadow-[0_20px_36px_rgba(239,68,68,0.15)] md:p-8">
+    <main className="animate-page-fade mx-auto my-6 w-[min(560px,calc(100%-2rem))] rounded-2xl border border-[#2a2a2a] bg-[#0d0d0d] p-6 shadow-[0_20px_36px_rgba(239,68,68,0.15)] md:p-8">
       <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#ef4444]">Admin Access</p>
       <h1 className="mt-3 font-['Syne'] text-3xl text-[#ffffff]">Login To Update Portfolio</h1>
       <p className="mt-3 text-sm leading-relaxed text-[#9ca3af]">

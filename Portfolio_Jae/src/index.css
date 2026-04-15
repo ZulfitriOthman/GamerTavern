@@ -99,6 +99,39 @@ body {
   }
 }
 
+@keyframes pageFade {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes formSwap {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes fieldReveal {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .animate-slide-fade {
   animation: slideFade 0.9s ease both;
 }
@@ -169,4 +202,16 @@ body {
 
 .animate-badge-pulse {
   animation: badgePulse 3.4s ease-in-out infinite;
+}
+
+.animate-page-fade {
+  animation: pageFade 0.55s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+.animate-form-swap {
+  animation: formSwap 0.4s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+.animate-field-reveal {
+  animation: fieldReveal 0.32s ease both;
 }

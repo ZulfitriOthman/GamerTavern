@@ -6,7 +6,7 @@ export default defineConfig({
 
   server: {
     host: true, // allow network access
-    port: 5174,
+    port: 5175,
     allowedHosts: [
       "localhost",
       "127.0.0.1",
@@ -17,7 +17,7 @@ export default defineConfig({
 
   preview: {
     host: true,
-    port: 5174,
+    port: 5175,
     allowedHosts: [
       "localhost",
       "127.0.0.1",

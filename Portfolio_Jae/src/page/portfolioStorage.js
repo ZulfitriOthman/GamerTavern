@@ -3,32 +3,23 @@ import { connectAdminSocket, disconnectAdminSocket } from '../socket/adminSocket
 const AUTH_TOKEN_KEY = 'jae_portfolio_token'
 const AUTH_USER_KEY = 'jae_portfolio_user'
 const OVERRIDES_KEY = 'jae_portfolio_overrides'
+const PORTFOLIO_ROLE = 'PORTFOLIO'
 
 function getApiBaseUrl() {
   return import.meta.env.VITE_API_URL || 'http://localhost:3002'
 }
 
-function getAdminEmailAllowlist() {
-  const raw = import.meta.env.VITE_ADMIN_EMAILS || ''
-  return raw
-    .split(',')
-    .map((entry) => entry.trim().toLowerCase())
-    .filter(Boolean)
+function toApiError(error, fallbackMessage) {
+  if (error instanceof TypeError) {
+    return new Error('Unable to reach the backend API. Please start the server and try again.')
+  }
+
+  return error instanceof Error ? error : new Error(fallbackMessage)
 }
 
 function isAdminUser(user) {
-  const email = String(user?.EMAIL || user?.email || '').trim().toLowerCase()
-  if (!email) {
-    return false
-  }
-
-  const allowlist = getAdminEmailAllowlist()
-  if (allowlist.length === 0) {
-    // Safe default for template usage when env is not set.
-    return email === 'jae@example.com'
-  }
-
-  return allowlist.includes(email)
+  const role = String(user?.ROLE || user?.role || '').trim().toUpperCase()
+  return role === PORTFOLIO_ROLE
 }
 
 export function isAuthenticated() {
@@ -53,30 +44,118 @@ export function isAdminAuthenticated() {
   return isAuthenticated() && isAdminUser(user)
 }
 
-export async function login(email, password) {
-  const response = await fetch(`${getApiBaseUrl()}/api/auth/login`, {
+async function authenticate(email, password, { requireAdmin = false } = {}) {
+  try {
+    const response = await fetch(`${getApiBaseUrl()}/api/auth/login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ email, password }),
+    })
+
+    const payload = await response.json().catch(() => ({}))
+
+    if (!response.ok || !payload?.token) {
+      throw new Error(payload?.message || 'Login failed')
+    }
+
+    if (requireAdmin && !isAdminUser(payload.user)) {
+      throw new Error('This account is not authorized for admin access.')
+    }
+
+    localStorage.setItem(AUTH_TOKEN_KEY, payload.token)
+    localStorage.setItem(AUTH_USER_KEY, JSON.stringify(payload.user || null))
+
+    return payload
+  } catch (error) {
+    throw toApiError(error, 'Login failed')
+  }
+}
+
+export async function loginAdmin(email, password) {
+  const payload = await authenticate(email, password, { requireAdmin: true })
+
+  if (!isAdminUser(payload.user)) {
+    logout()
+    throw new Error('This account is not authorized for admin access.')
+  }
+
+  connectAdminSocket(payload.token)
+
+  return payload
+}
+
+export async function loginClient(email, password) {
+  return authenticate(String(email || '').trim().toLowerCase(), String(password || ''))
+}
+
+export async function registerClient({ email, name, password, phone }) {
+  const safePayload = {
+    email: String(email || '').trim().toLowerCase(),
+    name: String(name || '').trim(),
+    password: String(password || ''),
+    phone: phone ? String(phone).trim() : '',
+  }
+
+  try {
+    const response = await fetch(`${getApiBaseUrl()}/api/auth/register`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(safePayload),
+    })
+
+    const payload = await response.json().catch(() => ({}))
+
+    if (!response.ok || !payload?.token) {
+      throw new Error(payload?.message || 'Sign up failed')
+    }
+
+    localStorage.setItem(AUTH_TOKEN_KEY, payload.token)
+    localStorage.setItem(AUTH_USER_KEY, JSON.stringify(payload.user || null))
+
+    return payload
+  } catch (error) {
+    throw toApiError(error, 'Sign up failed')
+  }
+}
+
+export async function submitClientPortfolio(formData) {
+  const token = getAuthToken()
+  const response = await fetch(`${getApiBaseUrl()}/api/client-portfolio/submit`, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ email, password }),
+    body: formData,
   })
 
   const payload = await response.json().catch(() => ({}))
 
-  if (!response.ok || !payload?.token) {
-    throw new Error(payload?.message || 'Login failed')
+  if (!response.ok || !payload?.ok) {
+    throw new Error(payload?.message || 'Submission failed')
   }
 
-  if (!isAdminUser(payload.user)) {
-    throw new Error('This account is not authorized for admin access.')
+  return payload.submission
+}
+
+export async function fetchClientSubmissions() {
+  const token = getAuthToken()
+  const response = await fetch(`${getApiBaseUrl()}/api/client-portfolio/me`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+  const payload = await response.json().catch(() => ({}))
+
+  if (!response.ok || !payload?.ok) {
+    throw new Error(payload?.message || 'Unable to load submissions')
   }
 
-  localStorage.setItem(AUTH_TOKEN_KEY, payload.token)
-  localStorage.setItem(AUTH_USER_KEY, JSON.stringify(payload.user || null))
-  connectAdminSocket(payload.token)
-
-  return payload
+  return payload.submissions || []
 }
 
 export function logout() {
