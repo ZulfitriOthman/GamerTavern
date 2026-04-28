@@ -146,6 +146,11 @@ export function useSocket(username = null) {
     [emitWithAck],
   );
 
+  const emitAccountUpdate = useCallback(
+    (payload) => emitWithAck("account:update", payload),
+    [emitWithAck],
+  );
+
   const emitAccountLogin = useCallback(
     (payload) => emitWithAck("account:login", payload),
     [emitWithAck],
@@ -161,6 +166,11 @@ export function useSocket(username = null) {
     [emitWithAck],
   );
 
+  const emitCountryList = useCallback(
+    () => emitWithAck("country:list", null),
+    [emitWithAck],
+  );
+
   const socket = useMemo(() => getSocket(), [isConnected]);
 
   return {
@@ -173,8 +183,10 @@ export function useSocket(username = null) {
     disconnect,
 
     emitAccountCreate,
+    emitAccountUpdate,
     emitAccountLogin,
     emitAccountRequestReset,
     emitAccountResetPassword,
+    emitCountryList,
   };
 }

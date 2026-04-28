@@ -16,9 +16,10 @@ import CartPage from "./pages/CartPage";
 import TradePage from "./pages/TradePage";
 import NewsPage from "./pages/NewsPage";
 import SocketDemo from "./pages/SocketDemo";
-import SignUpPage from "./pages/SignUpPage";
-import LoginPage from "./pages/LoginPage";
-import ForgotPasswordPage from "./pages/ForgotPasswordPage";
+import SignUpPage from "./pages/login/SignUpPage";
+import ProfilePage from "./pages/profile/ProfilePage";
+import LoginPage from "./pages/login/LoginPage";
+import ForgotPasswordPage from "./pages/login/ForgotPasswordPage";
 import ChatPage from "./pages/ChatPage";
 import UserShopPage from "./pages/UserShopPage";
 import VendorShopPage from "./pages/VendorShopPage";
@@ -196,7 +197,9 @@ function App() {
   }, [location.pathname]);
 
   const isAccountRoute = useMemo(
-    () => location.pathname.startsWith("/account"),
+    () =>
+      location.pathname.startsWith("/profile") ||
+      location.pathname.startsWith("/account"),
     [location.pathname],
   );
 
@@ -313,7 +316,7 @@ function App() {
             { to: "/trade", label: "Trade" },
             { to: "/chat", label: "Chat" },
             { to: "/news", label: "News" },
-            { to: "/account", label: displayName },
+            { to: "/profile", label: displayName },
             { to: "/cart", label: `Cart (${cartTotalItems})` },
           ]
         : [
@@ -404,7 +407,7 @@ function App() {
 
                 {isLoggedIn ? (
                   <ArcaneNavItem
-                    to="/account"
+                    to="/profile"
                     label={displayName}
                     isActive={isAccountRoute}
                     variant="desktop"
@@ -719,27 +722,13 @@ function App() {
               }
             />
 
-            {/* ✅ Optional placeholder route so "name" link doesn't 404 */}
+            {/* ✅ Profile page (account settings) */}
             <Route
-              path="/account"
+              path="/profile"
               element={
                 <RequireAuth>
                   <PageWrap>
-                    <div className="rounded-2xl border border-amber-900/30 bg-slate-950/60 p-8">
-                      <h2 className="font-serif text-2xl font-bold text-amber-100">
-                        Account
-                      </h2>
-                      <p className="mt-2 font-serif text-amber-100/70">
-                        Logged in as{" "}
-                        <span className="text-amber-300">{displayName}</span>
-                      </p>
-                      <button
-                        onClick={handleLogout}
-                        className="mt-6 rounded-xl border border-amber-600/40 bg-amber-950/20 px-4 py-2 font-serif text-sm text-amber-100 hover:border-amber-500 hover:bg-amber-950/30 transition"
-                      >
-                        Logout
-                      </button>
-                    </div>
+                    <ProfilePage />
                   </PageWrap>
                 </RequireAuth>
               }

@@ -17,12 +17,15 @@ import createClientPortfolioRoutes from "./routes/api/clientPortfolio.routes.js"
 import createPaymentRoutes from "./routes/api/payment.routes.js";
 
 // sockets
-import accountSocketController from "./sockets/account.socket.js";
-import chatSocketController from "./sockets/chat.socket.js";
-import productSocketController from "./sockets/product.socket.js";
-import shopSocketController from "./sockets/shop.socket.js";
-import tradeSocketController from "./sockets/trade.socket.js";
-import newsSocketController from "./sockets/news.socket.js";
+import accountSocketController from "./controllers/account.controller.js";
+import chatSocketController from "./controllers/chat.controller.js";
+import productSocketController from "./controllers/product.controller.js";
+import shopSocketController from "./controllers/shop.controller.js";
+import tradeSocketController from "./controllers/trade.controller.js";
+import newsSocketController from "./controllers/news.controller.js";
+import tournamentSocketController from "./controllers/tournament.controller.js";
+import decklistSocketController from "./controllers/decklist.controller.js";
+import countrySocketController from "./controllers/country.controller.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -46,6 +49,10 @@ fs.mkdirSync(uploadsDir, { recursive: true });
 // Store product images in: Backend/public/uploads/products
 const productUploadsDir = path.join(publicPath, "uploads", "products");
 fs.mkdirSync(productUploadsDir, { recursive: true });
+
+// Store avatar images in: Backend/public/uploads/avatars
+const avatarUploadsDir = path.join(publicPath, "uploads", "avatars");
+fs.mkdirSync(avatarUploadsDir, { recursive: true });
 
 /* ------------------------------ Multer config ------------------------------ */
 const storage = multer.diskStorage({
@@ -80,6 +87,21 @@ const upload = multer({
   storage,
   fileFilter,
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+});
+
+// Avatar uploader (same fileFilter, separate destination)
+const avatarStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, avatarUploadsDir),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname || "").toLowerCase() || ".png";
+    const safe = Date.now() + "-" + Math.random().toString(16).slice(2);
+    cb(null, safe + ext);
+  },
+});
+const avatarUpload = multer({
+  storage: avatarStorage,
+  fileFilter,
+  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
 });
 
 /* ------------------------------ App / Server ------------------------------ */
@@ -216,6 +238,15 @@ app.post("/api/upload/product-image", upload.single("image"), (req, res) => {
   return res.json({ success: true, imageUrl });
 });
 
+app.post("/api/upload/avatar", avatarUpload.single("image"), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ success: false, message: "No file uploaded" });
+  }
+  const imageUrl = `/public/uploads/avatars/${req.file.filename}`;
+  console.log("[upload][avatar] ✅", imageUrl);
+  return res.json({ success: true, imageUrl });
+});
+
 /* ------------------------------ Routes ------------------------------ */
 app.use(
   "/api",
@@ -246,6 +277,9 @@ io.on("connection", (socket) => {
   productSocketController({ socket, io, db, pushActivity });
   tradeSocketController({ socket, io, db });
   newsSocketController({ socket, io, db });
+  tournamentSocketController({ socket, io, db });
+  decklistSocketController({ socket, io, db });
+  countrySocketController({ socket, db });
 });
 
 /* ------------------------------ Error handler ------------------------------ */

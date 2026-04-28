@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useSocket } from "../hooks/useSocket";
+import { useSocket } from "../../hooks/useSocket";
 
 export default function ForgotPasswordPage() {
   const { isConnected, connect, emitAccountRequestReset, emitAccountResetPassword } =

@@ -1,4 +1,4 @@
-// Backend/sockets/account.socket.js
+// Backend/controllers/account.controller.js
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 
@@ -16,6 +16,55 @@ const ROLES = Object.freeze({
 
 const normalizeRole = (v) => toStr(v).toUpperCase();
 const isValidRole = (v) => Object.values(ROLES).includes(v);
+
+// ✅ Password rule (mirrors frontend): 8+ chars, lowercase, uppercase, number, special
+const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/;
+const PASSWORD_MESSAGE =
+  "Password must be at least 8 characters and include uppercase, lowercase, a number, and a special character.";
+
+// ✅ Per-country phone rules (mirrors frontend PHONE_RULES)
+const PHONE_RULES = {
+  "+673": { min: 7,  max: 7  }, // Brunei
+  "+60":  { min: 9,  max: 10 }, // Malaysia
+  "+65":  { min: 8,  max: 8  }, // Singapore
+  "+62":  { min: 9,  max: 12 }, // Indonesia
+  "+63":  { min: 10, max: 10 }, // Philippines
+  "+66":  { min: 9,  max: 9  }, // Thailand
+  "+84":  { min: 9,  max: 10 }, // Vietnam
+  "+91":  { min: 10, max: 10 }, // India
+  "+86":  { min: 11, max: 11 }, // China
+  "+81":  { min: 10, max: 10 }, // Japan
+  "+82":  { min: 9,  max: 10 }, // South Korea
+  "+61":  { min: 9,  max: 9  }, // Australia
+  "+44":  { min: 10, max: 10 }, // United Kingdom
+  "+1":   { min: 10, max: 10 }, // United States
+};
+
+/**
+ * Validates a phone in international format and enforces per-country length when known.
+ * Returns null if valid, or an error message string.
+ */
+function validatePhone(phone) {
+  if (!phone) return null; // optional
+  if (!/^\+\d{6,15}$/.test(phone)) {
+    return "Phone must be in international format e.g. +673xxxxxxx.";
+  }
+  // Find longest matching dial code (e.g. "+673" before "+6")
+  const dial = Object.keys(PHONE_RULES)
+    .sort((a, b) => b.length - a.length)
+    .find((d) => phone.startsWith(d));
+  if (!dial) return null; // unknown country, length already 6–15
+  const localDigits = phone.slice(dial.length);
+  if (!/^\d+$/.test(localDigits)) return "Phone contains invalid characters.";
+  if (/^0+$/.test(localDigits)) return "Phone number cannot be all zeros.";
+  const { min, max } = PHONE_RULES[dial];
+  if (localDigits.length < min || localDigits.length > max) {
+    return min === max
+      ? `Phone for ${dial} must be exactly ${min} digits.`
+      : `Phone for ${dial} must be ${min}–${max} digits.`;
+  }
+  return null;
+}
 
 /**
  * ✅ SECURITY POLICY:
@@ -80,8 +129,8 @@ export default function accountSocketController({
       return ack({ success: false, message: "Passwords do not match." });
     }
 
-    if (password.length < 6) {
-      return ack({ success: false, message: "Password must be at least 6 characters." });
+    if (!PASSWORD_REGEX.test(password)) {
+      return ack({ success: false, message: PASSWORD_MESSAGE });
     }
 
     const emailRegex = /^\S+@\S+\.\S+$/;
@@ -89,10 +138,16 @@ export default function accountSocketController({
       return ack({ success: false, message: "Email is invalid." });
     }
 
-    if (phone && !/^\+\d{6,15}$/.test(phone)) {
+    const phoneErr = validatePhone(phone);
+    if (phoneErr) {
+      return ack({ success: false, message: phoneErr });
+    }
+
+    // Vendors must provide a phone number
+    if (role === ROLES.VENDOR && !phone) {
       return ack({
         success: false,
-        message: "Phone must be in international format e.g. +673xxxxxxx.",
+        message: "Phone is required for merchant accounts.",
       });
     }
 
@@ -156,24 +211,40 @@ export default function accountSocketController({
     if (!id) return ack({ success: false, message: "id is required." });
 
     const name = payload.name != null ? toStr(payload.name) : null;
+    const email = payload.email != null ? toStr(payload.email).toLowerCase() : null;
     const phone = payload.phone != null ? toStr(payload.phone) : null;
     const profileIcon =
       payload.profileIcon != null ? toStr(payload.profileIcon) : null;
+
+    // Optional password change: requires currentPassword + newPassword
+    const currentPassword =
+      payload.currentPassword != null ? toPassword(payload.currentPassword) : null;
+    const newPassword =
+      payload.newPassword != null ? toPassword(payload.newPassword) : null;
 
     // ✅ SECURITY: do NOT allow role update here
     const fields = [];
     const params = [];
 
     if (name !== null) {
+      if (!name) {
+        return ack({ success: false, message: "Name cannot be empty." });
+      }
       fields.push("NAME = ?");
       params.push(name);
     }
+    if (email !== null) {
+      const emailRegex = /^\S+@\S+\.\S+$/;
+      if (!emailRegex.test(email)) {
+        return ack({ success: false, message: "Email is invalid." });
+      }
+      fields.push("EMAIL = ?");
+      params.push(email);
+    }
     if (phone !== null) {
-      if (phone && !/^\+\d{6,15}$/.test(phone)) {
-        return ack({
-          success: false,
-          message: "Phone must be in international format e.g. +673xxxxxxx.",
-        });
+      const phoneErr = validatePhone(phone);
+      if (phoneErr) {
+        return ack({ success: false, message: phoneErr });
       }
       fields.push("PHONE = ?");
       params.push(phone || null);
@@ -181,6 +252,44 @@ export default function accountSocketController({
     if (profileIcon !== null) {
       fields.push("PROFILE_ICON = ?");
       params.push(profileIcon);
+    }
+
+    // Password change branch
+    if (newPassword !== null || currentPassword !== null) {
+      if (!currentPassword || !newPassword) {
+        return ack({
+          success: false,
+          message: "Both current and new password are required to change password.",
+        });
+      }
+      if (!PASSWORD_REGEX.test(newPassword)) {
+        return ack({ success: false, message: PASSWORD_MESSAGE });
+      }
+      try {
+        const [pwRows] = await db.execute(
+          `SELECT PASSWORD FROM PERSONAL_USER WHERE ID = ?`,
+          [id],
+        );
+        const currentHash = pwRows?.[0]?.PASSWORD;
+        if (!currentHash) {
+          return ack({ success: false, message: "Account not found." });
+        }
+        const ok = await bcrypt.compare(currentPassword, currentHash);
+        if (!ok) {
+          return ack({ success: false, message: "Current password is incorrect." });
+        }
+        const rounds = Number(process.env.BCRYPT_ROUNDS || 10);
+        const newHash = await bcrypt.hash(newPassword, rounds);
+        fields.push("PASSWORD = ?");
+        params.push(newHash);
+      } catch (err) {
+        console.error(`[socket][account:update] ❌ password verify failed`, err);
+        return ack({ success: false, message: "Failed to update password." });
+      }
+    }
+
+    if (fields.length === 0) {
+      return ack({ success: false, message: "Nothing to update." });
     }
 
     fields.push("UPDATED_AT = NOW()");
@@ -225,7 +334,12 @@ export default function accountSocketController({
       );
 
       if (err?.code === "ER_DUP_ENTRY") {
-        return ack({ success: false, message: "Phone already exists." });
+        const dupMsg = /email/i.test(err?.sqlMessage || "")
+          ? "Email already in use."
+          : /phone/i.test(err?.sqlMessage || "")
+          ? "Phone already in use."
+          : "Email or phone already in use.";
+        return ack({ success: false, message: dupMsg });
       }
       return ack({ success: false, message: "Failed to update account." });
     }
@@ -370,6 +484,9 @@ export default function accountSocketController({
     }
     if (newPassword !== confirmPassword) {
       return ack({ success: false, message: "Passwords do not match." });
+    }
+    if (!PASSWORD_REGEX.test(newPassword)) {
+      return ack({ success: false, message: PASSWORD_MESSAGE });
     }
 
     try {

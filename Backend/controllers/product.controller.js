@@ -1,4 +1,4 @@
-// Backend/sockets/product.socket.js
+// Backend/controllers/product.controller.js
 import fs from "fs";
 import path from "path";
 

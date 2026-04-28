@@ -7,15 +7,14 @@ let lastUsername = null;
 export const getSocket = () => socket;
 
 export const connectSocket = (username) => {
-  const url = (import.meta.env.VITE_SOCKET_URL || "http://localhost:3001").trim();
+  const url = (import.meta.env.VITE_SOCKET_URL?.trim() || "http://localhost:3002");
 
   if (username) lastUsername = String(username).trim();
 
   if (!socket) {
     socket = io(url, {
-      transports: ["websocket", "polling"],
+      transports: ["polling", "websocket"],
       withCredentials: true,
-
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 800,

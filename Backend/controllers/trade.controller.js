@@ -1,4 +1,4 @@
-// Backend/sockets/trade.socket.js
+// Backend/controllers/trade.controller.js
 const ROLES = {
   USER: "USER",
   VENDOR: "VENDOR",
