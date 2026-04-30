@@ -1,5 +1,7 @@
 // Backend/controllers/news.controller.js
 
+import { sendBulkEmail } from "../modules/mailer.module.js";
+
 const toStr = (v) => (v == null ? "" : String(v)).trim();
 const toInt = (v, d = 0) => {
   const n = Number(v);
@@ -152,6 +154,67 @@ export default function newsSocketController({ socket, io, db }) {
 
       const created = safeNewsRow(rows?.[0]);
       io?.emit?.("news:created", created);
+
+      // 📧 Broadcast to all users (non-blocking)
+      (async () => {
+        try {
+          const [userRows] = await db.execute(
+            "SELECT EMAIL FROM PERSONAL_USER WHERE EMAIL IS NOT NULL AND EMAIL <> ''",
+          );
+          const recipients = userRows.map((r) => r.EMAIL);
+          if (!recipients.length) return;
+
+          const safeTitle = String(created.title || "New Update");
+          const safeContent = String(created.content || "");
+          const subject = `📰 ${safeTitle}`;
+          const escapeHtml = (s) =>
+            String(s)
+              .replace(/&/g, "&amp;")
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;");
+
+          const paragraphs = safeContent
+            .split(/\r?\n/)
+            .map((p) => p.trim())
+            .filter(Boolean)
+            .map((p) => `<p style="margin:0 0 12px;">${escapeHtml(p)}</p>`)
+            .join("");
+
+          const imgHtml = created.image_url
+            ? `<img src="${escapeHtml(created.image_url)}" alt="" style="max-width:100%;border-radius:8px;margin:12px 0;" />`
+            : "";
+
+          const html = `
+            <div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px;background:#0f172a;color:#fde68a;border-radius:12px;">
+              <p style="font-size:11px;letter-spacing:0.3em;text-transform:uppercase;color:#f59e0b;margin:0 0 8px;">
+                Gamer Tavern · ${escapeHtml(created.category || "General")}
+              </p>
+              <h1 style="font-size:24px;margin:0 0 16px;color:#fef3c7;">${escapeHtml(safeTitle)}</h1>
+              ${imgHtml}
+              <div style="font-size:14px;line-height:1.6;color:#fef3c7;">${paragraphs}</div>
+              <hr style="border:none;border-top:1px solid #78350f;margin:24px 0;" />
+              <p style="font-size:12px;color:#fbbf24;margin:0;">
+                Posted by ${escapeHtml(created.author || "Admin")}
+              </p>
+            </div>
+          `;
+
+          const text = `${safeTitle}\n\n${safeContent}\n\n— ${created.author || "Admin"}`;
+
+          const result = await sendBulkEmail({
+            recipients,
+            subject,
+            html,
+            text,
+          });
+          console.log(
+            `[news:create] 📧 broadcast email — sent: ${result.sent}/${result.total ?? 0}`,
+          );
+        } catch (mailErr) {
+          console.error("[news:create] email broadcast failed:", mailErr);
+        }
+      })();
+
       return ack({ success: true, data: created });
     } catch (err) {
       console.error("[news:create] error", err);

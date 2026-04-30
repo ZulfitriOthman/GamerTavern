@@ -13,7 +13,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Navigate } from "react-router-dom";
 
 import CartPage from "./pages/CartPage";
-import TradePage from "./pages/TradePage";
+import TradePage from "./pages/shop/TradePage";
 import NewsPage from "./pages/NewsPage";
 import SocketDemo from "./pages/SocketDemo";
 import SignUpPage from "./pages/login/SignUpPage";

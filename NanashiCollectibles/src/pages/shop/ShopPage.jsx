@@ -1,8 +1,8 @@
 // src/pages/ShopPage.jsx
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { TCG_LIST, PRODUCTS } from "../data/products";
-import { getCurrentUser } from "../authStorage";
+import { TCG_LIST, PRODUCTS } from "../../data/products";
+import { getCurrentUser } from "../../authStorage";
 
 const ROLES = {
   USER: "USER",

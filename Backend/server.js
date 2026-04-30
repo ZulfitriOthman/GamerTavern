@@ -9,6 +9,7 @@ import { fileURLToPath } from "url";
 import { Server } from "socket.io";
 import multer from "multer";
 import { initDB, dbPing } from "./modules/db.module.js";
+import { verifyMailer } from "./modules/mailer.module.js";
 
 // routes (optional)
 import createHealthRoutes from "./routes/api/health.routes.js";
@@ -208,6 +209,9 @@ app.get("/", (_req, res) => {
 
 /* ------------------------------ DB ------------------------------ */
 const db = initDB();
+
+// Verify SMTP transporter (non-fatal)
+verifyMailer().catch(() => {});
 
 app.get("/api/db-test", async (_req, res) => {
   try {

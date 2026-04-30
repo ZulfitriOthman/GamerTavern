@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { getSocket, connectSocket } from "../socket/socketClient";
-import { getCurrentUser, getUsername } from "../authStorage";
+import { getSocket, connectSocket } from "../../socket/socketClient";
+import { getCurrentUser, getUsername } from "../../authStorage";
 
 function TradePage() {
   const [currentUser, setCurrentUser] = useState(null);
