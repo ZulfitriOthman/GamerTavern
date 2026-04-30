@@ -24,6 +24,7 @@ import ChatPage from "./pages/ChatPage";
 import UserShopPage from "./pages/UserShopPage";
 import VendorShopPage from "./pages/VendorShopPage";
 import ProductDetailPage from "./pages/ProductDetailPage";
+import MarketTabs from "./components/MarketTabs";
 
 // ✅ Socket.IO (no direct `socket` export anymore)
 import {
@@ -173,7 +174,8 @@ function App() {
       p.startsWith("/user/") ||
       p.startsWith("/vendor/") ||
       p.startsWith("/tcg/") ||
-      p.startsWith("/product/") // optional: keep Shop active on product details
+      p.startsWith("/product/") || // optional: keep Shop active on product details
+      p.startsWith("/trade") // ✅ Trade is a tab inside Shop
     );
   }, [location.pathname]);
   const isCartRoute = useMemo(
@@ -313,7 +315,6 @@ function App() {
       isLoggedIn
         ? [
             { to: "/shop", label: "Shop" },
-            { to: "/trade", label: "Trade" },
             { to: "/chat", label: "Chat" },
             { to: "/news", label: "News" },
             { to: "/profile", label: displayName },
@@ -377,15 +378,6 @@ function App() {
                     isActive={isShopRoute}
                     variant="desktop"
                     onClick={() => setMobileMenuOpen(false)}
-                  />
-                ) : null}
-
-                {isLoggedIn ? (
-                  <ArcaneNavItem
-                    to="/trade"
-                    label="Trade"
-                    isActive={isTradeRoute}
-                    variant="desktop"
                   />
                 ) : null}
 
@@ -557,14 +549,16 @@ function App() {
               element={
                 <RequireAuth>
                   <PageWrap>
-                    <UserShopPage
-                      cart={cart}
-                      addToCart={addToCart}
-                      removeFromCart={removeFromCart}
-                      updateQuantity={updateQuantity}
-                      cartTotalItems={cartTotalItems}
-                      cartTotalPrice={cartTotalPrice}
-                    />
+                    <MarketTabs>
+                      <UserShopPage
+                        cart={cart}
+                        addToCart={addToCart}
+                        removeFromCart={removeFromCart}
+                        updateQuantity={updateQuantity}
+                        cartTotalItems={cartTotalItems}
+                        cartTotalPrice={cartTotalPrice}
+                      />
+                    </MarketTabs>
                   </PageWrap>
                 </RequireAuth>
               }
@@ -575,14 +569,16 @@ function App() {
               element={
                 <RequireAuth>
                   <PageWrap>
-                    <UserShopPage
-                      cart={cart}
-                      addToCart={addToCart}
-                      removeFromCart={removeFromCart}
-                      updateQuantity={updateQuantity}
-                      cartTotalItems={cartTotalItems}
-                      cartTotalPrice={cartTotalPrice}
-                    />
+                    <MarketTabs>
+                      <UserShopPage
+                        cart={cart}
+                        addToCart={addToCart}
+                        removeFromCart={removeFromCart}
+                        updateQuantity={updateQuantity}
+                        cartTotalItems={cartTotalItems}
+                        cartTotalPrice={cartTotalPrice}
+                      />
+                    </MarketTabs>
                   </PageWrap>
                 </RequireAuth>
               }
@@ -603,14 +599,16 @@ function App() {
               element={
                 <RequireAuth>
                   <PageWrap>
-                    <VendorShopPage
-                      cart={cart}
-                      addToCart={addToCart}
-                      removeFromCart={removeFromCart}
-                      updateQuantity={updateQuantity}
-                      cartTotalItems={cartTotalItems}
-                      cartTotalPrice={cartTotalPrice}
-                    />
+                    <MarketTabs>
+                      <VendorShopPage
+                        cart={cart}
+                        addToCart={addToCart}
+                        removeFromCart={removeFromCart}
+                        updateQuantity={updateQuantity}
+                        cartTotalItems={cartTotalItems}
+                        cartTotalPrice={cartTotalPrice}
+                      />
+                    </MarketTabs>
                   </PageWrap>
                 </RequireAuth>
               }
@@ -643,7 +641,9 @@ function App() {
               element={
                 <RequireAuth>
                   <PageWrap>
-                    <TradePage />
+                    <MarketTabs>
+                      <TradePage />
+                    </MarketTabs>
                   </PageWrap>
                 </RequireAuth>
               }

@@ -573,9 +573,6 @@ export default function ProfilePage() {
                   autoComplete="email"
                   className={inputClass(false) + " cursor-not-allowed opacity-60"}
                 />
-                <p className="mt-1 font-serif text-xs text-amber-100/40">
-                  Email cannot be changed.
-                </p>
               </div>
 
               {/* Role read-only */}

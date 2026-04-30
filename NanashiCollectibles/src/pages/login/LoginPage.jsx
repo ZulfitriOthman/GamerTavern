@@ -109,7 +109,7 @@ export default function LoginPage() {
       setUsername(user?.name || "Traveler");
       window.dispatchEvent(new Event("tavern:authChanged"));
 
-      if (accountRole === ROLES.ADMIN) navigate("/admin");
+      if (accountRole === ROLES.ADMIN) navigate("/vendor"); 
       else if (accountRole === ROLES.VENDOR) navigate("/vendor");
       else navigate("/shop");
     } catch (err) {
