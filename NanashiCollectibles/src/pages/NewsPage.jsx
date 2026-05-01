@@ -1,1107 +1,26 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { getSocket, connectSocket } from "../socket/socketClient";
 import { getUsername, getCurrentUser } from "../authStorage";
-
-const CATEGORIES = ["All", "Magic", "Yu-Gi-Oh", "Pokemon", "Vanguard", "General"];
-
-// --- DB row normalizers ---
-function normalizeDbNews(row) {
-  if (!row) return null;
-  const rawContent = row.content || "";
-  const paragraphs = rawContent
-    .split(/\r?\n/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  const excerpt =
-    rawContent.length > 180
-      ? rawContent.slice(0, 180).replace(/\s+\S*$/, "") + "\u2026"
-      : rawContent;
-
-  const words = rawContent.split(/\s+/).length;
-  const readMin = Math.max(1, Math.round(words / 200));
-
-  const rawDate = row.date_posted || row.created_at;
-  const date = rawDate
-    ? new Date(rawDate).toISOString().slice(0, 10)
-    : new Date().toISOString().slice(0, 10);
-
-  return {
-    id: `db-news-${row.id}`,
-    dbId: row.id,
-    title: row.title || "Untitled",
-    excerpt,
-    category: row.category || "General",
-    date: date,
-    rawContent,
-    readTime: `${readMin} min`,
-    featured: false,
-    image:
-      row.image_url ||
-      "https://images.unsplash.com/photo-1612036781124-847f8939c3f3?auto=format&fit=crop&w=1200&q=70",
-    content: paragraphs.length ? paragraphs : [rawContent],
-    source: row.author || "Gamer Tavern Scribe Desk",
-    tags: row.tags || "",
-  };
-}
-
-function normalizeDbTournament(row) {
-  if (!row) return null;
-
-  const parseDt = (val) => {
-    if (!val) return null;
-    const d = new Date(val);
-    return Number.isNaN(d.getTime()) ? null : d;
-  };
-
-  const startDt = parseDt(row.start_date);
-  const endDt = parseDt(row.end_date);
-
-  const _pad = (n) => String(n).padStart(2, "0");
-  const date = startDt
-    ? `${startDt.getFullYear()}-${_pad(startDt.getMonth() + 1)}-${_pad(startDt.getDate())}`
-    : new Date().toISOString().slice(0, 10);
-  const startTime = startDt ? `${_pad(startDt.getHours())}:${_pad(startDt.getMinutes())}` : "00:00";
-  const endTime = endDt ? `${_pad(endDt.getHours())}:${_pad(endDt.getMinutes())}` : "00:00";
-  const fee = row.entry_fee != null ? `BND ${Number(row.entry_fee).toFixed(2)}` : "Free";
-
-  return {
-    id: `db-evt-${row.id}`,
-    dbId: row.id,
-    title: row.name || "Untitled Event",
-    game: row.game_title || "General",
-    date,
-    startTime,
-    endTime,
-    location: row.location || "Gamer Tavern",
-    format: row.rules ? row.rules.slice(0, 80) : "",
-    entryFee: fee,
-    prize: "",
-    notes: row.description || "",
-    maxTeams: row.max_teams != null ? Number(row.max_teams) : null,
-    participants: Array.isArray(row.participants)
-      ? row.participants.map((p) => ({
-          id: p.id,
-          userId: p.user_id,
-          name:
-            p.user_name ||
-            p.guest_name ||
-            p.nickname ||
-            (p.user_id ? `User #${p.user_id}` : "Guest"),
-          nickname: p.nickname || "",
-          teamName: p.team_name || "",
-          role: String(p.user_role || (p.user_id ? "USER" : "GUEST")).toUpperCase(),
-        }))
-      : [],
-    _raw: row,
-  };
-}
-
-function normalizeDbDecklist(row) {
-  if (!row) return null;
-  const keyCards = String(row.key_cards || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return {
-    id: `db-deck-${row.id}`,
-    dbId: row.id,
-    name: row.name || "Untitled Deck",
-    game: row.game || "General",
-    archetype: row.archetype || "",
-    format: row.format || "",
-    pilot: row.pilot || "",
-    description: row.description || "",
-    keyCards,
-    winRate: row.win_rate != null ? Number(row.win_rate) : 0,
-    popularity: row.popularity != null ? Number(row.popularity) : 0,
-    avgCost: row.avg_cost != null ? Number(row.avg_cost) : 0,
-    featured: row.featured ? true : false,
-    _raw: row,
-  };
-}
-
-function formatDate(iso) {
-  const [y, m, d] = iso.split("-").map(Number);
-  const dt = new Date(y, m - 1, d);
-  return dt.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-  });
-}
-
-function toMonthKey(iso) {
-  return iso.slice(0, 7); // YYYY-MM
-}
-
-function formatMonth(key) {
-  const [y, m] = key.split("-").map(Number);
-  const dt = new Date(y, m - 1, 1);
-  return dt.toLocaleDateString(undefined, { year: "numeric", month: "long" });
-}
-
-function pad2(n) {
-  return String(n).padStart(2, "0");
-}
-
-function buildGoogleCalendarLink({
-  title,
-  date,
-  startTime,
-  endTime,
-  location,
-  details,
-}) {
-  const [y, m, d] = date.split("-").map(Number);
-  const [sh, sm] = startTime.split(":").map(Number);
-  const [eh, em] = endTime.split(":").map(Number);
-
-  const start = new Date(y, m - 1, d, sh, sm, 0);
-  const end = new Date(y, m - 1, d, eh, em, 0);
-
-  const toGCal = (dt) => {
-    const yyyy = dt.getUTCFullYear();
-    const mm = pad2(dt.getUTCMonth() + 1);
-    const dd = pad2(dt.getUTCDate());
-    const hh = pad2(dt.getUTCHours());
-    const mi = pad2(dt.getUTCMinutes());
-    const ss = pad2(dt.getUTCSeconds());
-    return `${yyyy}${mm}${dd}T${hh}${mi}${ss}Z`;
-  };
-
-  const params = new URLSearchParams({
-    action: "TEMPLATE",
-    text: title,
-    dates: `${toGCal(start)}/${toGCal(end)}`,
-    location: location || "",
-    details: details || "",
-  });
-
-  return `https://calendar.google.com/calendar/render?${params.toString()}`;
-}
-
-function formatMoney(n) {
-  if (n == null || Number.isNaN(Number(n))) return "-";
-  return `BND ${Number(n).toFixed(2)}`;
-}
-
-function Pill({ children }) {
-  return (
-    <span className="inline-flex items-center rounded-full border border-amber-700/40 bg-slate-950/40 px-3 py-1 text-xs font-serif tracking-wide text-amber-200">
-      {children}
-    </span>
-  );
-}
-
-function ButtonGhost({ active, children, ...props }) {
-  return (
-    <button
-      {...props}
-      className={[
-        "rounded-full px-4 py-2 text-sm font-serif transition-all",
-        "border border-amber-700/30 bg-slate-950/30 hover:bg-slate-950/50",
-        active
-          ? "text-amber-200 shadow-[0_0_0_1px_rgba(245,158,11,0.35)]"
-          : "text-amber-100/80",
-      ].join(" ")}
-    >
-      {children}
-    </button>
-  );
-}
-
-function GamePill({ game }) {
-  const cls =
-    game === "Magic"
-      ? "border-amber-700/50 bg-amber-950/40 text-amber-200"
-      : game === "Yu-Gi-Oh"
-      ? "border-purple-700/50 bg-purple-950/40 text-purple-100"
-      : game === "Pokemon"
-      ? "border-emerald-700/50 bg-emerald-950/30 text-emerald-100"
-      : game === "Vanguard"
-      ? "border-sky-700/50 bg-sky-950/30 text-sky-100"
-      : "border-amber-700/40 bg-slate-950/40 text-amber-200";
-
-  return (
-    <span
-      className={[
-        "inline-flex items-center rounded-full border px-3 py-1 text-xs font-serif tracking-wide",
-        cls,
-      ].join(" ")}
-    >
-      {game}
-    </span>
-  );
-}
-
-function Modal({ open, onClose, article }) {
-  if (!open || !article) return null;
-
-  return (
-    <div className="fixed inset-0 z-[60]">
-      <div
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-        onClick={onClose}
-      />
-
-      <div className="relative mx-auto mt-10 w-[92%] max-w-3xl overflow-hidden rounded-2xl border border-amber-900/40 bg-gradient-to-b from-slate-950 via-purple-950/30 to-slate-950 shadow-2xl shadow-purple-900/30">
-        <div className="relative">
-          <img
-            src={article.image}
-            alt={article.title}
-            className="h-56 w-full object-cover opacity-85"
-          />
-          <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/10 to-transparent" />
-          <button
-            onClick={onClose}
-            className="absolute right-4 top-4 rounded-full border border-amber-700/40 bg-slate-950/60 px-3 py-1 text-xs font-serif text-amber-200 hover:bg-slate-950/80"
-          >
-            Close
-          </button>
-          <div className="absolute bottom-4 left-5 right-5">
-            <div className="flex flex-wrap gap-2">
-              <Pill>{article.category}</Pill>
-              <Pill>{formatDate(article.date)}</Pill>
-              <Pill>{article.readTime}</Pill>
-            </div>
-            <h2 className="mt-3 font-serif text-2xl font-bold text-amber-100">
-              {article.title}
-            </h2>
-            <p className="mt-2 text-sm text-amber-100/80">{article.excerpt}</p>
-          </div>
-        </div>
-
-        <div className="space-y-4 px-6 py-6 text-amber-50/90">
-          <p className="text-xs font-serif tracking-wide text-amber-300/80">
-            Source: {article.source}
-          </p>
-
-          <div className="space-y-3 leading-relaxed">
-            {article.content.map((p, idx) => (
-              <p key={idx} className="text-sm text-amber-50/90">
-                {p}
-              </p>
-            ))}
-          </div>
-
-          <div className="mt-6 rounded-xl border border-amber-800/30 bg-slate-950/40 p-4">
-            <p className="text-xs text-amber-200/80">
-              Tip: Later, you can replace this modal content with real articles
-              fetched from your backend/API.
-            </p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function NewsEditor({ open, initial, onClose, onSave, saving, error }) {
-  const isEdit = Boolean(initial?.dbId);
-  const [title, setTitle] = useState("");
-  const [category, setCategory] = useState("General");
-  const [imageUrl, setImageUrl] = useState("");
-  const [tags, setTags] = useState("");
-  const [content, setContent] = useState("");
-
-  useEffect(() => {
-    if (!open) return;
-    setTitle(initial?.title || "");
-    setCategory(initial?.category || "General");
-    setImageUrl(
-      initial?.image && !initial.image.startsWith("https://images.unsplash.com")
-        ? initial.image
-        : "",
-    );
-    setTags(initial?.tags || "");
-    setContent(initial?.rawContent ?? (initial?.content || []).join("\n\n"));
-  }, [open, initial]);
-
-  if (!open) return null;
-
-  const submit = (e) => {
-    e.preventDefault();
-    if (!title.trim() || !content.trim()) return;
-    onSave({
-      id: initial?.dbId,
-      title: title.trim(),
-      category,
-      imageUrl: imageUrl.trim(),
-      tags: tags.trim(),
-      content: content.trim(),
-    });
-  };
-
-  return (
-    <div className="fixed inset-0 z-[70]">
-      <div
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-        onClick={onClose}
-      />
-      <form
-        onSubmit={submit}
-        className="relative mx-auto mt-10 w-[92%] max-w-2xl space-y-4 overflow-hidden rounded-2xl border border-amber-900/40 bg-gradient-to-b from-slate-950 via-purple-950/30 to-slate-950 p-6 shadow-2xl shadow-purple-900/30"
-      >
-        <div className="flex items-center justify-between">
-          <h3 className="font-serif text-xl font-bold text-amber-100">
-            {isEdit ? "Edit Article" : "New Article"}
-          </h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full border border-amber-700/40 bg-slate-950/60 px-3 py-1 text-xs font-serif text-amber-200 hover:bg-slate-950/80"
-          >
-            Close
-          </button>
-        </div>
-
-        {error && (
-          <div className="rounded-xl border border-red-500/30 bg-red-950/30 px-4 py-2 text-sm text-red-200">
-            ⚠️ {error}
-          </div>
-        )}
-
-        <div>
-          <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-            Title
-          </label>
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            required
-            className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-          />
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-              Category
-            </label>
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-            >
-              {CATEGORIES.filter((c) => c !== "All").map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-              Tags (comma separated)
-            </label>
-            <input
-              value={tags}
-              onChange={(e) => setTags(e.target.value)}
-              className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-            />
-          </div>
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-            Image URL (optional)
-          </label>
-          <input
-            type="url"
-            value={imageUrl}
-            onChange={(e) => setImageUrl(e.target.value)}
-            placeholder="https://…"
-            className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-          />
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-            Content (separate paragraphs with blank lines)
-          </label>
-          <textarea
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            required
-            rows={8}
-            className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-          />
-        </div>
-
-        <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-xl border border-amber-900/30 bg-slate-950/40 px-4 py-2 font-serif text-sm text-amber-100/80 hover:bg-slate-950/60"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={saving}
-            className="rounded-xl border border-amber-600/50 bg-gradient-to-r from-amber-950/60 to-purple-950/60 px-5 py-2 font-serif text-sm font-bold text-amber-100 shadow-lg shadow-amber-900/20 hover:border-amber-500/80 disabled:opacity-50"
-          >
-            {saving ? "Saving…" : isEdit ? "Save Changes" : "Create Article"}
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-const TOURNAMENT_GAMES = ["Magic", "Yu-Gi-Oh", "Pokemon", "Vanguard", "General"];
-
-function TournamentEditor({ open, initial, onClose, onSave, saving, error }) {
-  const isEdit = Boolean(initial?.dbId);
-  const [name, setName] = useState("");
-  const [game, setGame] = useState("General");
-  const [location, setLocation] = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [startTime, setStartTime] = useState("18:00");
-  const [endDate, setEndDate] = useState("");
-  const [endTime, setEndTime] = useState("21:00");
-  const [entryFee, setEntryFee] = useState("");
-  const [maxTeams, setMaxTeams] = useState("");
-  const [regDeadline, setRegDeadline] = useState("");
-  const [organizer, setOrganizer] = useState("");
-  const [rules, setRules] = useState("");
-  const [description, setDescription] = useState("");
-
-  useEffect(() => {
-    if (!open) return;
-    const raw = initial?._raw || {};
-    const startDt = raw.start_date ? new Date(raw.start_date) : null;
-    const endDt = raw.end_date ? new Date(raw.end_date) : null;
-    const regDt = raw.registration_deadline
-      ? new Date(raw.registration_deadline)
-      : null;
-    const pad = (n) => String(n).padStart(2, "0");
-    const toDateStr = (d) =>
-      d ? `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` : "";
-    const toTimeStr = (d) =>
-      d ? `${pad(d.getHours())}:${pad(d.getMinutes())}` : "";
-
-    setName(initial?.title || raw.name || "");
-    setGame(initial?.game || raw.game_title || "General");
-    setLocation(initial?.location || raw.location || "");
-    setStartDate(toDateStr(startDt) || initial?.date || "");
-    setStartTime(toTimeStr(startDt) || initial?.startTime || "18:00");
-    setEndDate(toDateStr(endDt) || initial?.date || "");
-    setEndTime(toTimeStr(endDt) || initial?.endTime || "21:00");
-    setEntryFee(raw.entry_fee != null ? String(raw.entry_fee) : "");
-    setMaxTeams(raw.max_teams != null ? String(raw.max_teams) : "");
-    setRegDeadline(regDt ? toDateStr(regDt) : "");
-    setOrganizer(raw.organizer || "");
-    setRules(raw.rules || initial?.format || "");
-    setDescription(raw.description || initial?.notes || "");
-  }, [open, initial]);
-
-  if (!open) return null;
-
-  const submit = (e) => {
-    e.preventDefault();
-    if (!name.trim() || !startDate) return;
-
-    const buildIso = (d, t) => (d ? `${d}T${t || "00:00"}:00` : "");
-
-    onSave({
-      id: initial?.dbId,
-      name: name.trim(),
-      gameTitle: game,
-      location: location.trim(),
-      startDate: buildIso(startDate, startTime),
-      endDate: endDate ? buildIso(endDate, endTime) : "",
-      entryFee: entryFee.trim(),
-      maxTeams: maxTeams.trim(),
-      registrationDeadline: regDeadline ? `${regDeadline}T23:59:00` : "",
-      organizer: organizer.trim(),
-      rules: rules.trim(),
-      description: description.trim(),
-    });
-  };
-
-  return (
-    <div className="fixed inset-0 z-[70]">
-      <div
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-        onClick={onClose}
-      />
-      <form
-        onSubmit={submit}
-        className="relative mx-auto mt-10 max-h-[88vh] w-[92%] max-w-2xl space-y-4 overflow-y-auto rounded-2xl border border-amber-900/40 bg-gradient-to-b from-slate-950 via-purple-950/30 to-slate-950 p-6 shadow-2xl shadow-purple-900/30"
-      >
-        <div className="flex items-center justify-between">
-          <h3 className="font-serif text-xl font-bold text-amber-100">
-            {isEdit ? "Edit Tournament" : "New Tournament"}
-          </h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full border border-amber-700/40 bg-slate-950/60 px-3 py-1 text-xs font-serif text-amber-200 hover:bg-slate-950/80"
-          >
-            Close
-          </button>
-        </div>
-
-        {error && (
-          <div className="rounded-xl border border-red-500/30 bg-red-950/30 px-4 py-2 text-sm text-red-200">
-            ⚠️ {error}
-          </div>
-        )}
-
-        <div>
-          <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-            Name
-          </label>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-            className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-          />
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-              Game
-            </label>
-            <select
-              value={game}
-              onChange={(e) => setGame(e.target.value)}
-              className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-            >
-              {TOURNAMENT_GAMES.map((g) => (
-                <option key={g} value={g}>
-                  {g}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-              Location
-            </label>
-            <input
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-            />
-          </div>
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-              Start Date
-            </label>
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              required
-              className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-              Start Time
-            </label>
-            <input
-              type="time"
-              value={startTime}
-              onChange={(e) => setStartTime(e.target.value)}
-              className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-            />
-          </div>
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-              End Date
-            </label>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-              End Time
-            </label>
-            <input
-              type="time"
-              value={endTime}
-              onChange={(e) => setEndTime(e.target.value)}
-              className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-            />
-          </div>
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-3">
-          <div>
-            <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-              Entry Fee (BND)
-            </label>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={entryFee}
-              onChange={(e) => setEntryFee(e.target.value)}
-              placeholder="0 = Free"
-              className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-              Max Teams
-            </label>
-            <input
-              type="number"
-              min="0"
-              value={maxTeams}
-              onChange={(e) => setMaxTeams(e.target.value)}
-              className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-              Reg. Deadline
-            </label>
-            <input
-              type="date"
-              value={regDeadline}
-              onChange={(e) => setRegDeadline(e.target.value)}
-              className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-            />
-          </div>
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-            Organizer
-          </label>
-          <input
-            value={organizer}
-            onChange={(e) => setOrganizer(e.target.value)}
-            placeholder="Defaults to your admin name"
-            className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-          />
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-            Format / Rules
-          </label>
-          <textarea
-            value={rules}
-            onChange={(e) => setRules(e.target.value)}
-            rows={2}
-            className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-          />
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-            Description / Notes
-          </label>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={3}
-            className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-          />
-        </div>
-
-        <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-xl border border-amber-900/30 bg-slate-950/40 px-4 py-2 font-serif text-sm text-amber-100/80 hover:bg-slate-950/60"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={saving}
-            className="rounded-xl border border-amber-600/50 bg-gradient-to-r from-amber-950/60 to-purple-950/60 px-5 py-2 font-serif text-sm font-bold text-amber-100 shadow-lg shadow-amber-900/20 hover:border-amber-500/80 disabled:opacity-50"
-          >
-            {saving ? "Saving…" : isEdit ? "Save Changes" : "Create Tournament"}
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-const DECK_GAMES = ["Magic", "Yu-Gi-Oh", "Pokemon", "Vanguard", "General"];
-
-function GuestJoinModal({ open, tournament, onClose, onSubmit, saving, error }) {
-  const [name, setName] = useState("");
-  const [teamName, setTeamName] = useState("");
-
-  useEffect(() => {
-    if (!open) return;
-    setName("");
-    setTeamName("");
-  }, [open]);
-
-  if (!open || !tournament) return null;
-
-  const submit = (e) => {
-    e.preventDefault();
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    onSubmit({
-      guestName: trimmed.slice(0, 100),
-      teamName: teamName.trim().slice(0, 255),
-    });
-  };
-
-  return (
-    <div className="fixed inset-0 z-[70]">
-      <div
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-        onClick={saving ? undefined : onClose}
-      />
-      <form
-        onSubmit={submit}
-        className="relative mx-auto mt-16 w-[92%] max-w-md space-y-4 overflow-hidden rounded-2xl border border-amber-900/40 bg-gradient-to-b from-slate-950 via-purple-950/30 to-slate-950 p-6 shadow-2xl shadow-purple-900/30"
-      >
-        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-500/40 to-transparent" />
-
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="font-serif text-[10px] uppercase tracking-[0.3em] text-amber-300/70">
-              ❖ Join as Guest
-            </p>
-            <h3 className="mt-1 font-serif text-xl font-bold text-amber-100">
-              {tournament.title}
-            </h3>
-            <p className="mt-1 text-xs italic text-amber-100/60">
-              {formatDate(tournament.date)} · {tournament.startTime}–{tournament.endTime}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={saving}
-            className="rounded-full border border-amber-700/40 bg-slate-950/60 px-3 py-1 text-xs font-serif text-amber-200 hover:bg-slate-950/80 disabled:opacity-50"
-          >
-            Close
-          </button>
-        </div>
-
-        <div className="rounded-xl border border-amber-800/30 bg-slate-950/40 p-3 text-[11px] text-amber-200/80">
-          Joining without an account — your name will be visible to everyone on
-          the participant list. Sign in if you want to manage your registration
-          later.
-        </div>
-
-        {error && (
-          <div className="rounded-xl border border-red-500/30 bg-red-950/30 px-4 py-2 text-sm text-red-200">
-            ⚠️ {error}
-          </div>
-        )}
-
-        <div>
-          <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-            Display Name <span className="text-red-300">*</span>
-          </label>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-            maxLength={100}
-            autoFocus
-            placeholder="e.g. Sir Lancelot"
-            className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-          />
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-            Team Name (optional)
-          </label>
-          <input
-            value={teamName}
-            onChange={(e) => setTeamName(e.target.value)}
-            maxLength={255}
-            placeholder="e.g. Tavern Knights"
-            className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-          />
-        </div>
-
-        <div className="flex justify-end gap-2 pt-1">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={saving}
-            className="rounded-xl border border-amber-900/30 bg-slate-950/40 px-4 py-2 font-serif text-sm text-amber-100/80 hover:bg-slate-950/60 disabled:opacity-50"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={saving || !name.trim()}
-            className="rounded-xl border border-amber-600/50 bg-gradient-to-r from-amber-950/60 to-purple-950/60 px-5 py-2 font-serif text-sm font-bold text-amber-100 shadow-lg shadow-amber-900/20 hover:border-amber-500/80 disabled:opacity-50"
-          >
-            {saving ? "Joining…" : "Join Tournament"}
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-function DecklistEditor({ open, initial, onClose, onSave, saving, error }) {
-  const isEdit = Boolean(initial?.dbId);
-  const [name, setName] = useState("");
-  const [game, setGame] = useState("Magic");
-  const [archetype, setArchetype] = useState("");
-  const [format, setFormat] = useState("");
-  const [pilot, setPilot] = useState("");
-  const [description, setDescription] = useState("");
-  const [keyCards, setKeyCards] = useState("");
-  const [winRate, setWinRate] = useState("");
-  const [popularity, setPopularity] = useState("");
-  const [avgCost, setAvgCost] = useState("");
-  const [featured, setFeatured] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    setName(initial?.name || "");
-    setGame(initial?.game || "Magic");
-    setArchetype(initial?.archetype || "");
-    setFormat(initial?.format || "");
-    setPilot(initial?.pilot || "");
-    setDescription(initial?.description || "");
-    setKeyCards(
-      Array.isArray(initial?.keyCards) ? initial.keyCards.join(", ") : "",
-    );
-    setWinRate(initial?.winRate != null ? String(initial.winRate) : "");
-    setPopularity(initial?.popularity != null ? String(initial.popularity) : "");
-    setAvgCost(initial?.avgCost != null ? String(initial.avgCost) : "");
-    setFeatured(Boolean(initial?.featured));
-  }, [open, initial]);
-
-  if (!open) return null;
-
-  const submit = (e) => {
-    e.preventDefault();
-    if (!name.trim() || !game) return;
-    onSave({
-      id: initial?.dbId,
-      name: name.trim(),
-      game,
-      archetype: archetype.trim(),
-      format: format.trim(),
-      pilot: pilot.trim(),
-      description: description.trim(),
-      keyCards: keyCards.trim(),
-      winRate: winRate.trim(),
-      popularity: popularity.trim(),
-      avgCost: avgCost.trim(),
-      featured,
-    });
-  };
-
-  return (
-    <div className="fixed inset-0 z-[70]">
-      <div
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-        onClick={onClose}
-      />
-      <form
-        onSubmit={submit}
-        className="relative mx-auto mt-10 max-h-[88vh] w-[92%] max-w-2xl space-y-4 overflow-y-auto rounded-2xl border border-amber-900/40 bg-gradient-to-b from-slate-950 via-purple-950/30 to-slate-950 p-6 shadow-2xl shadow-purple-900/30"
-      >
-        <div className="flex items-center justify-between">
-          <h3 className="font-serif text-xl font-bold text-amber-100">
-            {isEdit ? "Edit Decklist" : "New Decklist"}
-          </h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full border border-amber-700/40 bg-slate-950/60 px-3 py-1 text-xs font-serif text-amber-200 hover:bg-slate-950/80"
-          >
-            Close
-          </button>
-        </div>
-
-        {error && (
-          <div className="rounded-xl border border-red-500/30 bg-red-950/30 px-4 py-2 text-sm text-red-200">
-            ⚠️ {error}
-          </div>
-        )}
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-              Deck Name
-            </label>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-              Game
-            </label>
-            <select
-              value={game}
-              onChange={(e) => setGame(e.target.value)}
-              className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-            >
-              {DECK_GAMES.map((g) => (
-                <option key={g} value={g}>
-                  {g}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-3">
-          <div>
-            <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-              Archetype
-            </label>
-            <input
-              value={archetype}
-              onChange={(e) => setArchetype(e.target.value)}
-              placeholder="Aggro / Combo / Control…"
-              className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-              Format
-            </label>
-            <input
-              value={format}
-              onChange={(e) => setFormat(e.target.value)}
-              placeholder="Standard / Pioneer / Advanced…"
-              className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-              Pilot
-            </label>
-            <input
-              value={pilot}
-              onChange={(e) => setPilot(e.target.value)}
-              className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-            />
-          </div>
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-            Description
-          </label>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={3}
-            className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-          />
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-            Key Cards (comma separated)
-          </label>
-          <input
-            value={keyCards}
-            onChange={(e) => setKeyCards(e.target.value)}
-            placeholder="Sol Ring, Lightning Bolt, …"
-            className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-          />
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-3">
-          <div>
-            <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-              Win Rate (%)
-            </label>
-            <input
-              type="number"
-              min="0"
-              max="100"
-              step="0.1"
-              value={winRate}
-              onChange={(e) => setWinRate(e.target.value)}
-              className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-              Popularity
-            </label>
-            <input
-              type="number"
-              min="0"
-              value={popularity}
-              onChange={(e) => setPopularity(e.target.value)}
-              className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-serif uppercase tracking-widest text-amber-100/60">
-              Avg Cost (BND)
-            </label>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={avgCost}
-              onChange={(e) => setAvgCost(e.target.value)}
-              className="w-full rounded-xl border border-amber-900/30 bg-slate-900/80 px-4 py-2 font-serif text-sm text-amber-100 focus:border-amber-600/50 focus:outline-none"
-            />
-          </div>
-        </div>
-
-        <label className="flex items-center gap-2 text-sm font-serif text-amber-100/80">
-          <input
-            type="checkbox"
-            checked={featured}
-            onChange={(e) => setFeatured(e.target.checked)}
-            className="h-4 w-4 rounded border-amber-700/40 bg-slate-900 accent-amber-500"
-          />
-          Mark as ★ Spotlight (featured deck)
-        </label>
-
-        <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-xl border border-amber-900/30 bg-slate-950/40 px-4 py-2 font-serif text-sm text-amber-100/80 hover:bg-slate-950/60"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={saving}
-            className="rounded-xl border border-amber-600/50 bg-gradient-to-r from-amber-950/60 to-purple-950/60 px-5 py-2 font-serif text-sm font-bold text-amber-100 shadow-lg shadow-amber-900/20 hover:border-amber-500/80 disabled:opacity-50"
-          >
-            {saving ? "Saving…" : isEdit ? "Save Changes" : "Create Decklist"}
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
+import {
+  CATEGORIES,
+  TREND_GAMES,
+  formatDate,
+  formatMoney,
+  buildGoogleCalendarLink,
+  toMonthKey,
+  formatMonth,
+  normalizeDbNews,
+  normalizeDbTournament,
+  normalizeDbDecklist,
+  Pill,
+  ButtonGhost,
+  GamePill,
+  ArticleModal as Modal,
+  NewsEditor,
+  TournamentEditor,
+  GuestJoinModal,
+  DecklistEditor,
+} from "./news";
 export default function NewsPage() {
   const [category, setCategory] = useState("All");
   const [query, setQuery] = useState("");
@@ -1150,7 +69,6 @@ export default function NewsPage() {
   const decklists = dbDecklists;
 
   /* Decklist filters */
-  const TREND_GAMES = ["All", "Magic", "Yu-Gi-Oh", "Pokemon", "Vanguard"];
   const [trendGame, setTrendGame] = useState("All");
 
   // --- Socket loading ---
@@ -1650,13 +568,13 @@ export default function NewsPage() {
           <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
             <div>
               <p className="font-serif text-xs uppercase tracking-[0.3em] text-amber-300/70">
-                ❖ Decklist Profile
+                â– Decklist Profile
               </p>
               <h3 className="mt-1 font-serif text-3xl font-bold text-amber-100">
                 Featured Decklists
               </h3>
               <p className="mt-2 max-w-2xl text-sm italic text-amber-100/70">
-                Curated decklists from local pilots — see archetypes, key cards,
+                Curated decklists from local pilots â€” see archetypes, key cards,
                 and win rates. Great for inspiration before your next event.
               </p>
               <div className="mt-4 flex flex-wrap gap-2">
@@ -1705,7 +623,7 @@ export default function NewsPage() {
                     <Pill>{featuredDeck.archetype}</Pill>
                     <Pill>{featuredDeck.format}</Pill>
                     <span className="rounded-full border border-amber-500/50 bg-amber-950/60 px-2.5 py-1 font-serif text-[10px] font-bold uppercase tracking-widest text-amber-200 backdrop-blur">
-                      ★ Spotlight
+                      â˜… Spotlight
                     </span>
                   </div>
                   <h4 className="font-serif text-2xl font-bold text-amber-100">
@@ -1776,7 +694,7 @@ export default function NewsPage() {
                   Showing {pagedDecks.length} of {filteredDecks.length} deck(s)
                   {trendGame !== "All" ? ` in ${trendGame}` : ""}
                   {totalDeckPages > 1
-                    ? ` · Page ${deckPage}/${totalDeckPages}`
+                    ? ` Â· Page ${deckPage}/${totalDeckPages}`
                     : ""}
                 </p>
               </div>
@@ -1804,7 +722,7 @@ export default function NewsPage() {
                         {d.name}
                       </h5>
                       <p className="mt-0.5 text-[11px] italic text-amber-200/70">
-                        {d.format} · {d.pilot}
+                        {d.format} Â· {d.pilot}
                       </p>
 
                       <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-amber-50/75">
@@ -1885,7 +803,7 @@ export default function NewsPage() {
                     disabled={deckPage === 1}
                     className="rounded-lg border border-amber-800/40 bg-slate-950/40 px-3 py-1.5 font-serif text-xs text-amber-200 hover:bg-slate-950/60 disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    ← Prev
+                    â† Prev
                   </button>
                   {Array.from({ length: totalDeckPages }, (_, i) => i + 1).map(
                     (p) => (
@@ -1912,7 +830,7 @@ export default function NewsPage() {
                     disabled={deckPage === totalDeckPages}
                     className="rounded-lg border border-amber-800/40 bg-slate-950/40 px-3 py-1.5 font-serif text-xs text-amber-200 hover:bg-slate-950/60 disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    Next →
+                    Next â†’
                   </button>
                 </div>
               )}
@@ -1932,7 +850,7 @@ export default function NewsPage() {
           <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
             <div>
               <p className="font-serif text-xs uppercase tracking-[0.3em] text-amber-300/70">
-                ❖ Upcoming Battles
+                â– Upcoming Battles
               </p>
               <h3 className="mt-1 font-serif text-3xl font-bold text-amber-100">
                 Tournament Calendar
@@ -1941,7 +859,7 @@ export default function NewsPage() {
                 Upcoming tournaments and weekly gatherings. Add events to your
                 calendar so you never miss a round.{" "}
                 {tournamentsLoading
-                  ? "(Loading…)"
+                  ? "(Loadingâ€¦)"
                   : dbTournaments.length > 0
                   ? "(Live from DB)"
                   : "(Demo data)"}
@@ -2028,7 +946,7 @@ export default function NewsPage() {
                       <div className="mt-2 space-y-1 text-sm text-amber-50/80">
                         <p>
                           <span className="text-amber-200/70">Time:</span>{" "}
-                          {e.startTime}–{e.endTime}
+                          {e.startTime}â€“{e.endTime}
                         </p>
                         {e.format && (
                           <p>
@@ -2091,7 +1009,7 @@ export default function NewsPage() {
                         </div>
                         {e.participants.length === 0 ? (
                           <p className="mt-2 text-[11px] italic text-amber-100/50">
-                            No challengers yet — be the first to join!
+                            No challengers yet â€” be the first to join!
                           </p>
                         ) : (
                           <ul className="mt-2 flex flex-wrap gap-1.5">
@@ -2111,19 +1029,19 @@ export default function NewsPage() {
                                 title={p.teamName || p.nickname || p.name}
                               >
                                 {p.role === "VENDOR" && (
-                                  <span className="text-[9px]">🏪</span>
+                                  <span className="text-[9px]">ðŸª</span>
                                 )}
                                 {p.role === "ADMIN" && (
-                                  <span className="text-[9px]">★</span>
+                                  <span className="text-[9px]">â˜…</span>
                                 )}
                                 {p.role === "GUEST" && (
                                   <span className="text-[9px] uppercase tracking-wider text-slate-400">
-                                    👤
+                                    ðŸ‘¤
                                   </span>
                                 )}
                                 <span>{p.name}</span>
                                 {p.teamName && (
-                                  <span className="text-amber-200/70">· {p.teamName}</span>
+                                  <span className="text-amber-200/70">Â· {p.teamName}</span>
                                 )}
                                 {isAdmin && (
                                   <button
@@ -2132,7 +1050,7 @@ export default function NewsPage() {
                                     className="ml-1 rounded-full px-1 text-red-300/80 opacity-0 transition hover:text-red-200 group-hover/part:opacity-100"
                                     title="Remove participant"
                                   >
-                                    ×
+                                    Ã—
                                   </button>
                                 )}
                               </li>
@@ -2149,7 +1067,7 @@ export default function NewsPage() {
                           className="inline-flex items-center gap-2 rounded-xl border border-amber-700/40 bg-slate-950/40 px-4 py-2 font-serif text-xs font-semibold uppercase tracking-[0.18em] text-amber-200 hover:bg-slate-950/60"
                         >
                           + Add to Calendar
-                          <span className="text-amber-400/80">→</span>
+                          <span className="text-amber-400/80">â†’</span>
                         </a>
                       </div>
 
@@ -2160,14 +1078,14 @@ export default function NewsPage() {
                             onClick={() => openEditTournament(e)}
                             className="flex-1 rounded-lg border border-amber-700/40 bg-slate-950/40 px-3 py-1.5 text-xs font-serif text-amber-200 transition hover:border-amber-500/60 hover:bg-amber-950/30"
                           >
-                            ✏️ Edit
+                            âœï¸ Edit
                           </button>
                           <button
                             type="button"
                             onClick={() => handleDeleteTournament(e)}
                             className="flex-1 rounded-lg border border-red-700/40 bg-red-950/30 px-3 py-1.5 text-xs font-serif text-red-200 transition hover:border-red-500/60 hover:bg-red-950/50"
                           >
-                            🗑 Delete
+                            ðŸ—‘ Delete
                           </button>
                         </div>
                       )}
@@ -2185,15 +1103,15 @@ export default function NewsPage() {
         <div className="flex flex-col gap-3 border-b border-amber-900/20 pb-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="font-serif text-xs uppercase tracking-[0.3em] text-amber-300/70">
-              ❖ Archives
+              â– Archives
             </p>
             <h4 className="mt-1 font-serif text-2xl font-bold text-amber-100">
               Latest Dispatches
             </h4>
             <p className="mt-1 text-xs text-amber-100/60">
               {newsLoading
-                ? "Loading…"
-                : `Showing ${filtered.length} item(s)${category !== "All" ? ` in ${category}` : ""}${dbNews.length > 0 ? " · Live from DB" : " · Demo data"}.`}
+                ? "Loadingâ€¦"
+                : `Showing ${filtered.length} item(s)${category !== "All" ? ` in ${category}` : ""}${dbNews.length > 0 ? " Â· Live from DB" : " Â· Demo data"}.`}
             </p>
           </div>
 
@@ -2221,7 +1139,7 @@ export default function NewsPage() {
 
         {!newsLoading && filtered.length === 0 && (
           <div className="rounded-2xl border border-dashed border-amber-900/40 bg-slate-950/30 p-10 text-center">
-            <p className="text-4xl">📜</p>
+            <p className="text-4xl">ðŸ“œ</p>
             <p className="mt-2 font-serif text-amber-100/70">
               No scrolls match your search.
             </p>
@@ -2248,16 +1166,16 @@ export default function NewsPage() {
                 </div>
                 {n.featured && (
                   <span className="absolute right-3 top-3 rounded-full border border-amber-500/50 bg-amber-950/70 px-2.5 py-1 font-serif text-[10px] font-bold uppercase tracking-widest text-amber-200 backdrop-blur">
-                    ★
+                    â˜…
                   </span>
                 )}
               </div>
 
               <div className="p-5">
                 <div className="flex items-center gap-2 text-xs text-amber-200/70">
-                  <span>📅 {formatDate(n.date)}</span>
-                  <span className="opacity-50">❖</span>
-                  <span>⏱ {n.readTime}</span>
+                  <span>ðŸ“… {formatDate(n.date)}</span>
+                  <span className="opacity-50">â–</span>
+                  <span>â± {n.readTime}</span>
                 </div>
 
                 <h5 className="mt-2 line-clamp-2 font-serif text-lg font-bold leading-snug text-amber-100 transition group-hover:text-amber-50">
@@ -2272,7 +1190,7 @@ export default function NewsPage() {
                   className="mt-4 inline-flex items-center gap-2 text-sm font-serif font-semibold text-amber-200 hover:text-amber-300"
                 >
                   Open scroll
-                  <span className="transition group-hover:translate-x-1">→</span>
+                  <span className="transition group-hover:translate-x-1">â†’</span>
                 </button>
 
                 {isAdmin && n.dbId != null && (
@@ -2282,14 +1200,14 @@ export default function NewsPage() {
                       onClick={() => openEditEditor(n)}
                       className="flex-1 rounded-lg border border-amber-700/40 bg-slate-950/40 px-3 py-1.5 text-xs font-serif text-amber-200 transition hover:border-amber-500/60 hover:bg-amber-950/30"
                     >
-                      ✏️ Edit
+                      âœï¸ Edit
                     </button>
                     <button
                       type="button"
                       onClick={() => handleDeleteArticle(n)}
                       className="flex-1 rounded-lg border border-red-700/40 bg-red-950/30 px-3 py-1.5 text-xs font-serif text-red-200 transition hover:border-red-500/60 hover:bg-red-950/50"
                     >
-                      🗑 Delete
+                      ðŸ—‘ Delete
                     </button>
                   </div>
                 )}

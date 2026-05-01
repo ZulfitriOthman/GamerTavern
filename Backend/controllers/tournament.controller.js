@@ -1,5 +1,7 @@
 // Backend/controllers/tournament.controller.js
 
+import { sendBulkEmail } from "../modules/mailer.module.js";
+
 const toStr = (v) => (v == null ? "" : String(v)).trim();
 const toInt = (v, d = 0) => {
   const n = Number(v);
@@ -228,6 +230,92 @@ export default function tournamentSocketController({ socket, io, db }) {
 
       const created = safeTournamentRow(rows?.[0]);
       io?.emit?.("tournament:created", created);
+
+      // 📧 Broadcast to all users (non-blocking)
+      (async () => {
+        try {
+          const [userRows] = await db.execute(
+            "SELECT EMAIL FROM PERSONAL_USER WHERE EMAIL IS NOT NULL AND EMAIL <> ''",
+          );
+          const recipients = userRows.map((r) => r.EMAIL);
+          if (!recipients.length) return;
+
+          const escapeHtml = (s) =>
+            String(s ?? "")
+              .replace(/&/g, "&amp;")
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;");
+
+          const fmtDt = (val) => {
+            if (!val) return "";
+            const d = new Date(val);
+            if (Number.isNaN(d.getTime())) return "";
+            return d.toLocaleString(undefined, {
+              dateStyle: "medium",
+              timeStyle: "short",
+            });
+          };
+
+          const safeName = String(created.name || "New Tournament");
+          const subject = `🏆 New Tournament: ${safeName}`;
+          const startStr = fmtDt(created.start_date);
+          const endStr = fmtDt(created.end_date);
+          const fee =
+            created.entry_fee != null
+              ? `BND ${Number(created.entry_fee).toFixed(2)}`
+              : "Free";
+
+          const rowHtml = (label, value) =>
+            value
+              ? `<tr><td style="padding:4px 8px;color:#fbbf24;font-weight:bold;">${label}</td><td style="padding:4px 8px;color:#fef3c7;">${escapeHtml(value)}</td></tr>`
+              : "";
+
+          const html = `
+            <div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px;background:#0f172a;color:#fde68a;border-radius:12px;">
+              <p style="font-size:11px;letter-spacing:0.3em;text-transform:uppercase;color:#f59e0b;margin:0 0 8px;">
+                Gamer Tavern · Tournament
+              </p>
+              <h1 style="font-size:24px;margin:0 0 16px;color:#fef3c7;">${escapeHtml(safeName)}</h1>
+              <table style="width:100%;border-collapse:collapse;font-size:14px;">
+                ${rowHtml("Game", created.game_title)}
+                ${rowHtml("Starts", startStr)}
+                ${rowHtml("Ends", endStr)}
+                ${rowHtml("Location", created.location)}
+                ${rowHtml("Entry Fee", fee)}
+                ${rowHtml("Max Teams", created.max_teams)}
+                ${rowHtml("Organizer", created.organizer)}
+              </table>
+              ${created.description ? `<p style="font-size:14px;line-height:1.6;color:#fef3c7;margin:16px 0 0;">${escapeHtml(created.description)}</p>` : ""}
+              <hr style="border:none;border-top:1px solid #78350f;margin:24px 0;" />
+              <p style="font-size:12px;color:#fbbf24;margin:0;">
+                Sign in to the Tavern to register and claim your seat.
+              </p>
+            </div>
+          `;
+
+          const text =
+            `${safeName}\n` +
+            `Game: ${created.game_title || ""}\n` +
+            `Starts: ${startStr}\n` +
+            (endStr ? `Ends: ${endStr}\n` : "") +
+            (created.location ? `Location: ${created.location}\n` : "") +
+            `Entry Fee: ${fee}\n` +
+            (created.description ? `\n${created.description}\n` : "");
+
+          const result = await sendBulkEmail({
+            recipients,
+            subject,
+            html,
+            text,
+          });
+          console.log(
+            `[tournament:create] 📧 broadcast email — sent: ${result.sent}/${result.total ?? 0}`,
+          );
+        } catch (mailErr) {
+          console.error("[tournament:create] email broadcast failed:", mailErr);
+        }
+      })();
+
       return ack({ success: true, data: created });
     } catch (err) {
       console.error("[tournament:create] error", err);
