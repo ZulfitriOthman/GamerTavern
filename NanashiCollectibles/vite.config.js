@@ -16,9 +16,6 @@ export default defineConfig({
       // ✅ your domain(s)
       "tcg.nanashicollectibles.com",
       "server.nanashicollectibles.com",
-
-      // optional wildcard (subdomains)
-      ".nanashicollectibles.com",
     ],
   },
 });
