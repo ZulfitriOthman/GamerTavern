@@ -6,8 +6,37 @@ let lastUsername = null;
 
 export const getSocket = () => socket;
 
+function resolveSocketUrl() {
+  const configured = (import.meta.env.VITE_SOCKET_URL?.trim() || "");
+  const fallbackLocal = "http://localhost:3002";
+  const runningOnLocalhost =
+    typeof window !== "undefined" &&
+    ["localhost", "127.0.0.1"].includes(window.location.hostname);
+
+  if (!configured) return fallbackLocal;
+
+  if (runningOnLocalhost) {
+    try {
+      const parsed = new URL(configured);
+      const targetIsLocal = ["localhost", "127.0.0.1"].includes(parsed.hostname);
+      if (!targetIsLocal) {
+        console.warn(
+          "[socket] Local dev detected: overriding VITE_SOCKET_URL with local backend",
+          fallbackLocal,
+        );
+        return fallbackLocal;
+      }
+    } catch (_err) {
+      // If configured URL is invalid, fallback to local backend in development.
+      return fallbackLocal;
+    }
+  }
+
+  return configured;
+}
+
 export const connectSocket = (username) => {
-  const url = (import.meta.env.VITE_SOCKET_URL?.trim() || "http://localhost:3002");
+  const url = resolveSocketUrl();
 
   if (username) lastUsername = String(username).trim();
 

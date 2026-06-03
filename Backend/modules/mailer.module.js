@@ -7,14 +7,20 @@ let verified = false;
 function buildTransporter() {
   const host = process.env.SMTP_HOST;
   const port = Number(process.env.SMTP_PORT || 587);
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
+  const user = String(process.env.SMTP_USER || "").trim();
+  const pass = String(process.env.SMTP_PASS || "").replace(/\s+/g, "");
 
   if (!host || !user || !pass) {
     console.warn(
       "[mailer] SMTP_HOST/SMTP_USER/SMTP_PASS not configured — emails will be skipped.",
     );
     return null;
+  }
+
+  if (host.includes("gmail") && pass.length !== 16) {
+    console.warn(
+      "[mailer] Gmail SMTP password does not look like a 16-character app password.",
+    );
   }
 
   return nodemailer.createTransport({

@@ -102,100 +102,137 @@ export default function ForgotPasswordPage() {
     }
   };
 
+  const inputClass =
+    "w-full rounded-xl border border-white/15 bg-black/35 px-4 py-3 font-serif text-sm text-white placeholder-white/35 transition focus:border-purple-400/70 focus:outline-none focus:ring-2 focus:ring-purple-400/25";
+
+  const actionButtonClass =
+    "relative w-full overflow-hidden rounded-xl border border-purple-300/50 bg-gradient-to-r from-purple-600/65 via-purple-500/60 to-cyan-500/45 py-3 font-serif text-base font-black uppercase tracking-[0.08em] text-white transition-all duration-200 hover:border-purple-200/80 disabled:cursor-not-allowed disabled:opacity-60";
+
   return (
-    <div className="mx-auto max-w-md space-y-6">
-      <div className="relative overflow-hidden rounded-2xl border border-amber-900/30 bg-gradient-to-br from-slate-950 via-purple-950/40 to-slate-950 p-8 text-center shadow-2xl shadow-purple-900/20">
-        <span className="mb-4 block text-5xl">🔐</span>
-        <h1 className="font-serif text-3xl font-bold text-amber-100">
-          Reset Password
-        </h1>
-        <p className="mt-2 font-serif text-sm italic text-amber-100/70">
-          Request a token, then set your new password.
-        </p>
+    <div className="mx-auto max-w-5xl">
+      <div className="grid gap-4 lg:grid-cols-[1.02fr_1.38fr]">
+        <aside className="relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-black/75 via-purple-950/25 to-black/70 p-7 shadow-2xl shadow-purple-500/20 lg:p-8">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_15%_10%,rgba(167,139,250,0.24),transparent_46%),radial-gradient(circle_at_100%_100%,rgba(56,189,248,0.16),transparent_45%)]" />
+          <div className="relative">
+            <div className="inline-flex h-14 w-14 items-center justify-center rounded-xl border border-white/20 bg-purple-500/20 text-3xl shadow-[0_0_24px_rgba(168,85,247,0.35)]">
+              🔐
+            </div>
 
-        <div className="mt-4 text-xs text-amber-100/60">
-          Socket:{" "}
-          <span className={isConnected ? "text-emerald-300" : "text-red-300"}>
-            {isConnected ? "Connected" : "Disconnected"}
-          </span>
-        </div>
-      </div>
+            <h1 className="mt-6 font-serif text-4xl font-black uppercase tracking-[0.08em] text-white sm:text-[2.65rem]">
+              Account
+              <span className="block text-purple-300">Recovery</span>
+            </h1>
 
-      <div className="space-y-5 rounded-2xl border border-amber-900/30 bg-gradient-to-br from-slate-950 to-purple-950/30 p-8 shadow-lg shadow-purple-900/20">
-        {error ? (
-          <div className="rounded-xl border border-red-500/30 bg-red-950/30 px-4 py-3 text-sm text-red-200">
-            {error}
+            <p className="mt-3 max-w-sm text-sm leading-relaxed text-white/65">
+              Request a reset token, then securely create your new password to
+              regain account access.
+            </p>
+
+            <div className="mt-8 space-y-3">
+              <div className="rounded-xl border border-white/10 bg-black/30 px-4 py-3">
+                <p className="text-[11px] font-black uppercase tracking-[0.24em] text-purple-200/70">
+                  Step 1
+                </p>
+                <p className="mt-1 font-serif text-lg font-bold uppercase tracking-[0.08em] text-white">
+                  Request Token
+                </p>
+                <p className="text-xs text-white/55">Use your account email.</p>
+              </div>
+
+              <div className="rounded-xl border border-white/10 bg-black/30 px-4 py-3">
+                <p className="text-[11px] font-black uppercase tracking-[0.24em] text-cyan-200/70">
+                  Step 2
+                </p>
+                <p className="mt-1 font-serif text-lg font-bold uppercase tracking-[0.08em] text-white">
+                  Set New Password
+                </p>
+                <p className="text-xs text-white/55">Token + password confirmation required.</p>
+              </div>
+            </div>
           </div>
-        ) : null}
+        </aside>
 
-        {requestMessage ? (
-          <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-200">
-            {requestMessage}
+        <section className="relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-black/80 via-slate-950/70 to-purple-950/30 p-6 shadow-2xl shadow-black/45 sm:p-8">
+          <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-purple-300/45 to-transparent" />
+          <div className="absolute -right-24 -top-24 h-60 w-60 rounded-full bg-purple-500/10 blur-3xl" />
+
+          <div className="relative z-10 space-y-4">
+            {error ? (
+              <div className="rounded-xl border border-red-500/40 bg-red-950/35 px-4 py-3 text-sm text-red-100">
+                {error}
+              </div>
+            ) : null}
+
+            {requestMessage ? (
+              <div className="rounded-xl border border-emerald-500/35 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-200">
+                {requestMessage}
+              </div>
+            ) : null}
+
+            {resetMessage ? (
+              <div className="rounded-xl border border-emerald-500/35 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-200">
+                {resetMessage}
+              </div>
+            ) : null}
+
+            <form onSubmit={handleRequestToken} className="space-y-3 rounded-xl border border-white/10 bg-black/30 p-4">
+              <h2 className="text-xs font-black uppercase tracking-[0.22em] text-white/65">
+                1) Request Reset Token
+              </h2>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Enter your account email"
+                className={inputClass}
+              />
+              <button type="submit" disabled={loadingRequest} className={actionButtonClass}>
+                <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-0 transition-opacity duration-300 hover:opacity-100" />
+                <span className="relative">{loadingRequest ? "Requesting..." : "Request Token"}</span>
+              </button>
+            </form>
+
+            <form onSubmit={handleResetPassword} className="space-y-3 rounded-xl border border-white/10 bg-black/30 p-4">
+              <h2 className="text-xs font-black uppercase tracking-[0.22em] text-white/65">
+                2) Reset Password
+              </h2>
+              <input
+                type="text"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="Paste your reset token"
+                className={inputClass}
+              />
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="New password"
+                className={inputClass}
+              />
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Confirm new password"
+                className={inputClass}
+              />
+              <button type="submit" disabled={loadingReset} className={actionButtonClass}>
+                <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-0 transition-opacity duration-300 hover:opacity-100" />
+                <span className="relative">{loadingReset ? "Resetting..." : "Reset Password"}</span>
+              </button>
+            </form>
+
+            <div className="pt-1 text-center text-sm text-white/55">
+              Back to{" "}
+              <Link to="/login" className="font-semibold text-purple-200 transition hover:text-purple-100">
+                Login
+              </Link>
+            </div>
           </div>
-        ) : null}
 
-        {resetMessage ? (
-          <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-200">
-            {resetMessage}
-          </div>
-        ) : null}
-
-        <form onSubmit={handleRequestToken} className="space-y-3">
-          <h2 className="font-serif text-lg font-semibold text-amber-100">1) Request Reset Token</h2>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="Enter your account email"
-            className="w-full rounded-lg border border-amber-900/30 bg-slate-950 px-4 py-3 font-serif text-sm text-amber-100 placeholder-amber-100/40 focus:outline-none focus:ring-2 focus:ring-amber-600"
-          />
-          <button
-            type="submit"
-            disabled={loadingRequest}
-            className="w-full rounded-xl border border-amber-600/50 bg-gradient-to-r from-amber-950/50 to-purple-950/50 py-3 font-serif text-base font-bold text-amber-100 transition-all hover:border-amber-500 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {loadingRequest ? "Requesting..." : "Request Token"}
-          </button>
-        </form>
-
-        <form onSubmit={handleResetPassword} className="space-y-3">
-          <h2 className="font-serif text-lg font-semibold text-amber-100">2) Reset Password</h2>
-          <input
-            type="text"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            placeholder="Paste your reset token"
-            className="w-full rounded-lg border border-amber-900/30 bg-slate-950 px-4 py-3 font-serif text-sm text-amber-100 placeholder-amber-100/40 focus:outline-none focus:ring-2 focus:ring-amber-600"
-          />
-          <input
-            type="password"
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-            placeholder="New password"
-            className="w-full rounded-lg border border-amber-900/30 bg-slate-950 px-4 py-3 font-serif text-sm text-amber-100 placeholder-amber-100/40 focus:outline-none focus:ring-2 focus:ring-amber-600"
-          />
-          <input
-            type="password"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            placeholder="Confirm new password"
-            className="w-full rounded-lg border border-amber-900/30 bg-slate-950 px-4 py-3 font-serif text-sm text-amber-100 placeholder-amber-100/40 focus:outline-none focus:ring-2 focus:ring-amber-600"
-          />
-          <button
-            type="submit"
-            disabled={loadingReset}
-            className="w-full rounded-xl border border-amber-600/50 bg-gradient-to-r from-amber-950/50 to-purple-950/50 py-3 font-serif text-base font-bold text-amber-100 transition-all hover:border-amber-500 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {loadingReset ? "Resetting..." : "Reset Password"}
-          </button>
-        </form>
-
-        <div className="text-center text-sm text-amber-100/70">
-          Back to{" "}
-          <Link to="/login" className="font-semibold text-amber-400 hover:text-amber-300">
-            Login
-          </Link>
-        </div>
+          <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-cyan-300/35 to-transparent" />
+        </section>
       </div>
     </div>
   );

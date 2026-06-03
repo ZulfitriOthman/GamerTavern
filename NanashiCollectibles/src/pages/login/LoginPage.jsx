@@ -120,183 +120,211 @@ export default function LoginPage() {
   };
 
   const activeConfig = ROLE_CONFIG[formData.role];
+  const currentRoleUI =
+    activeConfig ||
+    ({
+      icon: "✦",
+      label: "Guardian",
+      description: "Privileged access",
+    });
+
+  const inputClass = (hasError) =>
+    `w-full rounded-xl border ${
+      hasError ? "border-red-500/80" : "border-white/15"
+    } bg-black/35 px-4 py-3 font-serif text-sm text-white placeholder-white/35 transition focus:border-purple-400/70 focus:outline-none focus:ring-2 ${
+      hasError ? "focus:ring-red-500/35" : "focus:ring-purple-400/25"
+    }`;
 
   return (
-    <div className="mx-auto max-w-md space-y-4">
-      {/* ── Header ── */}
-      <div className="relative overflow-hidden rounded-2xl border border-amber-900/30 bg-gradient-to-br from-slate-950 via-purple-950/40 to-slate-950 px-8 py-10 text-center shadow-2xl shadow-purple-900/20">
-        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-500/50 to-transparent" />
-
-        <div className="relative inline-flex items-center justify-center">
-          <div className="absolute h-20 w-20 rounded-full bg-amber-500/10 blur-xl" />
-          <span className="relative text-6xl drop-shadow-lg">🏰</span>
-        </div>
-
-        <h1 className="mt-4 font-serif text-3xl font-bold tracking-wide text-amber-100">
-          Welcome Back
-        </h1>
-        <p className="mt-1 font-serif text-sm italic text-amber-100/60">
-          Sign in to continue your journey
-        </p>
-
-        <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-amber-500/30 to-transparent" />
-      </div>
-
-      {/* ── Form Card ── */}
-      <div className="relative overflow-hidden rounded-2xl border border-amber-900/30 bg-gradient-to-br from-slate-950 to-purple-950/20 p-8 shadow-xl shadow-purple-900/20">
-        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
-
-        {serverError && (
-          <div className="mb-5 flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-950/30 px-4 py-3 text-sm text-red-200">
-            <span className="mt-0.5 shrink-0">⚠️</span>
-            <span>{serverError}</span>
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-5">
-          {/* Role picker */}
-          <div>
-            <label className="mb-2 block font-serif text-xs font-semibold uppercase tracking-widest text-amber-100/60">
-              Sign in as
-            </label>
-            <div className="grid grid-cols-2 gap-3">
-              {Object.entries(ROLE_CONFIG).map(([roleKey, cfg]) => (
-                <label
-                  key={roleKey}
-                  className={`group relative cursor-pointer overflow-hidden rounded-xl border px-4 py-3 transition-all duration-200 ${
-                    formData.role === roleKey
-                      ? "border-amber-500/60 bg-amber-950/40 shadow-lg shadow-amber-900/20"
-                      : "border-amber-900/30 bg-slate-950/60 hover:border-amber-700/50 hover:bg-slate-900/80"
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="role"
-                    value={roleKey}
-                    checked={formData.role === roleKey}
-                    onChange={handleChange}
-                    className="sr-only"
-                  />
-                  {formData.role === roleKey && (
-                    <span className="absolute right-2 top-2 text-xs text-amber-400">✓</span>
-                  )}
-                  <span className="text-xl">{cfg.icon}</span>
-                  <p className="mt-1 font-serif text-sm font-semibold text-amber-100">
-                    {cfg.label}
-                  </p>
-                  <p className="text-xs text-amber-100/50">{cfg.description}</p>
-                </label>
-              ))}
+    <div className="mx-auto max-w-5xl">
+      <div className="grid gap-4 lg:grid-cols-[1.02fr_1.38fr]">
+        <aside className="relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-black/75 via-purple-950/25 to-black/70 p-7 shadow-2xl shadow-purple-500/20 lg:p-8">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_15%_10%,rgba(167,139,250,0.24),transparent_46%),radial-gradient(circle_at_100%_100%,rgba(56,189,248,0.16),transparent_45%)]" />
+          <div className="relative">
+            <div className="inline-flex h-14 w-14 items-center justify-center rounded-xl border border-white/20 bg-purple-500/20 text-3xl shadow-[0_0_24px_rgba(168,85,247,0.35)]">
+              🏰
             </div>
-            {errors.role && (
-              <p className="mt-1 font-serif text-xs text-red-400">{errors.role}</p>
-            )}
-          </div>
 
-          {/* Identifier */}
-          <div>
-            <label className="mb-2 block font-serif text-xs font-semibold uppercase tracking-widest text-amber-100/60">
-              {formData.role === ROLES.VENDOR ? "Merchant name or email" : "Name or email"}
-            </label>
-            <input
-              type="text"
-              name="identifier"
-              value={formData.identifier}
-              onChange={handleChange}
-              placeholder={
-                formData.role === ROLES.VENDOR
-                  ? "Enter your merchant name or email"
-                  : "Enter your name or email"
-              }
-              autoComplete="username"
-              className={`w-full rounded-xl border ${
-                errors.identifier ? "border-red-500/70" : "border-amber-900/30"
-              } bg-slate-900/80 px-4 py-3 font-serif text-sm text-amber-100 placeholder-amber-100/30 transition focus:border-amber-600/50 focus:outline-none focus:ring-1 ${
-                errors.identifier ? "focus:ring-red-500/50" : "focus:ring-amber-600/30"
-              }`}
-            />
-            {errors.identifier && (
-              <p className="mt-1 font-serif text-xs text-red-400">{errors.identifier}</p>
-            )}
-          </div>
+            <h1 className="mt-6 font-serif text-4xl font-black uppercase tracking-[0.08em] text-white sm:text-[2.65rem]">
+              Tavern
+              <span className="block text-purple-300">Access</span>
+            </h1>
 
-          {/* Password */}
-          <div>
-            <div className="mb-2 flex items-center justify-between">
-              <label className="font-serif text-xs font-semibold uppercase tracking-widest text-amber-100/60">
-                Password
+            <p className="mt-3 max-w-sm text-sm leading-relaxed text-white/65">
+              Re-enter your collector profile, sync your inventory, and jump
+              back into live trading.
+            </p>
+
+            <div className="mt-8 space-y-3">
+              <div className="rounded-xl border border-white/10 bg-black/30 px-4 py-3">
+                <p className="text-[11px] font-black uppercase tracking-[0.24em] text-purple-200/70">
+                  Active Channel
+                </p>
+                <p className="mt-1 font-serif text-lg font-bold uppercase tracking-[0.08em] text-white">
+                  {currentRoleUI.label}
+                </p>
+                <p className="text-xs text-white/55">{currentRoleUI.description}</p>
+              </div>
+
+              <div className="rounded-xl border border-white/10 bg-black/30 px-4 py-3">
+                <p className="text-[11px] font-black uppercase tracking-[0.24em] text-cyan-200/70">
+                  Realm Notice
+                </p>
+                <p className="mt-1 text-sm text-white/70">
+                  Merchant and admin profiles route to the vendor command deck.
+                </p>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <section className="relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-black/80 via-slate-950/70 to-purple-950/30 p-6 shadow-2xl shadow-black/45 sm:p-8">
+          <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-purple-300/45 to-transparent" />
+          <div className="absolute -right-24 -top-24 h-60 w-60 rounded-full bg-purple-500/10 blur-3xl" />
+
+          {serverError && (
+            <div className="relative z-10 mb-5 flex items-start gap-2 rounded-xl border border-red-500/40 bg-red-950/35 px-4 py-3 text-sm text-red-100">
+              <span className="mt-0.5 shrink-0">⚠️</span>
+              <span>{serverError}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="relative z-10 space-y-5">
+            <div>
+              <label className="mb-2 block text-xs font-black uppercase tracking-[0.22em] text-white/60">
+                Sign in as
               </label>
-              <Link
-                to="/forgot-password"
-                className="font-serif text-xs text-amber-400/70 transition hover:text-amber-300"
-              >
-                Forgot password?
-              </Link>
+              <div className="grid grid-cols-2 gap-3">
+                {Object.entries(ROLE_CONFIG).map(([roleKey, cfg]) => (
+                  <label
+                    key={roleKey}
+                    className={`group relative cursor-pointer overflow-hidden rounded-xl border px-4 py-3 transition-all duration-200 ${
+                      formData.role === roleKey
+                        ? "border-purple-400/70 bg-purple-500/20 shadow-[0_0_26px_rgba(168,85,247,0.22)]"
+                        : "border-white/15 bg-black/35 hover:border-purple-300/45 hover:bg-purple-500/10"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="role"
+                      value={roleKey}
+                      checked={formData.role === roleKey}
+                      onChange={handleChange}
+                      className="sr-only"
+                    />
+                    {formData.role === roleKey && (
+                      <span className="absolute right-2 top-2 text-xs text-purple-200">✓</span>
+                    )}
+                    <span className="text-xl">{cfg.icon}</span>
+                    <p className="mt-1 font-serif text-sm font-semibold text-white">
+                      {cfg.label}
+                    </p>
+                    <p className="text-xs text-white/55">{cfg.description}</p>
+                  </label>
+                ))}
+              </div>
+              {errors.role && (
+                <p className="mt-1 text-xs text-red-300">{errors.role}</p>
+              )}
             </div>
-            <div className="relative">
+
+            <div>
+              <label className="mb-2 block text-xs font-black uppercase tracking-[0.22em] text-white/60">
+                {formData.role === ROLES.VENDOR
+                  ? "Merchant name or email"
+                  : "Name or email"}
+              </label>
               <input
-                type={showPassword ? "text" : "password"}
-                name="password"
-                value={formData.password}
+                type="text"
+                name="identifier"
+                value={formData.identifier}
                 onChange={handleChange}
-                placeholder="Enter your password"
-                autoComplete="current-password"
-                className={`w-full rounded-xl border ${
-                  errors.password ? "border-red-500/70" : "border-amber-900/30"
-                } bg-slate-900/80 px-4 py-3 pr-11 font-serif text-sm text-amber-100 placeholder-amber-100/30 transition focus:border-amber-600/50 focus:outline-none focus:ring-1 ${
-                  errors.password ? "focus:ring-red-500/50" : "focus:ring-amber-600/30"
-                }`}
+                placeholder={
+                  formData.role === ROLES.VENDOR
+                    ? "Enter your merchant name or email"
+                    : "Enter your name or email"
+                }
+                autoComplete="username"
+                className={inputClass(errors.identifier)}
               />
-              <button
-                type="button"
-                onClick={() => setShowPassword((v) => !v)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-amber-100/40 transition hover:text-amber-100/80"
-                tabIndex={-1}
-              >
-                {showPassword ? "🙈" : "👁️"}
-              </button>
+              {errors.identifier && (
+                <p className="mt-1 text-xs text-red-300">{errors.identifier}</p>
+              )}
             </div>
-            {errors.password && (
-              <p className="mt-1 font-serif text-xs text-red-400">{errors.password}</p>
-            )}
+
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <label className="text-xs font-black uppercase tracking-[0.22em] text-white/60">
+                  Password
+                </label>
+                <Link
+                  to="/forgot-password"
+                  className="text-xs font-semibold uppercase tracking-[0.12em] text-purple-200/80 transition hover:text-purple-100"
+                >
+                  Forgot?
+                </Link>
+              </div>
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  name="password"
+                  value={formData.password}
+                  onChange={handleChange}
+                  placeholder="Enter your password"
+                  autoComplete="current-password"
+                  className={inputClass(errors.password) + " pr-11"}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-white/45 transition hover:text-white/90"
+                  tabIndex={-1}
+                >
+                  {showPassword ? "🙈" : "👁️"}
+                </button>
+              </div>
+              {errors.password && (
+                <p className="mt-1 text-xs text-red-300">{errors.password}</p>
+              )}
+            </div>
+
+            <button
+              type="submit"
+              disabled={!canSubmit}
+              className={`relative w-full overflow-hidden rounded-xl border py-3.5 font-serif text-base font-black uppercase tracking-[0.08em] text-white transition-all duration-200 ${
+                canSubmit
+                  ? "border-purple-300/50 bg-gradient-to-r from-purple-600/65 via-purple-500/60 to-cyan-500/45 shadow-[0_0_30px_rgba(168,85,247,0.3)] hover:border-purple-200/80"
+                  : "cursor-not-allowed border-white/10 bg-white/5 opacity-50"
+              }`}
+            >
+              <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-0 transition-opacity duration-300 hover:opacity-100" />
+              {isSubmitting ? (
+                <span className="relative flex items-center justify-center gap-2">
+                  <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/35 border-t-white" />
+                  Signing in...
+                </span>
+              ) : (
+                <span className="relative">
+                  {currentRoleUI.icon} Enter the Tavern
+                </span>
+              )}
+            </button>
+          </form>
+
+          <div className="relative z-10 mt-6 text-center">
+            <p className="text-sm text-white/55">
+              Don&apos;t have an account?{" "}
+              <Link
+                to="/signup"
+                className="font-semibold text-purple-200 transition hover:text-purple-100"
+              >
+                Create Account
+              </Link>
+            </p>
           </div>
 
-          {/* Submit */}
-          <button
-            type="submit"
-            disabled={!canSubmit}
-            className={`relative w-full overflow-hidden rounded-xl border py-3.5 font-serif text-base font-bold text-amber-100 transition-all duration-200 ${
-              canSubmit
-                ? "border-amber-600/50 bg-gradient-to-r from-amber-950/60 to-purple-950/60 shadow-lg shadow-amber-900/20 hover:border-amber-500/80 hover:shadow-amber-500/20"
-                : "cursor-not-allowed border-amber-900/20 bg-slate-950/50 opacity-50"
-            }`}
-          >
-            {isSubmitting ? (
-              <span className="flex items-center justify-center gap-2">
-                <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-amber-100/30 border-t-amber-100" />
-                Signing in…
-              </span>
-            ) : (
-              <span>
-                {activeConfig.icon} Enter the Tavern
-              </span>
-            )}
-          </button>
-        </form>
-
-        <div className="mt-6 text-center">
-          <p className="font-serif text-sm text-amber-100/50">
-            Don&apos;t have an account?{" "}
-            <Link
-              to="/signup"
-              className="font-semibold text-amber-400 transition hover:text-amber-300"
-            >
-              Create Account
-            </Link>
-          </p>
-        </div>
-
-        <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
+          <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-cyan-300/35 to-transparent" />
+        </section>
       </div>
     </div>
   );

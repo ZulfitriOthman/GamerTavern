@@ -235,6 +235,14 @@ function App() {
 
   const didConnectRef = useRef(false);
 
+  // Preload all scene backgrounds so they're cached before navigation
+  useEffect(() => {
+    Object.values(sceneBackgrounds).forEach(({ bg }) => {
+      const img = new Image();
+      img.src = bg;
+    });
+  }, []);
+
   const displayName = useMemo(() => {
     return currentUser?.name || getUsername("Traveler") || "Traveler";
   }, [currentUser]);
@@ -373,16 +381,19 @@ function App() {
   return (
     <div className="relative min-h-screen overflow-hidden bg-black text-white">
       {/* FULL BACKGROUND */}
-      <motion.div
-        key={scene.bg}
-        initial={{ scale: 1.04, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        transition={{ duration: 0.55, ease: "easeOut" }}
-        className="fixed inset-0 z-0 bg-cover bg-center"
-        style={{
-          backgroundImage: `url('${scene.bg}')`,
-        }}
-      />
+      <AnimatePresence mode="sync">
+        <motion.div
+          key={scene.bg}
+          initial={{ opacity: 0, scale: 1.04 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.45, ease: "easeInOut" }}
+          className="fixed inset-0 z-0 bg-cover bg-center"
+          style={{
+            backgroundImage: `url('${scene.bg}')`,
+          }}
+        />
+      </AnimatePresence>
 
       {/* BACKGROUND FILTERS */}
       <div className="fixed inset-0 z-0 bg-gradient-to-r from-black via-black/30 to-black/10" />
@@ -390,7 +401,8 @@ function App() {
       <div className="fixed inset-0 z-0 bg-black/15" />
 
       {/* LEFT MENU PANEL */}
-      <aside className="fixed left-0 top-0 z-30 flex h-screen w-full flex-col bg-[#171717]/92 px-6 py-8 shadow-2xl backdrop-blur-md sm:w-[390px] lg:w-[430px]">
+      {!isAuthRoute ? (
+        <aside className="fixed left-0 top-0 z-30 flex h-screen w-full flex-col bg-[#171717]/92 px-6 py-8 shadow-2xl backdrop-blur-md sm:w-[390px] lg:w-[430px]">
         {/* LOGO / TITLE */}
         <Link
           to="/"
@@ -516,29 +528,49 @@ function App() {
             </div>
           </div>
         </div>
-      </aside>
+        </aside>
+      ) : null}
 
       {/* MAIN CONTENT AREA */}
-      <main className="relative z-20 min-h-screen pl-0 sm:pl-[390px] lg:pl-[430px]">
-        <div className="min-h-screen p-4 sm:p-6 lg:p-8">
-          <div className="ml-auto max-w-6xl">
-            <motion.div
-              key={currentScene}
-              initial={{ opacity: 0, y: 14, filter: "blur(8px)" }}
-              animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-              transition={{ duration: 0.35, ease: "easeOut" }}
-              className="mb-5 hidden rounded-2xl border border-white/10 bg-black/35 p-5 shadow-2xl backdrop-blur-md sm:block"
-            >
-              <p className="text-xs font-black uppercase tracking-[0.35em] text-purple-300">
-                Selected Mode
-              </p>
-              <h2 className="mt-2 font-serif text-4xl font-black uppercase text-white">
-                {scene.title}
-              </h2>
-              <p className="mt-1 text-white/60">{scene.subtitle}</p>
-            </motion.div>
+      <main
+        className={[
+          "relative z-20 min-h-screen",
+          isAuthRoute ? "" : "pl-0 sm:pl-[390px] lg:pl-[430px]",
+        ].join(" ")}
+      >
+        <div
+          className={[
+            "min-h-screen",
+            isAuthRoute
+              ? "flex items-center justify-center p-4 sm:p-6 lg:p-8"
+              : "p-4 sm:p-6 lg:p-8",
+          ].join(" ")}
+        >
+          <div className={isAuthRoute ? "w-full max-w-5xl" : "ml-auto max-w-6xl"}>
+            {!isAuthRoute ? (
+              <motion.div
+                key={currentScene}
+                initial={{ opacity: 0, y: 14, filter: "blur(8px)" }}
+                animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                transition={{ duration: 0.35, ease: "easeOut" }}
+                className="mb-5 hidden rounded-2xl border border-white/10 bg-black/35 p-5 shadow-2xl backdrop-blur-md sm:block"
+              >
+                <p className="text-xs font-black uppercase tracking-[0.35em] text-purple-300">
+                  Selected Mode
+                </p>
+                <h2 className="mt-2 font-serif text-4xl font-black uppercase text-white">
+                  {scene.title}
+                </h2>
+                <p className="mt-1 text-white/60">{scene.subtitle}</p>
+              </motion.div>
+            ) : null}
 
-            <section className="rounded-2xl border border-white/10 bg-black/45 p-4 shadow-2xl backdrop-blur-md sm:p-6">
+            <section
+              className={[
+                "rounded-2xl border border-white/10 bg-black/45 p-4 shadow-2xl backdrop-blur-md",
+                isAuthRoute ? "sm:p-5" : "sm:p-6",
+              ].join(" ")}
+            >
               <AnimatePresence mode="wait">
                 <Routes location={location} key={location.pathname}>
                   <Route
