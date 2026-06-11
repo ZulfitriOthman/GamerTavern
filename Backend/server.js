@@ -27,6 +27,7 @@ import newsSocketController from "./controllers/news.controller.js";
 import tournamentSocketController from "./controllers/tournament.controller.js";
 import decklistSocketController from "./controllers/decklist.controller.js";
 import countrySocketController from "./controllers/country.controller.js";
+import tcgCategoriesSocketController from "./controllers/tcgcategories.controller.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -284,6 +285,7 @@ io.on("connection", (socket) => {
   tournamentSocketController({ socket, io, db });
   decklistSocketController({ socket, io, db });
   countrySocketController({ socket, db });
+  tcgCategoriesSocketController({ socket, io, db });
 });
 
 /* ------------------------------ Error handler ------------------------------ */

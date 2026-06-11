@@ -4,6 +4,9 @@ export const CATEGORIES = [
   "Yu-Gi-Oh",
   "Pokemon",
   "Vanguard",
+  "Shadowverse",
+  "Ultraman",
+  "Digimon",
   "General",
 ];
 

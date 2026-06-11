@@ -206,50 +206,94 @@ function ShopPage({
           </div>
         ) : null}
 
-        {/* TCG Selector */}
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-          {TCG_LIST.map((tcg) => {
-            const isActive = tcg.id === selectedTcg;
-            const initial = tcg.name?.[0] ?? "?";
-            return (
-              <button
-                key={tcg.id}
-                onClick={() => handleSelectTcg(tcg.id)}
-                className={[
-                  "group relative flex h-28 flex-col justify-between overflow-hidden rounded-xl border p-4 text-left transition-all duration-200",
-                  isActive
-                    ? "border-amber-500/80 bg-gradient-to-br from-amber-950/70 via-purple-950/50 to-slate-950 shadow-xl shadow-amber-900/40 ring-1 ring-amber-400/60"
-                    : "border-amber-900/40 bg-gradient-to-br from-slate-950 to-purple-950/40 hover:border-amber-500/60 hover:shadow-lg hover:shadow-purple-900/30",
-                ].join(" ")}
-              >
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(251,191,36,0.15),_transparent_55%)] opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
+        {/* TCG Selector - Clean Dropdown */}
+        <div className="rounded-2xl border border-amber-900/40 bg-gradient-to-br from-slate-950 via-purple-950/45 to-slate-950 p-5 shadow-lg shadow-purple-900/20">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            {/* Left Info */}
+            <div>
+              <p className="font-serif text-[10px] font-bold uppercase tracking-[0.28em] text-amber-500">
+                Trading Card Game
+              </p>
 
-                <div className="relative flex items-center justify-between gap-3">
-                  <span className="font-serif text-[10px] uppercase tracking-[0.18em] text-amber-500">
-                    Trading Card Game
-                  </span>
+              <h3 className="mt-1 font-serif text-xl font-bold text-amber-100">
+                {activeTcg?.name || "Choose Category"}
+              </h3>
 
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full border border-amber-500/50 bg-slate-950/80 text-xs font-bold text-amber-200 shadow-inner shadow-amber-900/60">
-                    {initial}
-                  </div>
-                </div>
+              <p className="mt-1 font-serif text-xs italic text-amber-100/60">
+                Select a category to browse listings, prices, and available stock.
+              </p>
+            </div>
 
-                <span className="relative mt-1 font-serif text-sm font-semibold leading-snug text-amber-50">
-                  {tcg.name}
+            {/* Right Dropdown */}
+            <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center lg:w-auto">
+              <div className="relative w-full lg:w-[340px]">
+                <select
+                  value={selectedTcg}
+                  onChange={(e) => handleSelectTcg(e.target.value)}
+                  className="
+                    h-12 w-full appearance-none rounded-xl border border-amber-700/50
+                    bg-slate-950 px-4 pr-10 font-serif text-sm font-semibold text-amber-100
+                    shadow-inner shadow-purple-950/50 outline-none transition
+                    hover:border-amber-500/70
+                    focus:border-amber-400 focus:ring-2 focus:ring-amber-500/30
+                  "
+                >
+                  {TCG_LIST.map((tcg) => (
+                    <option
+                      key={tcg.id}
+                      value={tcg.id}
+                      className="bg-slate-950 text-amber-100"
+                    >
+                      {tcg.name}
+                    </option>
+                  ))}
+                </select>
+
+                <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-amber-300">
+                  ▼
                 </span>
+              </div>
 
-                <div
-                  className={[
-                    "pointer-events-none absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r opacity-70",
-                    tcg.color,
-                  ].join(" ")}
-                />
-                {isActive && (
-                  <div className="pointer-events-none absolute inset-x-4 bottom-0 h-px bg-gradient-to-r from-transparent via-amber-400 to-transparent" />
-                )}
+              <button
+                type="button"
+                onClick={() => handleSelectTcg(selectedTcg)}
+                className="
+                  h-12 rounded-xl border border-amber-500/60
+                  bg-gradient-to-r from-amber-950/70 via-purple-950/70 to-slate-950
+                  px-6 font-serif text-xs font-bold uppercase tracking-[0.18em]
+                  text-amber-100 shadow-md shadow-amber-900/30 transition
+                  hover:-translate-y-0.5 hover:border-amber-400 hover:shadow-amber-500/30
+                "
+              >
+                Browse
               </button>
-            );
-          })}
+            </div>
+          </div>
+
+          {/* Selected category indicator */}
+          <div className="mt-4 rounded-xl border border-amber-900/40 bg-black/25 px-4 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="font-serif text-[10px] uppercase tracking-[0.22em] text-amber-500/80">
+                  Current Selection
+                </p>
+                <p className="mt-1 font-serif text-sm font-bold text-amber-50">
+                  {activeTcg?.name}
+                </p>
+              </div>
+
+              <div className="flex h-9 w-9 items-center justify-center rounded-full border border-amber-500/50 bg-slate-950/80 text-xs font-bold text-amber-200">
+                {activeTcg?.name?.[0] || "?"}
+              </div>
+            </div>
+
+            <div
+              className={[
+                "mt-3 h-1 rounded-full bg-gradient-to-r",
+                activeTcg?.color || "from-purple-500 to-indigo-500",
+              ].join(" ")}
+            />
+          </div>
         </div>
 
         {/* Product list */}

@@ -19,6 +19,28 @@ function normalizeRole(role) {
   return Object.values(ROLES).includes(r) ? r : ROLES.USER;
 }
 
+function canSell(role) {
+  return role === ROLES.VENDOR || role === ROLES.ADMIN;
+}
+
+async function resolveRoleFromDb(db, userId) {
+  if (!userId) return ROLES.USER;
+
+  try {
+    const [rows] = await executeWithRetry(
+      db,
+      `SELECT ROLE FROM PERSONAL_USER WHERE ID = ? LIMIT 1`,
+      [userId],
+      "auth:role.lookup"
+    );
+
+    return normalizeRole(rows?.[0]?.ROLE);
+  } catch (err) {
+    console.error("[product.socket] role lookup failed:", err?.message || err);
+    return ROLES.USER;
+  }
+}
+
 const publicPath = path.join(process.cwd(), "public");
 
 function isLocalProductImage(url) {
@@ -181,10 +203,10 @@ export default function productSocketController({
 
     const currentUser = payload.currentUser || null;
     const userId = toInt(currentUser?.id);
-    const role = normalizeRole(currentUser?.role);
+    const role = await resolveRoleFromDb(db, userId);
 
     if (!userId) return ack({ success: false, message: "Unauthorized." });
-    if (!(role === ROLES.VENDOR || role === ROLES.ADMIN)) {
+    if (!canSell(role)) {
       return ack({
         success: false,
         message: "Only vendors/admin can create products.",
@@ -274,10 +296,13 @@ export default function productSocketController({
 
     const currentUser = payload.currentUser || null;
     const userId = toInt(currentUser?.id);
-    const role = normalizeRole(currentUser?.role);
+    const role = await resolveRoleFromDb(db, userId);
     const productId = toInt(payload.id);
 
     if (!userId) return ack({ success: false, message: "Unauthorized." });
+    if (!canSell(role)) {
+      return ack({ success: false, message: "Only vendors/admin can update products." });
+    }
     if (!productId) return ack({ success: false, message: "Product id is required." });
 
     try {
@@ -395,12 +420,15 @@ export default function productSocketController({
 
     const currentUser = payload.currentUser || null;
     const userId = toInt(currentUser?.id);
-    const role = normalizeRole(currentUser?.role);
+    const role = await resolveRoleFromDb(db, userId);
 
     const productId = toInt(payload.product_id ?? payload.productId);
     const delta = toInt(payload.delta);
 
     if (!userId) return ack({ success: false, message: "Unauthorized." });
+    if (!canSell(role)) {
+      return ack({ success: false, message: "Only vendors/admin can adjust inventory." });
+    }
     if (!productId) return ack({ success: false, message: "product_id is required." });
     if (!Number.isFinite(delta) || delta === 0) {
       return ack({ success: false, message: "delta must be a non-zero number." });
@@ -500,10 +528,13 @@ export default function productSocketController({
 
     const currentUser = payload.currentUser || null;
     const userId = toInt(currentUser?.id);
-    const role = normalizeRole(currentUser?.role);
+    const role = await resolveRoleFromDb(db, userId);
 
     const productId = toInt(payload.id);
     if (!userId) return ack({ success: false, message: "Unauthorized." });
+    if (!canSell(role)) {
+      return ack({ success: false, message: "Only vendors/admin can delete products." });
+    }
     if (!productId) return ack({ success: false, message: "Product id is required." });
 
     let conn;
@@ -585,10 +616,10 @@ export default function productSocketController({
 
     const currentUser = payload.currentUser || null;
     const userId = toInt(currentUser?.id);
-    const role = normalizeRole(currentUser?.role);
+    const role = await resolveRoleFromDb(db, userId);
 
     if (!userId) return ack({ success: false, message: "Unauthorized." });
-    if (!(role === ROLES.VENDOR || role === ROLES.ADMIN)) {
+    if (!canSell(role)) {
       return ack({
         success: false,
         message: "Only vendors/admin can upload images.",

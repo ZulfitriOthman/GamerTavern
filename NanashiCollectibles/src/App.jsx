@@ -402,23 +402,40 @@ function App() {
 
       {/* LEFT MENU PANEL */}
       {!isAuthRoute ? (
-        <aside className="fixed left-0 top-0 z-30 flex h-screen w-full flex-col bg-[#171717]/92 px-6 py-8 shadow-2xl backdrop-blur-md sm:w-[390px] lg:w-[430px]">
+        <aside
+          className="
+            relative z-30
+            flex w-full flex-col overflow-hidden
+            border-b border-purple-400/20
+            bg-gradient-to-b from-[#171717]/95 via-[#111111]/95 to-black/95
+            px-4 py-4 shadow-[0_12px_40px_rgba(0,0,0,0.65)]
+            backdrop-blur-xl
+
+            sm:fixed sm:left-0 sm:top-0 sm:h-screen sm:w-[390px] sm:border-b-0 sm:border-r
+            sm:border-purple-400/20 sm:px-6 sm:py-8
+
+            lg:w-[430px]
+          "
+        >
         {/* LOGO / TITLE */}
         <Link
           to="/"
           onClick={() => setMobileMenuOpen(false)}
-          className="mx-auto mb-10 block text-center"
+          className="
+            mx-auto mb-4 block text-center
+            sm:mb-10
+          "
         >
           <div className="relative">
-            <h1 className="font-serif text-5xl font-black uppercase leading-none tracking-[0.08em] text-purple-400 drop-shadow-[0_0_18px_rgba(192,132,252,0.75)] sm:text-6xl">
+            <h1 className="font-serif text-3xl font-black uppercase leading-none tracking-[0.08em] text-purple-400 drop-shadow-[0_0_18px_rgba(192,132,252,0.75)] sm:text-6xl">
               TBC
             </h1>
-            <h2 className="font-serif text-6xl font-black uppercase leading-none tracking-[0.04em] text-purple-400 drop-shadow-[0_0_18px_rgba(192,132,252,0.75)] sm:text-7xl">
+            <h2 className="font-serif text-4xl font-black uppercase leading-none tracking-[0.04em] text-purple-400 drop-shadow-[0_0_18px_rgba(192,132,252,0.75)] sm:text-7xl">
               Name
             </h2>
 
             <div className="mx-auto mt-4 h-px w-56 bg-gradient-to-r from-transparent via-purple-400 to-transparent" />
-            <p className="mt-3 text-xs font-black uppercase tracking-[0.35em] text-white/45">
+            <p className="mt-2 text-[10px] font-black uppercase tracking-[0.28em] text-white/45 sm:mt-3 sm:text-xs sm:tracking-[0.35em]">
               Collector Sanctum
             </p>
           </div>
@@ -503,7 +520,7 @@ function App() {
         </nav>
 
         {/* BOTTOM STATUS */}
-        <div className="mt-auto">
+        <div className="mt-4 sm:mt-auto">
           <div className="mb-5 border border-white/10 bg-black/30 px-4 py-3">
             <p className="text-xs font-bold uppercase tracking-[0.25em] text-white/40">
               Current Mode
@@ -534,19 +551,19 @@ function App() {
       {/* MAIN CONTENT AREA */}
       <main
         className={[
-          "relative z-20 min-h-screen",
-          isAuthRoute ? "" : "pl-0 sm:pl-[390px] lg:pl-[430px]",
+        "relative z-20 min-h-screen",
+        isAuthRoute ? "" : "sm:pl-[390px] lg:pl-[430px]",
         ].join(" ")}
       >
         <div
           className={[
             "min-h-screen",
             isAuthRoute
-              ? "flex items-center justify-center p-4 sm:p-6 lg:p-8"
-              : "p-4 sm:p-6 lg:p-8",
+              ? "flex items-center justify-center p-3 sm:p-6 lg:p-8"
+              : "p-3 sm:p-6 lg:p-8",
           ].join(" ")}
         >
-          <div className={isAuthRoute ? "w-full max-w-5xl" : "ml-auto max-w-6xl"}>
+          <div className={isAuthRoute ? "w-full max-w-5xl" : "ml-auto w-full max-w-7xl"}>
             {!isAuthRoute ? (
               <motion.div
                 key={currentScene}
@@ -567,8 +584,8 @@ function App() {
 
             <section
               className={[
-                "rounded-2xl border border-white/10 bg-black/45 p-4 shadow-2xl backdrop-blur-md",
-                isAuthRoute ? "sm:p-5" : "sm:p-6",
+                "rounded-xl border border-white/10 bg-black/40 p-3 shadow-2xl backdrop-blur-md sm:rounded-2xl sm:p-4",
+                isAuthRoute ? "sm:p-5" : "sm:p-6 lg:p-8",
               ].join(" ")}
             >
               <AnimatePresence mode="wait">

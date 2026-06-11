@@ -2,8 +2,18 @@
 import { NavLink, useLocation } from "react-router-dom";
 
 const TABS = [
-  { to: "/shop", label: "Shop", icon: "🛒", description: "Browse the vault" },
-  { to: "/trade", label: "Trade", icon: "🤝", description: "Swap with adventurers" },
+  {
+    to: "/shop",
+    label: "Shop",
+    icon: "🛒",
+    description: "Browse cards, collections, and marketplace items.",
+  },
+  {
+    to: "/trade",
+    label: "Trade",
+    icon: "🤝",
+    description: "Swap cards safely with other adventurers.",
+  },
 ];
 
 export default function MarketTabs({ children }) {
@@ -18,38 +28,72 @@ export default function MarketTabs({ children }) {
   const isTradeActive = location.pathname.startsWith("/trade");
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       {/* Tab Bar */}
-      <div className="relative overflow-hidden rounded-2xl border border-amber-900/40 bg-gradient-to-br from-slate-950 via-purple-950/40 to-slate-950 p-2 shadow-lg shadow-purple-900/20">
-        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-500/50 to-transparent" />
+      <div className="relative overflow-hidden rounded-3xl border border-amber-900/40 bg-slate-950/80 p-3 shadow-2xl shadow-purple-950/40 backdrop-blur-xl">
+        {/* Top glow line */}
+        <div className="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-amber-400/60 to-transparent" />
 
-        <div className="relative grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {TABS.map((tab) => {
-            const active =
-              tab.to === "/shop" ? isShopActive : isTradeActive;
+            const active = tab.to === "/shop" ? isShopActive : isTradeActive;
+
             return (
               <NavLink
                 key={tab.to}
                 to={tab.to}
-                className={`group relative flex items-center justify-center gap-2 rounded-xl border px-4 py-3 font-serif text-sm font-semibold uppercase tracking-wider transition-all duration-200 ${
-                  active
-                    ? "border-amber-500/60 bg-gradient-to-r from-amber-950/60 to-purple-950/60 text-amber-100 shadow-lg shadow-amber-900/30"
-                    : "border-amber-900/30 bg-slate-950/50 text-amber-100/60 hover:border-amber-700/50 hover:bg-slate-900/70 hover:text-amber-200"
-                }`}
+                className={`
+                  group relative overflow-hidden rounded-2xl border p-4 transition-all duration-300
+                  ${
+                    active
+                      ? "border-amber-400/70 bg-gradient-to-br from-amber-950/70 via-purple-950/60 to-slate-950 text-amber-100 shadow-lg shadow-amber-950/30"
+                      : "border-amber-900/30 bg-slate-950/70 text-amber-100/60 hover:border-amber-600/50 hover:bg-purple-950/30 hover:text-amber-100"
+                  }
+                `}
               >
-                <span className="text-lg">{tab.icon}</span>
-                <div className="flex flex-col items-start leading-tight">
-                  <span>{tab.label}</span>
-                  <span className="font-sans text-[10px] font-normal normal-case tracking-normal text-amber-100/50">
-                    {tab.description}
-                  </span>
+                {/* Soft background glow */}
+                <div
+                  className={`
+                    absolute inset-0 opacity-0 transition-opacity duration-300
+                    ${
+                      active
+                        ? "opacity-100 bg-gradient-to-r from-amber-500/10 via-purple-500/10 to-transparent"
+                        : "group-hover:opacity-100 bg-gradient-to-r from-purple-500/10 to-transparent"
+                    }
+                  `}
+                />
+
+                <div className="relative flex items-center gap-4">
+                  <div
+                    className={`
+                      flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border text-xl
+                      ${
+                        active
+                          ? "border-amber-400/60 bg-amber-500/10"
+                          : "border-amber-900/40 bg-slate-900/80"
+                      }
+                    `}
+                  >
+                    {tab.icon}
+                  </div>
+
+                  <div className="min-w-0">
+                    <p className="font-serif text-base font-bold uppercase tracking-[0.18em]">
+                      {tab.label}
+                    </p>
+
+                    <p className="mt-1 line-clamp-2 font-sans text-xs leading-relaxed text-amber-100/55">
+                      {tab.description}
+                    </p>
+                  </div>
                 </div>
+
                 {active && (
                   <>
-                    <span className="absolute left-0 top-0 h-2 w-2 border-l-2 border-t-2 border-amber-400" />
-                    <span className="absolute right-0 top-0 h-2 w-2 border-r-2 border-t-2 border-amber-400" />
-                    <span className="absolute bottom-0 left-0 h-2 w-2 border-b-2 border-l-2 border-amber-400" />
-                    <span className="absolute bottom-0 right-0 h-2 w-2 border-b-2 border-r-2 border-amber-400" />
+                    <span className="absolute left-0 top-0 h-3 w-3 border-l-2 border-t-2 border-amber-400" />
+                    <span className="absolute right-0 top-0 h-3 w-3 border-r-2 border-t-2 border-amber-400" />
+                    <span className="absolute bottom-0 left-0 h-3 w-3 border-b-2 border-l-2 border-amber-400" />
+                    <span className="absolute bottom-0 right-0 h-3 w-3 border-b-2 border-r-2 border-amber-400" />
                   </>
                 )}
               </NavLink>
@@ -57,7 +101,8 @@ export default function MarketTabs({ children }) {
           })}
         </div>
 
-        <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-amber-500/30 to-transparent" />
+        {/* Bottom glow line */}
+        <div className="absolute inset-x-6 bottom-0 h-px bg-gradient-to-r from-transparent via-amber-500/30 to-transparent" />
       </div>
 
       {/* Tab Content */}

@@ -2,9 +2,13 @@
 
 export const TCG_LIST = [
   { id: "mtg", name: "Magic: The Gathering", color: "from-purple-500 to-indigo-500" },
+  { id: "vanguard", name: "Vanguard", color: "from-emerald-400 to-teal-500" },
   { id: "ygo", name: "Yu-Gi-Oh!", color: "from-yellow-400 to-amber-600" },
-  { id: "pokémon", name: "Pokémon TCG", color: "from-sky-400 to-blue-500" },
-  { id: "vanguard", name: "Cardfight!! Vanguard", color: "from-emerald-400 to-teal-500" },
+  { id: "pokemon", name: "Pokemon TCG", color: "from-sky-400 to-blue-500" },
+  { id: "onepiece", name: "One Piece", color: "from-rose-500 to-orange-500" },
+  { id: "digimon", name: "Digimon", color: "from-cyan-400 to-indigo-500" },
+  { id: "ultraman", name: "Ultraman", color: "from-lime-400 to-green-600" },
+  { id: "shadowverse", name: "Shadow Verse", color: "from-fuchsia-500 to-pink-500" },
 ];
 
 export const PRODUCTS = [

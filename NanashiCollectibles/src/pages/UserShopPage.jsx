@@ -1,7 +1,7 @@
 // src/pages/UserShopPage.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { TCG_LIST } from "../data/products";
+import { TCG_LIST as FALLBACK_TCG_LIST } from "../data/products";
 import { getSocket, connectSocket } from "../socket/socketClient";
 import { getCurrentUser, getUsername } from "../authStorage";
 
@@ -100,6 +100,107 @@ const SORT = {
 };
 
 const LOW_STOCK_THRESHOLD = 3;
+const TCG_COLOR_SWATCHES = [
+  "from-purple-500 to-indigo-500",
+  "from-yellow-400 to-amber-600",
+  "from-sky-400 to-blue-500",
+  "from-emerald-400 to-teal-500",
+  "from-rose-500 to-orange-500",
+  "from-cyan-400 to-indigo-500",
+  "from-lime-400 to-green-600",
+  "from-fuchsia-500 to-pink-500",
+];
+
+function normalizeTcgKey(value) {
+  return toStr(value)
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function findFallbackCategory(value) {
+  const key = normalizeTcgKey(value);
+  return FALLBACK_TCG_LIST.find(
+    (item) =>
+      normalizeTcgKey(item.id) === key || normalizeTcgKey(item.name) === key,
+  );
+}
+
+function resolveCategoryId(idValue, nameValue) {
+  const byName = findFallbackCategory(nameValue);
+  if (byName?.id) return byName.id;
+
+  const byId = findFallbackCategory(idValue);
+  if (byId?.id) return byId.id;
+
+  const id = toStr(idValue);
+  if (id && !/^TCG[_-]?\d+$/i.test(id)) return id;
+
+  const fromName = normalizeTcgKey(nameValue);
+  if (fromName) return fromName;
+
+  return id || toStr(nameValue);
+}
+
+function mapTcgCategoryRow(row, index) {
+  const id = toStr(row?.id ?? row?.ID);
+  const name = toStr(
+    row?.name ?? row?.NAME ?? row?.tcg_categories ?? row?.TCG_CATEGORIES,
+  );
+
+  if (!id && !name) return null;
+
+  const canonicalId = resolveCategoryId(id, name);
+  const fallback = findFallbackCategory(name) || findFallbackCategory(canonicalId);
+
+  return {
+    id: canonicalId,
+    name: name || id,
+    color:
+      fallback?.color ||
+      TCG_COLOR_SWATCHES[index % TCG_COLOR_SWATCHES.length],
+  };
+}
+
+function mergeTcgCategories(serverCategories) {
+  const merged = [];
+  const seen = new Set();
+
+  const pushIfNew = (item) => {
+    const key = normalizeTcgKey(item?.name) || normalizeTcgKey(item?.id);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    merged.push(item);
+  };
+
+  for (const item of serverCategories || []) {
+    if (item) pushIfNew(item);
+  }
+
+  for (const item of FALLBACK_TCG_LIST) {
+    pushIfNew(item);
+  }
+
+  return merged;
+}
+
+function matchesSelectedTcg(categoryValue, selectedTcg, activeTcg) {
+  const categoryKey = normalizeTcgKey(categoryValue);
+  if (!selectedTcg) return true;
+  if (!categoryKey) return false;
+
+  const selectedKey = normalizeTcgKey(selectedTcg);
+  if (categoryKey === selectedKey) return true;
+
+  if (activeTcg) {
+    const activeIdKey = normalizeTcgKey(activeTcg.id);
+    const activeNameKey = normalizeTcgKey(activeTcg.name);
+    if (categoryKey === activeIdKey || categoryKey === activeNameKey) return true;
+  }
+
+  return false;
+}
 
 function formatCurrency(value) {
   return `BND ${toInt(value).toFixed(2)}`;
@@ -140,14 +241,16 @@ export default function UserShopPage({
 
   // socket + data
   const [isSocketConnected, setIsSocketConnected] = useState(false);
+  const [tcgList, setTcgList] = useState(() => [...FALLBACK_TCG_LIST]);
+  const [loadingTcg, setLoadingTcg] = useState(false);
   const [products, setProducts] = useState([]);
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [serverError, setServerError] = useState("");
 
   // UI state
   const [selectedTcg, setSelectedTcg] = useState(() => {
-    if (tcgId && TCG_LIST.some((t) => t.id === tcgId)) return tcgId;
-    return "mtg";
+    if (tcgId) return tcgId;
+    return FALLBACK_TCG_LIST[0]?.id || "";
   });
 
   const [search, setSearch] = useState("");
@@ -179,17 +282,34 @@ export default function UserShopPage({
 
   useEffect(() => {
     if (!tcgId) return;
-    if (TCG_LIST.some((t) => t.id === tcgId)) setSelectedTcg(tcgId);
-  }, [tcgId]);
+    if (tcgList.some((t) => normalizeTcgKey(t.id) === normalizeTcgKey(tcgId))) {
+      setSelectedTcg(tcgId);
+    }
+  }, [tcgId, tcgList]);
+
+  useEffect(() => {
+    if (!tcgList.length) return;
+
+    const hasSelected = tcgList.some(
+      (t) => normalizeTcgKey(t.id) === normalizeTcgKey(selectedTcg),
+    );
+
+    if (!hasSelected) {
+      setSelectedTcg(tcgList[0].id);
+    }
+  }, [selectedTcg, tcgList]);
 
   const activeTcg = useMemo(
-    () => TCG_LIST.find((t) => t.id === selectedTcg),
-    [selectedTcg],
+    () =>
+      tcgList.find(
+        (t) => normalizeTcgKey(t.id) === normalizeTcgKey(selectedTcg),
+      ) || null,
+    [selectedTcg, tcgList],
   );
 
   const handleSelectTcg = (id) => {
     setSelectedTcg(id);
-    navigate(`/user/tcg/${id}`);
+    navigate(`/user/tcg/${encodeURIComponent(id)}`);
   };
 
   // ----------------------------
@@ -251,6 +371,25 @@ export default function UserShopPage({
     setProducts(mapped);
   };
 
+  const loadTcgCategories = async () => {
+    setLoadingTcg(true);
+
+    const res = await emitAsync("tcgcategories:list", {});
+
+    setLoadingTcg(false);
+
+    if (!res?.success || !Array.isArray(res.data)) {
+      return;
+    }
+
+    const serverCategories = res.data
+      .map((row, index) => mapTcgCategoryRow(row, index))
+      .filter(Boolean);
+
+    const merged = mergeTcgCategories(serverCategories);
+    if (merged.length) setTcgList(merged);
+  };
+
   // ✅ Ensure socket is connected (handles refresh timing)
   useEffect(() => {
     if (didInitSocketRef.current) return;
@@ -270,6 +409,7 @@ export default function UserShopPage({
     const onConnect = () => {
       setIsSocketConnected(true);
       setServerError("");
+      loadTcgCategories();
       loadProducts();
     };
 
@@ -284,6 +424,7 @@ export default function UserShopPage({
     setIsSocketConnected(!!s.connected);
     if (s.connected) {
       setServerError("");
+      loadTcgCategories();
       loadProducts();
     }
 
@@ -292,11 +433,19 @@ export default function UserShopPage({
     const onUpdated = () => loadProducts();
     const onDeleted = () => loadProducts();
     const onInvUpdated = () => loadProducts();
+    const onCategoriesUpdated = (categories) => {
+      const serverCategories = (Array.isArray(categories) ? categories : [])
+        .map((row, index) => mapTcgCategoryRow(row, index))
+        .filter(Boolean);
+      const merged = mergeTcgCategories(serverCategories);
+      if (merged.length) setTcgList(merged);
+    };
 
     s.on("product:created", onCreated);
     s.on("product:updated", onUpdated);
     s.on("product:deleted", onDeleted);
     s.on("inventory:updated", onInvUpdated);
+    s.on("tcgcategories:updated", onCategoriesUpdated);
 
     return () => {
       s.off("connect", onConnect);
@@ -306,6 +455,7 @@ export default function UserShopPage({
       s.off("product:updated", onUpdated);
       s.off("product:deleted", onDeleted);
       s.off("inventory:updated", onInvUpdated);
+      s.off("tcgcategories:updated", onCategoriesUpdated);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -314,10 +464,11 @@ export default function UserShopPage({
   // ✅ TCG FILTER (same spirit as vendor: CATEGORY is the TCG name)
   // ----------------------------
   const tcgFilteredProducts = useMemo(() => {
-    const selected = toStr(selectedTcg);
-    if (!selected) return products;
-    return products.filter((p) => toStr(p.category) === selected);
-  }, [products, selectedTcg]);
+    if (!selectedTcg) return products;
+    return products.filter((p) =>
+      matchesSelectedTcg(p.category, selectedTcg, activeTcg),
+    );
+  }, [products, selectedTcg, activeTcg]);
 
   // ----------------------------
   // Filters / Sort (applies after TCG filter)
@@ -433,7 +584,7 @@ export default function UserShopPage({
   if (!currentUser) return null;
 
   return (
-    <div className="relative flex flex-col gap-6 md:flex-row">
+    <div className="relative flex flex-col gap-6 xl:flex-row">
       {/* glows */}
       <div className="pointer-events-none absolute -left-32 top-10 h-64 w-64 rounded-full bg-purple-900/30 blur-3xl" />
       <div className="pointer-events-none absolute -right-40 bottom-0 h-72 w-72 rounded-full bg-amber-800/25 blur-3xl" />
@@ -448,8 +599,8 @@ export default function UserShopPage({
         ) : null}
 
         {/* TCG selector */}
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-          {TCG_LIST.map((tcg) => {
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+          {tcgList.map((tcg) => {
             const isActive = tcg.id === selectedTcg;
             const initial = tcg.name?.[0] ?? "?";
             return (
@@ -555,7 +706,7 @@ export default function UserShopPage({
               </span>
 
               <span className="rounded-full border border-amber-700/40 bg-amber-950/20 px-3 py-1 font-serif text-[10px] uppercase tracking-wide text-amber-200">
-                {loadingProducts
+                {loadingProducts || loadingTcg
                   ? "Loading..."
                   : `${filteredProducts.length} item(s)`}
               </span>
@@ -772,7 +923,7 @@ export default function UserShopPage({
       </section>
 
       {/* RIGHT cart */}
-      <aside className="relative z-10 mt-6 w-full max-w-sm md:mt-0 md:w-80">
+      <aside className="relative z-10 mt-2 w-full max-w-none xl:mt-0 xl:w-80 xl:max-w-sm">
         <div className="sticky top-20 overflow-hidden rounded-2xl border border-amber-900/50 bg-gradient-to-br from-slate-950 via-purple-950/45 to-slate-950 p-5">
           <div className="mb-3 flex items-center justify-between">
             <div>

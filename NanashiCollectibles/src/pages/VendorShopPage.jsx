@@ -1,7 +1,7 @@
 // src/pages/VendorShopPage.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { TCG_LIST } from "../data/products";
+import { TCG_LIST as FALLBACK_TCG_LIST } from "../data/products";
 import { getSocket, connectSocket } from "../socket/socketClient";
 import { getCurrentUser, getUsername } from "../authStorage";
 
@@ -105,6 +105,107 @@ const SORT = {
 };
 
 const LOW_STOCK_THRESHOLD = 3;
+const TCG_COLOR_SWATCHES = [
+  "from-purple-500 to-indigo-500",
+  "from-yellow-400 to-amber-600",
+  "from-sky-400 to-blue-500",
+  "from-emerald-400 to-teal-500",
+  "from-rose-500 to-orange-500",
+  "from-cyan-400 to-indigo-500",
+  "from-lime-400 to-green-600",
+  "from-fuchsia-500 to-pink-500",
+];
+
+function normalizeTcgKey(value) {
+  return toStr(value)
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function findFallbackCategory(value) {
+  const key = normalizeTcgKey(value);
+  return FALLBACK_TCG_LIST.find(
+    (item) =>
+      normalizeTcgKey(item.id) === key || normalizeTcgKey(item.name) === key,
+  );
+}
+
+function resolveCategoryId(idValue, nameValue) {
+  const byName = findFallbackCategory(nameValue);
+  if (byName?.id) return byName.id;
+
+  const byId = findFallbackCategory(idValue);
+  if (byId?.id) return byId.id;
+
+  const id = toStr(idValue);
+  if (id && !/^TCG[_-]?\d+$/i.test(id)) return id;
+
+  const fromName = normalizeTcgKey(nameValue);
+  if (fromName) return fromName;
+
+  return id || toStr(nameValue);
+}
+
+function mapTcgCategoryRow(row, index) {
+  const id = toStr(row?.id ?? row?.ID);
+  const name = toStr(
+    row?.name ?? row?.NAME ?? row?.tcg_categories ?? row?.TCG_CATEGORIES,
+  );
+
+  if (!id && !name) return null;
+
+  const canonicalId = resolveCategoryId(id, name);
+  const fallback = findFallbackCategory(name) || findFallbackCategory(canonicalId);
+
+  return {
+    id: canonicalId,
+    name: name || id,
+    color:
+      fallback?.color ||
+      TCG_COLOR_SWATCHES[index % TCG_COLOR_SWATCHES.length],
+  };
+}
+
+function mergeTcgCategories(serverCategories) {
+  const merged = [];
+  const seen = new Set();
+
+  const pushIfNew = (item) => {
+    const key = normalizeTcgKey(item?.name) || normalizeTcgKey(item?.id);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    merged.push(item);
+  };
+
+  for (const item of serverCategories || []) {
+    if (item) pushIfNew(item);
+  }
+
+  for (const item of FALLBACK_TCG_LIST) {
+    pushIfNew(item);
+  }
+
+  return merged;
+}
+
+function matchesSelectedTcg(categoryValue, selectedTcg, activeTcg) {
+  const categoryKey = normalizeTcgKey(categoryValue);
+  if (!selectedTcg) return true;
+  if (!categoryKey) return false;
+
+  const selectedKey = normalizeTcgKey(selectedTcg);
+  if (categoryKey === selectedKey) return true;
+
+  if (activeTcg) {
+    const activeIdKey = normalizeTcgKey(activeTcg.id);
+    const activeNameKey = normalizeTcgKey(activeTcg.name);
+    if (categoryKey === activeIdKey || categoryKey === activeNameKey) return true;
+  }
+
+  return false;
+}
 
 function formatCurrency(value) {
   return `BND ${toInt(value).toFixed(2)}`;
@@ -149,6 +250,8 @@ export default function VendorShopPage({
 
   // DB products loaded from socket
   const [products, setProducts] = useState([]);
+  const [tcgList, setTcgList] = useState(() => [...FALLBACK_TCG_LIST]);
+  const [loadingTcg, setLoadingTcg] = useState(false);
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [serverError, setServerError] = useState("");
 
@@ -168,7 +271,7 @@ export default function VendorShopPage({
     stock_quantity: 0,
     image_url: "",
     description: "",
-    category: "mtg", // ✅ CATEGORY = TCG id/name
+    category: FALLBACK_TCG_LIST[0]?.id || "", // ✅ CATEGORY = TCG id/name
   });
 
   // Manage Inventory UI state (per product)
@@ -205,23 +308,50 @@ export default function VendorShopPage({
   // TCG selection from URL
   // ----------------------------
   const [selectedTcg, setSelectedTcg] = useState(() => {
-    if (tcgId && TCG_LIST.some((t) => t.id === tcgId)) return tcgId;
-    return "mtg";
+    if (tcgId) return tcgId;
+    return FALLBACK_TCG_LIST[0]?.id || "";
   });
 
   useEffect(() => {
     if (!tcgId) return;
-    if (TCG_LIST.some((t) => t.id === tcgId)) setSelectedTcg(tcgId);
-  }, [tcgId]);
+    if (tcgList.some((t) => normalizeTcgKey(t.id) === normalizeTcgKey(tcgId))) {
+      setSelectedTcg(tcgId);
+    }
+  }, [tcgId, tcgList]);
+
+  useEffect(() => {
+    if (!tcgList.length) return;
+
+    const hasSelected = tcgList.some(
+      (t) => normalizeTcgKey(t.id) === normalizeTcgKey(selectedTcg),
+    );
+
+    if (!hasSelected) {
+      setSelectedTcg(tcgList[0].id);
+    }
+  }, [selectedTcg, tcgList]);
+
+  useEffect(() => {
+    if (!tcgList.length) return;
+    const hasCategory = tcgList.some(
+      (t) => normalizeTcgKey(t.id) === normalizeTcgKey(newProduct.category),
+    );
+    if (!hasCategory) {
+      setNewProduct((prev) => ({ ...prev, category: tcgList[0].id }));
+    }
+  }, [newProduct.category, tcgList]);
 
   const activeTcg = useMemo(
-    () => TCG_LIST.find((t) => t.id === selectedTcg),
-    [selectedTcg]
+    () =>
+      tcgList.find(
+        (t) => normalizeTcgKey(t.id) === normalizeTcgKey(selectedTcg),
+      ) || null,
+    [selectedTcg, tcgList]
   );
 
   const handleSelectTcg = (id) => {
     setSelectedTcg(id);
-    navigate(`/vendor/tcg/${id}`);
+    navigate(`/vendor/tcg/${encodeURIComponent(id)}`);
   };
 
   // ----------------------------
@@ -279,6 +409,25 @@ export default function VendorShopPage({
     setProducts(mapped);
   };
 
+  const loadTcgCategories = async () => {
+    setLoadingTcg(true);
+
+    const res = await emitAsync("tcgcategories:list", {});
+
+    setLoadingTcg(false);
+
+    if (!res?.success || !Array.isArray(res.data)) {
+      return;
+    }
+
+    const serverCategories = res.data
+      .map((row, index) => mapTcgCategoryRow(row, index))
+      .filter(Boolean);
+
+    const merged = mergeTcgCategories(serverCategories);
+    if (merged.length) setTcgList(merged);
+  };
+
   // Ensure socket exists (handles refresh timing)
   useEffect(() => {
     if (didInitSocketRef.current) return;
@@ -299,6 +448,7 @@ export default function VendorShopPage({
     const onConnect = () => {
       setIsSocketConnected(true);
       setServerError("");
+      loadTcgCategories();
       loadProducts();
     };
 
@@ -312,6 +462,7 @@ export default function VendorShopPage({
     setIsSocketConnected(!!s.connected);
     if (s.connected) {
       setServerError("");
+      loadTcgCategories();
       loadProducts();
     }
 
@@ -319,11 +470,19 @@ export default function VendorShopPage({
     const onUpdated = () => loadProducts();
     const onDeleted = () => loadProducts();
     const onInvUpdated = () => loadProducts();
+    const onCategoriesUpdated = (categories) => {
+      const serverCategories = (Array.isArray(categories) ? categories : [])
+        .map((row, index) => mapTcgCategoryRow(row, index))
+        .filter(Boolean);
+      const merged = mergeTcgCategories(serverCategories);
+      if (merged.length) setTcgList(merged);
+    };
 
     s.on("product:created", onCreated);
     s.on("product:updated", onUpdated);
     s.on("product:deleted", onDeleted);
     s.on("inventory:updated", onInvUpdated);
+    s.on("tcgcategories:updated", onCategoriesUpdated);
 
     return () => {
       s.off("connect", onConnect);
@@ -333,6 +492,7 @@ export default function VendorShopPage({
       s.off("product:updated", onUpdated);
       s.off("product:deleted", onDeleted);
       s.off("inventory:updated", onInvUpdated);
+      s.off("tcgcategories:updated", onCategoriesUpdated);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.id]);
@@ -550,7 +710,7 @@ export default function VendorShopPage({
 
   const vendorStats = useMemo(() => {
     const scoped = products.filter((p) =>
-      selectedTcg ? toStr(p.category) === toStr(selectedTcg) : true
+      selectedTcg ? matchesSelectedTcg(p.category, selectedTcg, activeTcg) : true,
     );
 
     const inventoryUnits = scoped.reduce((sum, item) => sum + toInt(item.stock), 0);
@@ -570,7 +730,7 @@ export default function VendorShopPage({
       lowStockCount,
       soldOutCount,
     };
-  }, [products, selectedTcg]);
+  }, [products, selectedTcg, activeTcg]);
 
   const filteredProducts = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -591,7 +751,9 @@ export default function VendorShopPage({
     };
 
     const list = products
-      .filter((p) => (selectedTcg ? toStr(p.category) === toStr(selectedTcg) : true))
+      .filter((p) =>
+        selectedTcg ? matchesSelectedTcg(p.category, selectedTcg, activeTcg) : true,
+      )
       .filter((p) => passDate(p))
       .filter((p) => {
         if (conditionFilter === "ALL") return true;
@@ -643,17 +805,24 @@ export default function VendorShopPage({
     }
 
     return sorted;
-  }, [products, selectedTcg, search, conditionFilter, dateFilter, sortMode]);
+  }, [products, selectedTcg, activeTcg, search, conditionFilter, dateFilter, sortMode]);
 
   if (!currentUser) return null;
 
   const isVendor =
     currentUser?.role === ROLES.VENDOR || currentUser?.role === ROLES.ADMIN;
 
-  const tcgNameById = (id) => TCG_LIST.find((t) => t.id === id)?.name || id;
+  const tcgNameById = (id) => {
+    const found = tcgList.find(
+      (t) =>
+        normalizeTcgKey(t.id) === normalizeTcgKey(id) ||
+        normalizeTcgKey(t.name) === normalizeTcgKey(id),
+    );
+    return found?.name || id;
+  };
 
   return (
-    <div className="relative flex flex-col gap-6 md:flex-row">
+    <div className="relative flex flex-col gap-6 xl:flex-row">
       {/* ✅ Match User theme glows */}
       <div className="pointer-events-none absolute -left-32 top-10 h-64 w-64 rounded-full bg-purple-900/30 blur-3xl" />
       <div className="pointer-events-none absolute -right-40 bottom-0 h-72 w-72 rounded-full bg-amber-800/25 blur-3xl" />
@@ -735,7 +904,7 @@ export default function VendorShopPage({
                     }
                     className="w-full rounded-lg border border-amber-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-amber-50"
                   >
-                    {TCG_LIST.map((t) => (
+                    {tcgList.map((t) => (
                       <option key={t.id} value={t.id}>
                         {t.name}
                       </option>
@@ -930,8 +1099,8 @@ export default function VendorShopPage({
         </div>
 
         {/* ✅ TCG selector */}
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-          {TCG_LIST.map((tcg) => {
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+          {tcgList.map((tcg) => {
             const isActive = tcg.id === selectedTcg;
             const initial = tcg.name?.[0] ?? "?";
             return (
@@ -984,7 +1153,9 @@ export default function VendorShopPage({
             </div>
 
             <span className="rounded-full border border-amber-700/40 bg-amber-950/20 px-3 py-1 font-serif text-[10px] uppercase tracking-wide text-amber-200">
-              {loadingProducts ? "Loading..." : `${filteredProducts.length} item(s)`}
+              {loadingProducts || loadingTcg
+                ? "Loading..."
+                : `${filteredProducts.length} item(s)`}
             </span>
           </div>
 
@@ -1302,7 +1473,7 @@ export default function VendorShopPage({
                               }
                               className="w-full rounded-lg border border-sky-900/40 bg-slate-950 px-3 py-2 font-serif text-sm text-amber-50"
                             >
-                              {TCG_LIST.map((tcg) => (
+                              {tcgList.map((tcg) => (
                                 <option key={tcg.id} value={tcg.id}>
                                   {tcg.name}
                                 </option>
@@ -1515,7 +1686,7 @@ export default function VendorShopPage({
       </section>
 
       {/* RIGHT cart */}
-      <aside className="relative z-10 mt-6 w-full max-w-sm md:mt-0 md:w-80">
+      <aside className="relative z-10 mt-2 w-full max-w-none xl:mt-0 xl:w-80 xl:max-w-sm">
         <div className="sticky top-20 overflow-hidden rounded-2xl border border-amber-900/50 bg-gradient-to-br from-slate-950 via-purple-950/45 to-slate-950 p-5">
           <div className="mb-3 flex items-center justify-between">
             <div>
