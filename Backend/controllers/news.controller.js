@@ -1,6 +1,7 @@
 // Backend/controllers/news.controller.js
 
 import { sendBulkEmail } from "../modules/mailer.module.js";
+import { requireAdmin } from "../modules/authz.module.js";
 
 const toStr = (v) => (v == null ? "" : String(v)).trim();
 const toInt = (v, d = 0) => {
@@ -9,30 +10,6 @@ const toInt = (v, d = 0) => {
 };
 
 const NEWS_CATEGORIES = ["Magic", "Yu-Gi-Oh", "Pokemon", "Vanguard", "General"];
-
-/**
- * Verify caller is ADMIN by looking up PERSONAL_USER.ROLE.
- * Returns { ok: true, user } or { ok: false, message }.
- */
-async function requireAdmin(db, userId) {
-  const id = toInt(userId, 0);
-  if (!id) return { ok: false, message: "Authentication required." };
-  try {
-    const [rows] = await db.execute(
-      "SELECT ID, ROLE, NAME FROM PERSONAL_USER WHERE ID = ? LIMIT 1",
-      [id],
-    );
-    const row = rows?.[0];
-    if (!row) return { ok: false, message: "Account not found." };
-    if (String(row.ROLE || "").toUpperCase() !== "ADMIN") {
-      return { ok: false, message: "Admin privileges required." };
-    }
-    return { ok: true, user: row };
-  } catch (err) {
-    console.error("[news] requireAdmin error", err);
-    return { ok: false, message: "Authorization check failed." };
-  }
-}
 
 function safeNewsRow(row) {
   if (!row) return null;
@@ -106,12 +83,12 @@ export default function newsSocketController({ socket, io, db }) {
   socket.on("news:create", async (payload = {}, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
 
-    const auth = await requireAdmin(db, payload.userId);
-    if (!auth.ok) return ack({ success: false, message: auth.message });
+    const auth = requireAdmin(socket);
+    if (!auth.ok) return ack({ success: false, code: auth.code, message: auth.message });
 
     const title = toStr(payload.title);
     const content = toStr(payload.content);
-    const author = toStr(payload.author) || auth.user.NAME || "Admin";
+    const author = toStr(payload.author) || auth.user.name || "Admin";
     const category = toStr(payload.category) || "General";
     const imageUrl = toStr(payload.imageUrl ?? payload.image_url);
     const tags = toStr(payload.tags);
@@ -228,8 +205,8 @@ export default function newsSocketController({ socket, io, db }) {
   socket.on("news:update", async (payload = {}, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
 
-    const auth = await requireAdmin(db, payload.userId);
-    if (!auth.ok) return ack({ success: false, message: auth.message });
+    const auth = requireAdmin(socket);
+    if (!auth.ok) return ack({ success: false, code: auth.code, message: auth.message });
 
     const id = toInt(payload.id, 0);
     if (!id) return ack({ success: false, message: "News id is required." });
@@ -317,8 +294,8 @@ export default function newsSocketController({ socket, io, db }) {
   socket.on("news:delete", async (payload = {}, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
 
-    const auth = await requireAdmin(db, payload.userId);
-    if (!auth.ok) return ack({ success: false, message: auth.message });
+    const auth = requireAdmin(socket);
+    if (!auth.ok) return ack({ success: false, code: auth.code, message: auth.message });
 
     const id = toInt(payload.id, 0);
     if (!id) return ack({ success: false, message: "News id is required." });

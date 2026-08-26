@@ -14,7 +14,7 @@ export default defineConfig({
       "all",
 
       // ✅ your domain(s)
-      "tcg.nanashicollectibles.com",
+      "dev.nanashicollectibles.com",
       "server.nanashicollectibles.com",
     ],
   },

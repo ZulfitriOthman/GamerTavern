@@ -125,7 +125,8 @@ export default function tcgCategoriesSocketController({ socket, io, db }) {
 	});
 
 	socket.on("tcgcategories:create", async (payload = {}, ack) => {
-		const actorId = Number(payload?.currentUser?.id);
+		// Identity from the verified handshake, never the client-supplied payload.
+		const actorId = socket.user ? Number(socket.user.id) : NaN;
 		const role = await resolveRoleFromDb(db, actorId);
 
 		if (!canSell(role)) {

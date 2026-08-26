@@ -42,8 +42,8 @@ export default function tradeSocketController({ socket, io, db }) {
   socket.on("trade:create", async (payload = {}, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
 
-    const currentUser = payload.currentUser || null;
-    const userId = toInt(currentUser?.id);
+    // Identity from the verified handshake, never the client-supplied payload.
+    const userId = socket.user ? toInt(socket.user.id) : 0;
 
     if (!userId) {
       return ack({ success: false, message: "Unauthorized." });
@@ -138,8 +138,8 @@ export default function tradeSocketController({ socket, io, db }) {
   socket.on("trade:delete", async (payload = {}, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
 
-    const currentUser = payload.currentUser || null;
-    const userId = toInt(currentUser?.id);
+    // Identity from the verified handshake, never the client-supplied payload.
+    const userId = socket.user ? toInt(socket.user.id) : 0;
     const listingId = toInt(payload.id);
 
     if (!userId) return ack({ success: false, message: "Unauthorized." });

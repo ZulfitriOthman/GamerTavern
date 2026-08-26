@@ -1,8 +1,35 @@
 /** @type {import('tailwindcss').Config} */
-module.exports = {
+export default {
   content: ["./index.html", "./src/**/*.{js,jsx,ts,tsx}"],
   theme: {
-    extend: {},
+    extend: {
+      colors: {
+        ink: {
+          950: "#05070d",
+          900: "#0a0e18",
+          800: "#12182a",
+          700: "#1b2338",
+        },
+        brand: {
+          400: "#8b7bf0",
+          500: "#6c56e8",
+          600: "#5641c9",
+        },
+        gold: {
+          300: "#f3d78a",
+          400: "#e6bd5c",
+          500: "#cf9d3a",
+        },
+        signal: {
+          400: "#4fd6d0",
+          500: "#2bb8b2",
+        },
+      },
+      fontFamily: {
+        display: ["'Space Grotesk'", "system-ui", "sans-serif"],
+        sans: ["'Inter'", "system-ui", "sans-serif"],
+      },
+    },
   },
   plugins: [],
 };

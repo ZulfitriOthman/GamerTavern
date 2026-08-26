@@ -10,6 +10,7 @@ import { Server } from "socket.io";
 import multer from "multer";
 import { initDB, dbPing } from "./modules/db.module.js";
 import { verifyMailer } from "./modules/mailer.module.js";
+import { verifyToken } from "./modules/jwt.module.js";
 
 // routes (optional)
 import createHealthRoutes from "./routes/api/health.routes.js";
@@ -140,6 +141,35 @@ const io = new Server(httpServer, {
   },
   transports: ["websocket", "polling"],
   maxHttpBufferSize: 1e8,
+});
+
+// ---- Socket.IO authentication (handshake) ----
+// Identity, not authorization: this only decides who the caller is, never what they can
+// do. No token → guest (socket.user = null); public/guest features must keep working.
+// Invalid/expired/malformed token → also guest, never authenticated — a bad token must
+// never grant privileges. See CLAUDE.md "Socket.IO authentication" for the full model.
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token;
+
+  if (!token) {
+    socket.user = null;
+    return next();
+  }
+
+  try {
+    const decoded = verifyToken(token);
+    socket.user = {
+      id: decoded.sub,
+      email: decoded.email,
+      name: decoded.name,
+      role: decoded.role,
+    };
+  } catch (err) {
+    console.warn("[socket-auth] rejected token:", err?.message || err);
+    socket.user = null;
+  }
+
+  next();
 });
 
 const stores = {

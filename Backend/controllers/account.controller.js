@@ -1,6 +1,7 @@
 // Backend/controllers/account.controller.js
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
+import { requireOwnerOrAdmin } from "../modules/authz.module.js";
 
 const toStr = (v) => (v == null ? "" : String(v)).trim();
 
@@ -209,6 +210,12 @@ export default function accountSocketController({
 
     const id = Number(payload.id);
     if (!id) return ack({ success: false, message: "id is required." });
+
+    // Previously this had no ownership check at all — any connected socket could
+    // update any account's profile fields by guessing an id. Identity comes from the
+    // verified handshake, never the payload.
+    const auth = requireOwnerOrAdmin(socket, id);
+    if (!auth.ok) return ack({ success: false, code: auth.code, message: auth.message });
 
     const name = payload.name != null ? toStr(payload.name) : null;
     const email = payload.email != null ? toStr(payload.email).toLowerCase() : null;

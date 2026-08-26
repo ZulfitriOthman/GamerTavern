@@ -201,8 +201,8 @@ export default function productSocketController({
     const ack = typeof cb === "function" ? cb : () => {};
     const t0 = Date.now();
 
-    const currentUser = payload.currentUser || null;
-    const userId = toInt(currentUser?.id);
+    // Identity from the verified handshake, never the client-supplied payload.
+    const userId = socket.user ? toInt(socket.user.id) : 0;
     const role = await resolveRoleFromDb(db, userId);
 
     if (!userId) return ack({ success: false, message: "Unauthorized." });
@@ -294,8 +294,8 @@ export default function productSocketController({
     const ack = typeof cb === "function" ? cb : () => {};
     const t0 = Date.now();
 
-    const currentUser = payload.currentUser || null;
-    const userId = toInt(currentUser?.id);
+    // Identity from the verified handshake, never the client-supplied payload.
+    const userId = socket.user ? toInt(socket.user.id) : 0;
     const role = await resolveRoleFromDb(db, userId);
     const productId = toInt(payload.id);
 
@@ -418,8 +418,8 @@ export default function productSocketController({
     const ack = typeof cb === "function" ? cb : () => {};
     const t0 = Date.now();
 
-    const currentUser = payload.currentUser || null;
-    const userId = toInt(currentUser?.id);
+    // Identity from the verified handshake, never the client-supplied payload.
+    const userId = socket.user ? toInt(socket.user.id) : 0;
     const role = await resolveRoleFromDb(db, userId);
 
     const productId = toInt(payload.product_id ?? payload.productId);
@@ -526,8 +526,8 @@ export default function productSocketController({
     const ack = typeof cb === "function" ? cb : () => {};
     const t0 = Date.now();
 
-    const currentUser = payload.currentUser || null;
-    const userId = toInt(currentUser?.id);
+    // Identity from the verified handshake, never the client-supplied payload.
+    const userId = socket.user ? toInt(socket.user.id) : 0;
     const role = await resolveRoleFromDb(db, userId);
 
     const productId = toInt(payload.id);
@@ -614,8 +614,8 @@ export default function productSocketController({
     const ack = typeof cb === "function" ? cb : () => {};
     const t0 = Date.now();
 
-    const currentUser = payload.currentUser || null;
-    const userId = toInt(currentUser?.id);
+    // Identity from the verified handshake, never the client-supplied payload.
+    const userId = socket.user ? toInt(socket.user.id) : 0;
     const role = await resolveRoleFromDb(db, userId);
 
     if (!userId) return ack({ success: false, message: "Unauthorized." });

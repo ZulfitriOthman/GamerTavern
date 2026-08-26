@@ -1,8 +1,7 @@
 // routes/auth.routes.js
 import express from "express";
 import bcrypt from "bcrypt";
-import jwt from "jsonwebtoken";
-import crypto from "crypto";
+import { signToken as signJwt, verifyToken } from "../../modules/jwt.module.js";
 
 /**
  * Factory route
@@ -19,18 +18,12 @@ export default function createAuthRoutes({ db, io } = {}) {
   const LOGIN_ALLOWED_FIELDS = new Set(["email", "password"]);
   const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const PHONE_REGEX = /^[0-9+()\- ]{8,20}$/;
-  let cachedDevJwtSecret = null;
 
   // -------------------------
   // Helpers
   // -------------------------
   function signToken(user) {
-    const jwtSecret = getJwtSecret();
-    return jwt.sign(
-      { sub: user.ID, email: user.EMAIL, name: user.NAME, role: user.ROLE },
-      jwtSecret,
-      { expiresIn: process.env.JWT_EXPIRES_IN || "7d" }
-    );
+    return signJwt({ sub: user.ID, email: user.EMAIL, name: user.NAME, role: user.ROLE });
   }
 
   function normalizeRole(role) {
@@ -41,31 +34,13 @@ export default function createAuthRoutes({ db, io } = {}) {
     return normalizeRole(role) === PORTFOLIO_ROLE;
   }
 
-  function getJwtSecret() {
-    if (process.env.JWT_SECRET) {
-      return process.env.JWT_SECRET;
-    }
-
-    const isProduction = process.env.NODE_ENV === "production";
-    if (isProduction) {
-      throw new Error("JWT_SECRET is not set in environment variables");
-    }
-
-    if (!cachedDevJwtSecret) {
-      cachedDevJwtSecret = crypto.randomBytes(48).toString("hex");
-      console.warn("[auth] JWT_SECRET is missing. Using temporary in-memory dev secret. Tokens will reset when server restarts.");
-    }
-
-    return cachedDevJwtSecret;
-  }
-
   function requireAuth(req, res, next) {
     const hdr = req.headers.authorization || "";
     const token = hdr.startsWith("Bearer ") ? hdr.slice(7) : null;
     if (!token) return res.status(401).json({ message: "missing token" });
 
     try {
-      req.user = jwt.verify(token, getJwtSecret());
+      req.user = verifyToken(token);
       return next();
     } catch {
       return res.status(401).json({ message: "invalid token" });

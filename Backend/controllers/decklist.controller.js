@@ -1,34 +1,11 @@
 // Backend/controllers/decklist.controller.js
+import { requireAdmin } from "../modules/authz.module.js";
 
 const toStr = (v) => (v == null ? "" : String(v)).trim();
 const toInt = (v, d = 0) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : d;
 };
-
-/**
- * Verify caller is ADMIN by looking up PERSONAL_USER.ROLE.
- * Returns { ok: true, user } or { ok: false, message }.
- */
-async function requireAdmin(db, userId) {
-  const id = toInt(userId, 0);
-  if (!id) return { ok: false, message: "Authentication required." };
-  try {
-    const [rows] = await db.execute(
-      "SELECT ID, ROLE, NAME FROM PERSONAL_USER WHERE ID = ? LIMIT 1",
-      [id],
-    );
-    const row = rows?.[0];
-    if (!row) return { ok: false, message: "Account not found." };
-    if (String(row.ROLE || "").toUpperCase() !== "ADMIN") {
-      return { ok: false, message: "Admin privileges required." };
-    }
-    return { ok: true, user: row };
-  } catch (err) {
-    console.error("[decklist] requireAdmin error", err);
-    return { ok: false, message: "Authorization check failed." };
-  }
-}
 
 function safeDecklistRow(row) {
   if (!row) return null;
@@ -95,8 +72,8 @@ export default function decklistSocketController({ socket, io, db }) {
   socket.on("decklist:create", async (payload = {}, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
 
-    const auth = await requireAdmin(db, payload.userId);
-    if (!auth.ok) return ack({ success: false, message: auth.message });
+    const auth = requireAdmin(socket);
+    if (!auth.ok) return ack({ success: false, code: auth.code, message: auth.message });
 
     const name = toStr(payload.name);
     const game = toStr(payload.game);
@@ -146,7 +123,7 @@ export default function decklistSocketController({ socket, io, db }) {
         pop.value,
         cost.value,
         featured,
-        auth.user.ID,
+        auth.user.id,
       ]);
 
       const [rows] = await db.execute(
@@ -168,8 +145,8 @@ export default function decklistSocketController({ socket, io, db }) {
   socket.on("decklist:update", async (payload = {}, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
 
-    const auth = await requireAdmin(db, payload.userId);
-    if (!auth.ok) return ack({ success: false, message: auth.message });
+    const auth = requireAdmin(socket);
+    if (!auth.ok) return ack({ success: false, code: auth.code, message: auth.message });
 
     const id = toInt(payload.id, 0);
     if (!id) return ack({ success: false, message: "Decklist id is required." });
@@ -267,8 +244,8 @@ export default function decklistSocketController({ socket, io, db }) {
   socket.on("decklist:delete", async (payload = {}, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
 
-    const auth = await requireAdmin(db, payload.userId);
-    if (!auth.ok) return ack({ success: false, message: auth.message });
+    const auth = requireAdmin(socket);
+    if (!auth.ok) return ack({ success: false, code: auth.code, message: auth.message });
 
     const id = toInt(payload.id, 0);
     if (!id) return ack({ success: false, message: "Decklist id is required." });

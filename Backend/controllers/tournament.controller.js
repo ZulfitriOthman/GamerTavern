@@ -1,36 +1,13 @@
 // Backend/controllers/tournament.controller.js
 
 import { sendBulkEmail } from "../modules/mailer.module.js";
+import { requireAdmin } from "../modules/authz.module.js";
 
 const toStr = (v) => (v == null ? "" : String(v)).trim();
 const toInt = (v, d = 0) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : d;
 };
-
-/**
- * Verify caller is ADMIN by looking up PERSONAL_USER.ROLE.
- * Returns { ok: true, user } or { ok: false, message }.
- */
-async function requireAdmin(db, userId) {
-  const id = toInt(userId, 0);
-  if (!id) return { ok: false, message: "Authentication required." };
-  try {
-    const [rows] = await db.execute(
-      "SELECT ID, ROLE, NAME FROM PERSONAL_USER WHERE ID = ? LIMIT 1",
-      [id],
-    );
-    const row = rows?.[0];
-    if (!row) return { ok: false, message: "Account not found." };
-    if (String(row.ROLE || "").toUpperCase() !== "ADMIN") {
-      return { ok: false, message: "Admin privileges required." };
-    }
-    return { ok: true, user: row };
-  } catch (err) {
-    console.error("[tournament] requireAdmin error", err);
-    return { ok: false, message: "Authorization check failed." };
-  }
-}
 
 function safeTournamentRow(row) {
   if (!row) return null;
@@ -146,15 +123,15 @@ export default function tournamentSocketController({ socket, io, db }) {
   socket.on("tournament:create", async (payload = {}, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
 
-    const auth = await requireAdmin(db, payload.userId);
-    if (!auth.ok) return ack({ success: false, message: auth.message });
+    const auth = requireAdmin(socket);
+    if (!auth.ok) return ack({ success: false, code: auth.code, message: auth.message });
 
     const name = toStr(payload.name);
     const description = toStr(payload.description);
     const gameTitle = toStr(payload.gameTitle ?? payload.game_title);
     const location = toStr(payload.location);
     const rules = toStr(payload.rules);
-    const organizer = toStr(payload.organizer) || auth.user.NAME || "Admin";
+    const organizer = toStr(payload.organizer) || auth.user.name || "Admin";
     const startRaw = toStr(payload.startDate ?? payload.start_date);
     const endRaw = toStr(payload.endDate ?? payload.end_date);
     const entryFeeRaw = payload.entryFee ?? payload.entry_fee;
@@ -329,8 +306,8 @@ export default function tournamentSocketController({ socket, io, db }) {
   socket.on("tournament:update", async (payload = {}, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
 
-    const auth = await requireAdmin(db, payload.userId);
-    if (!auth.ok) return ack({ success: false, message: auth.message });
+    const auth = requireAdmin(socket);
+    if (!auth.ok) return ack({ success: false, code: auth.code, message: auth.message });
 
     const id = toInt(payload.id, 0);
     if (!id) return ack({ success: false, message: "Tournament id is required." });
@@ -452,8 +429,8 @@ export default function tournamentSocketController({ socket, io, db }) {
   socket.on("tournament:delete", async (payload = {}, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
 
-    const auth = await requireAdmin(db, payload.userId);
-    if (!auth.ok) return ack({ success: false, message: auth.message });
+    const auth = requireAdmin(socket);
+    if (!auth.ok) return ack({ success: false, code: auth.code, message: auth.message });
 
     const id = toInt(payload.id, 0);
     if (!id) return ack({ success: false, message: "Tournament id is required." });
@@ -477,8 +454,11 @@ export default function tournamentSocketController({ socket, io, db }) {
   socket.on("tournament:join", async (payload = {}, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
 
-    const userId = toInt(payload.userId, 0);
-    const guestName = toStr(payload.guestName ?? payload.guest_name);
+    // Identity comes from the verified handshake, never the payload — an authenticated
+    // caller always registers as themselves and can't claim to be a guest or impersonate
+    // another user. Only truly anonymous sockets (socket.user === null) use guestName.
+    const userId = socket.user ? toInt(socket.user.id, 0) : 0;
+    const guestName = socket.user ? "" : toStr(payload.guestName ?? payload.guest_name);
 
     const tournamentId = toInt(payload.tournamentId ?? payload.id, 0);
     if (!tournamentId)
@@ -569,7 +549,8 @@ export default function tournamentSocketController({ socket, io, db }) {
   socket.on("tournament:leave", async (payload = {}, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
 
-    const userId = toInt(payload.userId, 0);
+    // Identity from the verified handshake, not the payload — see tournament:join.
+    const userId = socket.user ? toInt(socket.user.id, 0) : 0;
     const participantId = toInt(payload.participantId ?? payload.participant_id, 0);
     const tournamentId = toInt(payload.tournamentId ?? payload.id, 0);
     if (!tournamentId)
@@ -589,14 +570,7 @@ export default function tournamentSocketController({ socket, io, db }) {
           return ack({ success: false, message: "Participant not found." });
         }
         const isOwner = userId && row.USER_ID && Number(row.USER_ID) === userId;
-        let isAdmin = false;
-        if (userId && !isOwner) {
-          const [u] = await db.execute(
-            "SELECT ROLE FROM PERSONAL_USER WHERE ID = ? LIMIT 1",
-            [userId],
-          );
-          isAdmin = String(u?.[0]?.ROLE || "").toUpperCase() === "ADMIN";
-        }
+        const isAdmin = String(socket.user?.role || "").toUpperCase() === "ADMIN";
         if (!isOwner && !isAdmin) {
           return ack({ success: false, message: "Not allowed." });
         }
