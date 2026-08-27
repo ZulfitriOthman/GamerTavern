@@ -29,13 +29,17 @@ import tournamentSocketController from "./controllers/tournament.controller.js";
 import decklistSocketController from "./controllers/decklist.controller.js";
 import countrySocketController from "./controllers/country.controller.js";
 import tcgCategoriesSocketController from "./controllers/tcgcategories.controller.js";
+import servicesSocketController from "./controllers/services.controller.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // ---- env ----
+// DOTENV_FILE lets an isolated environment file (e.g. .env.integration, gitignored,
+// never committed) be loaded instead of the default .env.dev, without ever touching
+// .env.dev itself. Unset by default -> unchanged behavior.
 dotenv.config({
-  path: path.join(__dirname, ".env.dev"),
+  path: path.join(__dirname, process.env.DOTENV_FILE || ".env.dev"),
   override: true,
 });
 
@@ -316,6 +320,7 @@ io.on("connection", (socket) => {
   decklistSocketController({ socket, io, db });
   countrySocketController({ socket, db });
   tcgCategoriesSocketController({ socket, io, db });
+  servicesSocketController({ socket, db });
 });
 
 /* ------------------------------ Error handler ------------------------------ */

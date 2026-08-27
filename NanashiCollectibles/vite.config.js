@@ -15,7 +15,7 @@ export default defineConfig({
 
       // ✅ your domain(s)
       "dev.nanashicollectibles.com",
-      "server.nanashicollectibles.com",
+      "backend.nanashicollectibles.com",
     ],
   },
 });

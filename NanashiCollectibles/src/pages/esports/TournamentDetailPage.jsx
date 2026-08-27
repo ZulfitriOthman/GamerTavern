@@ -7,16 +7,14 @@ import TournamentRegistrationForm from "../../features/tournament/TournamentRegi
 import { useTournaments } from "../../features/tournament/useTournaments.js";
 import { formatDateTime, formatEntryFee } from "../../features/tournament/format.js";
 
-// Derived client-side only, from real start/end dates — the backend has no status field.
-function deriveStatus(tournament) {
-  const now = new Date();
-  const start = tournament.start_date ? new Date(tournament.start_date) : null;
-  const end = tournament.end_date ? new Date(tournament.end_date) : start;
-  if (start && now < start) return { label: "Upcoming", tone: "signal" };
-  if (end && now > end) return { label: "Completed", tone: "neutral" };
-  if (start) return { label: "In progress", tone: "gold" };
-  return null;
-}
+// Real backend status now (v2 schema) — no more client-side date guessing.
+const STATUS_BADGES = {
+  draft: { label: "Draft", tone: "neutral" },
+  open: { label: "Open", tone: "signal" },
+  closed: { label: "Closed", tone: "gold" },
+  completed: { label: "Completed", tone: "neutral" },
+  cancelled: { label: "Cancelled", tone: "neutral" },
+};
 
 export default function TournamentDetailPage() {
   const { id } = useParams();
@@ -72,7 +70,8 @@ export default function TournamentDetailPage() {
     );
   }
 
-  const derivedStatus = deriveStatus(tournament);
+  const statusBadge = STATUS_BADGES[tournament.status] ?? null;
+  const isTeamMode = tournament.registration_type === "team";
 
   return (
     <Section className="pt-16 sm:pt-24">
@@ -81,8 +80,9 @@ export default function TournamentDetailPage() {
       </Link>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        {tournament.game_title ? <Badge tone="signal">{tournament.game_title}</Badge> : null}
-        {derivedStatus ? <Badge tone={derivedStatus.tone}>{derivedStatus.label}</Badge> : null}
+        {tournament.esports_game_name ? <Badge tone="signal">{tournament.esports_game_name}</Badge> : null}
+        {statusBadge ? <Badge tone={statusBadge.tone}>{statusBadge.label}</Badge> : null}
+        {isTeamMode ? <Badge>Team tournament</Badge> : null}
       </div>
 
       <h1 className="mt-3 font-display text-3xl font-semibold text-amber-50 sm:text-4xl">
@@ -118,11 +118,18 @@ export default function TournamentDetailPage() {
               <dt className="text-xs uppercase tracking-wide text-amber-50/30">Entry fee</dt>
               <dd className="mt-1 text-amber-50/80">{formatEntryFee(tournament.entry_fee)}</dd>
             </div>
-            {tournament.max_teams != null ? (
+            {isTeamMode ? (
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-amber-50/30">Team size</dt>
+                <dd className="mt-1 text-amber-50/80">{tournament.team_size} players</dd>
+              </div>
+            ) : null}
+            {tournament.max_entries != null ? (
               <div>
                 <dt className="text-xs uppercase tracking-wide text-amber-50/30">Capacity</dt>
                 <dd className="mt-1 text-amber-50/80">
-                  {tournament.participants?.length || 0} / {tournament.max_teams} registered
+                  {isTeamMode ? tournament.teams?.length || 0 : tournament.participants?.length || 0} /{" "}
+                  {tournament.max_entries} {isTeamMode ? "teams" : "registered"}
                 </dd>
               </div>
             ) : null}
@@ -151,7 +158,27 @@ export default function TournamentDetailPage() {
             </div>
           ) : null}
 
-          {tournament.participants?.length ? (
+          {isTeamMode ? (
+            tournament.teams?.length ? (
+              <div className="mt-6 border-t border-white/10 pt-6">
+                <h2 className="text-xs font-semibold uppercase tracking-wider text-amber-50/40">
+                  Registered teams ({tournament.teams.length})
+                </h2>
+                <ul className="mt-3 flex flex-col gap-3 text-sm text-amber-50/70">
+                  {tournament.teams.map((team) => (
+                    <li key={team.id}>
+                      <p className="font-medium text-amber-50">{team.name}</p>
+                      <p className="text-xs text-amber-50/50">
+                        {(team.members || [])
+                          .map((m) => m.nickname || m.user_name || m.guest_name || "Anonymous")
+                          .join(", ")}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null
+          ) : tournament.participants?.length ? (
             <div className="mt-6 border-t border-white/10 pt-6">
               <h2 className="text-xs font-semibold uppercase tracking-wider text-amber-50/40">
                 Registered ({tournament.participants.length})
@@ -159,7 +186,7 @@ export default function TournamentDetailPage() {
               <ul className="mt-3 flex flex-col gap-1.5 text-sm text-amber-50/70">
                 {tournament.participants.map((p) => (
                   <li key={p.id}>
-                    {p.team_name || p.nickname || p.user_name || p.guest_name || "Anonymous"}
+                    {p.nickname || p.user_name || p.guest_name || "Anonymous"}
                     {p.user_role === "GUEST" ? (
                       <span className="ml-2 text-xs text-amber-50/30">guest</span>
                     ) : null}

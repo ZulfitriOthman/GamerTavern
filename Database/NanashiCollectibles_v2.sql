@@ -303,12 +303,17 @@ CREATE TABLE tournament_teams (
   updated_at               TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_teams_tournament
     FOREIGN KEY (tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE,
-  -- Composite FK: guarantees the captain's registration belongs to THIS SAME tournament.
-  -- (It does not, by itself, guarantee the captain is a member of THIS SPECIFIC team —
-  -- see the backend requirement note below.)
+  -- NOT a composite FK (corrected — the original (captain_registration_id, tournament_id)
+  -- composite failed in practice: MySQL applies ON DELETE SET NULL to every column in the
+  -- FK, and tournament_id here is NOT NULL, so it could never be nulled out). Plain FK on
+  -- captain_registration_id only. Two rules are therefore NOT database-enforced and MUST
+  -- be validated in backend service logic before ever setting this column:
+  --   1. team.tournament_id === (the referenced registration).tournament_id
+  --   2. the referenced registration is actually a member of THIS team (has a row in
+  --      tournament_team_members for this team_id)
   CONSTRAINT fk_teams_captain_registration
-    FOREIGN KEY (captain_registration_id, tournament_id)
-    REFERENCES tournament_registrations(id, tournament_id) ON DELETE SET NULL,
+    FOREIGN KEY (captain_registration_id)
+    REFERENCES tournament_registrations(id) ON DELETE SET NULL,
   UNIQUE KEY uq_teams_tournament_name (tournament_id, name),
   UNIQUE KEY uq_teams_id_tournament (id, tournament_id),           -- composite candidate key for tournament_team_members below
   INDEX idx_teams_tournament (tournament_id)
@@ -330,21 +335,19 @@ CREATE TABLE tournament_team_members (
   UNIQUE KEY uq_team_members_registration (registration_id),       -- a registration belongs to at most one team, ever
   INDEX idx_team_members_team (team_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
--- Both cross-table tournament-consistency rules you asked for are enforced by MySQL
--- itself via the composite foreign keys above — no triggers used:
---   1. A team_member's registration is guaranteed to be in the same tournament as its team
---      (fk_team_members_team + fk_team_members_registration both key off tournament_id).
---   2. A team's captain_registration_id is guaranteed to be in the same tournament as the
---      team (fk_teams_captain_registration).
--- NOT enforced at the database level (would require a trigger to do cleanly, and none was
--- added per your instruction to avoid triggers unless necessary) — MUST be enforced in
--- backend service logic:
---   - That a team's captain_registration_id is actually a MEMBER of that specific team
---     (i.e. has a row in tournament_team_members for that team_id), not just any
---     registration in the same tournament. Recommended pattern: only allow setting a
---     captain from within the same transaction that inserts/has already inserted the
---     corresponding tournament_team_members row, and validate the membership row exists
---     first.
+-- Cross-table tournament-consistency, current status (corrected):
+--   1. ENFORCED BY MYSQL — a team_member's registration is guaranteed to be in the same
+--      tournament as its team (fk_team_members_team + fk_team_members_registration both
+--      key off tournament_id, via the composite FKs above).
+--   2. NOT ENFORCED BY MYSQL, backend responsibility — a team's captain_registration_id
+--      belonging to the same tournament as the team, and being an actual MEMBER of that
+--      specific team (a row in this table for that team_id). The composite-FK approach
+--      used for (1) does not work for captain_registration_id (see the comment on
+--      fk_teams_captain_registration on tournament_teams above — ON DELETE SET NULL
+--      cannot apply to a composite FK where one column is NOT NULL). Recommended pattern:
+--      validate both conditions in application code inside the same transaction that
+--      assigns a captain, after the corresponding tournament_team_members row already
+--      exists.
 --   - Whenever inserting into this table, the application must set tournament_id to the
 --     same value as the referenced team's (and registration's) tournament_id — trivial
 --     (SELECT it from either parent), but not automatic.

@@ -24,6 +24,12 @@ export default {
           400: "#4fd6d0",
           500: "#2bb8b2",
         },
+        // Semantic alias for Tailwind's own rose values — formalizes the error/danger
+        // color already used ad hoc (text-rose-400) across auth/form error messages.
+        danger: {
+          400: "#fb7185",
+          500: "#f43f5e",
+        },
       },
       fontFamily: {
         display: ["'Space Grotesk'", "system-ui", "sans-serif"],

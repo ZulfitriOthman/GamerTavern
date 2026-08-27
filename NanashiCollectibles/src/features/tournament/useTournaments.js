@@ -54,17 +54,22 @@ export function useTournaments() {
         prev.map((t) => (t.id === tournament_id ? { ...t, participants } : t))
       );
     };
+    const mergeTeams = ({ tournament_id, teams }) => {
+      setTournaments((prev) => prev.map((t) => (t.id === tournament_id ? { ...t, teams } : t)));
+    };
 
     socket.on("tournament:created", upsert);
     socket.on("tournament:updated", upsert);
     socket.on("tournament:deleted", remove);
     socket.on("tournament:participants_updated", mergeParticipants);
+    socket.on("tournament:teams_updated", mergeTeams);
 
     return () => {
       socket.off("tournament:created", upsert);
       socket.off("tournament:updated", upsert);
       socket.off("tournament:deleted", remove);
       socket.off("tournament:participants_updated", mergeParticipants);
+      socket.off("tournament:teams_updated", mergeTeams);
     };
   }, [socket]);
 

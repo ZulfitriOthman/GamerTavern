@@ -1,4 +1,7 @@
 // Backend/controllers/decklist.controller.js
+//
+// Migrated to the NanashiCollectibles v2 schema: DECKLIST -> deck_lists, and the
+// free-text GAME column -> tcg_game_id FK against the canonical tcg_games list.
 import { requireAdmin } from "../modules/authz.module.js";
 
 const toStr = (v) => (v == null ? "" : String(v)).trim();
@@ -10,28 +13,31 @@ const toInt = (v, d = 0) => {
 function safeDecklistRow(row) {
   if (!row) return null;
   return {
-    id: row.ID,
-    name: row.NAME,
-    game: row.GAME,
-    archetype: row.ARCHETYPE,
-    format: row.FORMAT,
-    pilot: row.PILOT,
-    description: row.DESCRIPTION,
-    key_cards: row.KEY_CARDS,
-    win_rate: row.WIN_RATE != null ? Number(row.WIN_RATE) : null,
-    popularity: row.POPULARITY,
-    avg_cost: row.AVG_COST != null ? Number(row.AVG_COST) : null,
-    featured: row.FEATURED ? 1 : 0,
-    created_by: row.CREATED_BY,
-    created_at: row.CREATED_AT,
-    updated_at: row.UPDATED_AT,
+    id: row.id,
+    name: row.name,
+    tcg_game_id: row.tcg_game_id,
+    tcg_game_name: row.tcg_game_name ?? null,
+    archetype: row.archetype,
+    format: row.format,
+    pilot: row.pilot,
+    description: row.description,
+    key_cards: row.key_cards,
+    win_rate: row.win_rate != null ? Number(row.win_rate) : null,
+    popularity: row.popularity,
+    avg_cost: row.avg_cost != null ? Number(row.avg_cost) : null,
+    featured: row.featured ? 1 : 0,
+    created_by: row.created_by,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
   };
 }
 
-const SELECT_DECKLIST_COLS = `
-  ID, NAME, GAME, ARCHETYPE, FORMAT, PILOT, DESCRIPTION, KEY_CARDS,
-  WIN_RATE, POPULARITY, AVG_COST, FEATURED, CREATED_BY,
-  CREATED_AT, UPDATED_AT
+const SELECT_DECKLIST_SQL = `
+  SELECT d.id, d.name, d.tcg_game_id, g.name AS tcg_game_name, d.archetype, d.format,
+         d.pilot, d.description, d.key_cards, d.win_rate, d.popularity, d.avg_cost,
+         d.featured, d.created_by, d.created_at, d.updated_at
+  FROM deck_lists d
+  LEFT JOIN tcg_games g ON g.id = d.tcg_game_id
 `;
 
 export default function decklistSocketController({ socket, io, db }) {
@@ -40,20 +46,19 @@ export default function decklistSocketController({ socket, io, db }) {
      ========================================================= */
   socket.on("decklist:list", async (payload = {}, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
-    const game = toStr(payload.game);
+    const tcgGameId = payload.tcgGameId != null ? toInt(payload.tcgGameId) : null;
 
     try {
       const where = [];
       const params = [];
-      if (game && game !== "All") {
-        where.push("GAME = ?");
-        params.push(game);
+      if (tcgGameId) {
+        where.push("d.tcg_game_id = ?");
+        params.push(tcgGameId);
       }
       const sql = `
-        SELECT ${SELECT_DECKLIST_COLS}
-        FROM DECKLIST
+        ${SELECT_DECKLIST_SQL}
         ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-        ORDER BY FEATURED DESC, POPULARITY DESC, ID DESC
+        ORDER BY d.featured DESC, d.popularity DESC, d.id DESC
       `;
       const [rows] = await db.execute(sql, params);
       return ack({
@@ -76,9 +81,9 @@ export default function decklistSocketController({ socket, io, db }) {
     if (!auth.ok) return ack({ success: false, code: auth.code, message: auth.message });
 
     const name = toStr(payload.name);
-    const game = toStr(payload.game);
+    const tcgGameId = toInt(payload.tcgGameId ?? payload.tcg_game_id, 0);
     if (!name) return ack({ success: false, message: "Name is required." });
-    if (!game) return ack({ success: false, message: "Game is required." });
+    if (!tcgGameId) return ack({ success: false, message: "tcgGameId is required." });
 
     const archetype = toStr(payload.archetype);
     const format = toStr(payload.format);
@@ -106,14 +111,14 @@ export default function decklistSocketController({ socket, io, db }) {
 
     try {
       const sql = `
-        INSERT INTO DECKLIST
-          (NAME, GAME, ARCHETYPE, FORMAT, PILOT, DESCRIPTION, KEY_CARDS,
-           WIN_RATE, POPULARITY, AVG_COST, FEATURED, CREATED_BY)
+        INSERT INTO deck_lists
+          (name, tcg_game_id, archetype, format, pilot, description, key_cards,
+           win_rate, popularity, avg_cost, featured, created_by)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
       const [result] = await db.execute(sql, [
         name,
-        game,
+        tcgGameId,
         archetype || null,
         format || null,
         pilot || null,
@@ -126,14 +131,14 @@ export default function decklistSocketController({ socket, io, db }) {
         auth.user.id,
       ]);
 
-      const [rows] = await db.execute(
-        `SELECT ${SELECT_DECKLIST_COLS} FROM DECKLIST WHERE ID = ? LIMIT 1`,
-        [result.insertId],
-      );
+      const [rows] = await db.execute(`${SELECT_DECKLIST_SQL} WHERE d.id = ? LIMIT 1`, [result.insertId]);
       const created = safeDecklistRow(rows?.[0]);
       io?.emit?.("decklist:created", created);
       return ack({ success: true, data: created });
     } catch (err) {
+      if (err?.code === "ER_NO_REFERENCED_ROW_2" || err?.code === "ER_NO_REFERENCED_ROW") {
+        return ack({ success: false, message: "Unknown tcgGameId." });
+      }
       console.error("[decklist:create] error", err);
       return ack({ success: false, message: "Failed to create decklist." });
     }
@@ -163,21 +168,21 @@ export default function decklistSocketController({ socket, io, db }) {
     if (payload.name !== undefined) {
       const v = toStr(payload.name);
       if (!v) return ack({ success: false, message: "Name cannot be empty." });
-      sets.push("NAME = ?");
+      sets.push("name = ?");
       params.push(v);
     }
-    if (payload.game !== undefined) {
-      const v = toStr(payload.game);
-      if (!v) return ack({ success: false, message: "Game cannot be empty." });
-      sets.push("GAME = ?");
+    if (payload.tcgGameId !== undefined || payload.tcg_game_id !== undefined) {
+      const v = toInt(payload.tcgGameId ?? payload.tcg_game_id, 0);
+      if (!v) return ack({ success: false, message: "tcgGameId cannot be empty." });
+      sets.push("tcg_game_id = ?");
       params.push(v);
     }
-    if (payload.archetype !== undefined) setStr("ARCHETYPE", payload.archetype);
-    if (payload.format !== undefined) setStr("FORMAT", payload.format);
-    if (payload.pilot !== undefined) setStr("PILOT", payload.pilot);
-    if (payload.description !== undefined) setStr("DESCRIPTION", payload.description);
+    if (payload.archetype !== undefined) setStr("archetype", payload.archetype);
+    if (payload.format !== undefined) setStr("format", payload.format);
+    if (payload.pilot !== undefined) setStr("pilot", payload.pilot);
+    if (payload.description !== undefined) setStr("description", payload.description);
     if (payload.keyCards !== undefined || payload.key_cards !== undefined)
-      setStr("KEY_CARDS", payload.keyCards ?? payload.key_cards);
+      setStr("key_cards", payload.keyCards ?? payload.key_cards);
 
     const numField = (col, raw, label, opts = {}) => {
       let val = null;
@@ -194,19 +199,19 @@ export default function decklistSocketController({ socket, io, db }) {
     };
 
     if (payload.winRate !== undefined || payload.win_rate !== undefined) {
-      const r = numField("WIN_RATE", payload.winRate ?? payload.win_rate, "win rate", { min: 0, max: 100 });
+      const r = numField("win_rate", payload.winRate ?? payload.win_rate, "win rate", { min: 0, max: 100 });
       if (!r.ok) return ack({ success: false, message: r.message });
     }
     if (payload.popularity !== undefined) {
-      const r = numField("POPULARITY", payload.popularity, "popularity", { int: true, min: 0 });
+      const r = numField("popularity", payload.popularity, "popularity", { int: true, min: 0 });
       if (!r.ok) return ack({ success: false, message: r.message });
     }
     if (payload.avgCost !== undefined || payload.avg_cost !== undefined) {
-      const r = numField("AVG_COST", payload.avgCost ?? payload.avg_cost, "avg cost", { min: 0 });
+      const r = numField("avg_cost", payload.avgCost ?? payload.avg_cost, "avg cost", { min: 0 });
       if (!r.ok) return ack({ success: false, message: r.message });
     }
     if (payload.featured !== undefined) {
-      sets.push("FEATURED = ?");
+      sets.push("featured = ?");
       params.push(payload.featured ? 1 : 0);
     }
 
@@ -214,25 +219,25 @@ export default function decklistSocketController({ socket, io, db }) {
       return ack({ success: false, message: "Nothing to update." });
     }
 
-    sets.push("UPDATED_AT = CURRENT_TIMESTAMP");
+    sets.push("updated_at = CURRENT_TIMESTAMP");
     params.push(id);
 
     try {
       const [result] = await db.execute(
-        `UPDATE DECKLIST SET ${sets.join(", ")} WHERE ID = ?`,
+        `UPDATE deck_lists SET ${sets.join(", ")} WHERE id = ?`,
         params,
       );
       if (result.affectedRows === 0) {
         return ack({ success: false, message: "Decklist not found." });
       }
-      const [rows] = await db.execute(
-        `SELECT ${SELECT_DECKLIST_COLS} FROM DECKLIST WHERE ID = ? LIMIT 1`,
-        [id],
-      );
+      const [rows] = await db.execute(`${SELECT_DECKLIST_SQL} WHERE d.id = ? LIMIT 1`, [id]);
       const updated = safeDecklistRow(rows?.[0]);
       io?.emit?.("decklist:updated", updated);
       return ack({ success: true, data: updated });
     } catch (err) {
+      if (err?.code === "ER_NO_REFERENCED_ROW_2" || err?.code === "ER_NO_REFERENCED_ROW") {
+        return ack({ success: false, message: "Unknown tcgGameId." });
+      }
       console.error("[decklist:update] error", err);
       return ack({ success: false, message: "Failed to update decklist." });
     }
@@ -251,7 +256,7 @@ export default function decklistSocketController({ socket, io, db }) {
     if (!id) return ack({ success: false, message: "Decklist id is required." });
 
     try {
-      const [result] = await db.execute("DELETE FROM DECKLIST WHERE ID = ?", [id]);
+      const [result] = await db.execute("DELETE FROM deck_lists WHERE id = ?", [id]);
       if (result.affectedRows === 0) {
         return ack({ success: false, message: "Decklist not found." });
       }

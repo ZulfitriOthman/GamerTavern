@@ -1,168 +1,68 @@
+// Backend/controllers/tcgcategories.controller.js
+//
+// Migrated to the NanashiCollectibles v2 schema. This retires the old
+// CATEGORIES_TCG / CATEGORIES fallback-query logic entirely — neither of those
+// legacy tables was ever confirmed to exist (they weren't in Database/All.sql, and
+// this file used to try three different query shapes and catch "table doesn't
+// exist" errors to figure out which one was real). `tcg_games` is now the single
+// canonical source; the file name is kept to avoid an unrelated server.js import
+// change, but its responsibility is now specifically the TCG games list, not a
+// generic "categories" concept — commerce categories are `product_categories`,
+// handled in product.controller.js.
+import { requireAdmin } from "../modules/authz.module.js";
+
 const toStr = (v) => (v == null ? "" : String(v)).trim();
 
-const ROLES = {
-	USER: "USER",
-	VENDOR: "VENDOR",
-	ADMIN: "ADMIN",
-};
-
-function normalizeRole(role) {
-	const r = String(role || ROLES.USER).toUpperCase();
-	return Object.values(ROLES).includes(r) ? r : ROLES.USER;
-}
-
-function canSell(role) {
-	return role === ROLES.VENDOR || role === ROLES.ADMIN;
-}
-
-const QUERY_PLANS = [
-	{
-		sql: "SELECT ID AS id, TCG_CATEGORIES AS name FROM CATEGORIES_TCG ORDER BY ID",
-		table: "CATEGORIES_TCG",
-	},
-	{
-		sql: "SELECT ID AS id, NAME AS name FROM CATEGORIES_TCG ORDER BY ID",
-		table: "CATEGORIES_TCG",
-	},
-	{
-		sql: "SELECT ID AS id, NAME AS name FROM CATEGORIES ORDER BY ID",
-		table: "CATEGORIES",
-	},
-];
-
-const INSERT_PLANS = [
-	{
-		sql: "INSERT INTO CATEGORIES_TCG (ID, TCG_CATEGORIES) VALUES (?, ?)",
-	},
-	{
-		sql: "INSERT INTO CATEGORIES_TCG (ID, NAME) VALUES (?, ?)",
-	},
-	{
-		sql: "INSERT INTO CATEGORIES (ID, NAME) VALUES (?, ?)",
-	},
-];
-
-function normalizeRows(rows = []) {
-	return rows
-		.map((row) => {
-			const id = toStr(row?.id ?? row?.ID);
-			const name = toStr(row?.name ?? row?.NAME ?? row?.tcg_categories ?? row?.TCG_CATEGORIES);
-			if (!id && !name) return null;
-			return {
-				id: id || name,
-				name: name || id,
-			};
-		})
-		.filter(Boolean);
-}
-
-function isRetryableSchemaError(err) {
-	const code = err?.code;
-	return code === "ER_NO_SUCH_TABLE" || code === "ER_BAD_FIELD_ERROR";
-}
-
-async function loadCategories(db) {
-	let lastErr;
-
-	for (const plan of QUERY_PLANS) {
-		try {
-			const [rows] = await db.query(plan.sql);
-			return normalizeRows(rows || []);
-		} catch (err) {
-			lastErr = err;
-			if (!isRetryableSchemaError(err)) break;
-		}
-	}
-
-	throw lastErr || new Error("Unable to load TCG categories.");
-}
-
-async function insertCategory(db, id, name) {
-	let lastErr;
-
-	for (const plan of INSERT_PLANS) {
-		try {
-			await db.execute(plan.sql, [id, name]);
-			return;
-		} catch (err) {
-			lastErr = err;
-			if (!isRetryableSchemaError(err)) break;
-		}
-	}
-
-	throw lastErr || new Error("Unable to create TCG category.");
-}
-
-async function resolveRoleFromDb(db, userId) {
-	const id = Number(userId);
-	if (!Number.isFinite(id) || id <= 0) return ROLES.USER;
-
-	try {
-		const [rows] = await db.query(
-			"SELECT ROLE FROM PERSONAL_USER WHERE ID = ? LIMIT 1",
-			[id],
-		);
-		return normalizeRole(rows?.[0]?.ROLE);
-	} catch (err) {
-		console.error("[tcgcategories.controller] role lookup failed:", err?.message || err);
-		return ROLES.USER;
-	}
+function slugify(name) {
+  return toStr(name)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 export default function tcgCategoriesSocketController({ socket, io, db }) {
-	socket.on("tcgcategories:list", async (_payload, ack) => {
-		try {
-			const data = await loadCategories(db);
-			if (typeof ack === "function") ack({ success: true, data });
-			socket.emit("tcgcategories:list", data);
-		} catch (err) {
-			console.error("[tcgcategories.controller] tcgcategories:list error:", err?.message || err);
-			if (typeof ack === "function") {
-				ack({ success: false, data: [], message: err?.message || "Failed to load TCG categories." });
-			}
-			socket.emit("tcgcategories:list", []);
-		}
-	});
+  socket.on("tcgcategories:list", async (_payload, ack) => {
+    try {
+      const [rows] = await db.query(
+        "SELECT id, name, slug, status FROM tcg_games ORDER BY name"
+      );
+      if (typeof ack === "function") ack({ success: true, data: rows || [] });
+      socket.emit("tcgcategories:list", rows || []);
+    } catch (err) {
+      console.error("[tcgcategories.controller] tcgcategories:list error:", err?.message || err);
+      if (typeof ack === "function") {
+        ack({ success: false, data: [], message: "Failed to load TCG games." });
+      }
+      socket.emit("tcgcategories:list", []);
+    }
+  });
 
-	socket.on("tcgcategories:create", async (payload = {}, ack) => {
-		// Identity from the verified handshake, never the client-supplied payload.
-		const actorId = socket.user ? Number(socket.user.id) : NaN;
-		const role = await resolveRoleFromDb(db, actorId);
+  socket.on("tcgcategories:create", async (payload = {}, ack) => {
+    const respond = typeof ack === "function" ? ack : () => {};
 
-		if (!canSell(role)) {
-			if (typeof ack === "function") {
-				ack({ success: false, message: "Only vendors/admin can create TCG categories." });
-			}
-			return;
-		}
+    // Identity from the verified handshake, never the client-supplied payload.
+    const auth = requireAdmin(socket);
+    if (!auth.ok) return respond({ success: false, code: auth.code, message: auth.message });
 
-		const id = toStr(payload?.id);
-		const name = toStr(payload?.name);
+    const name = toStr(payload?.name);
+    if (!name) return respond({ success: false, message: "name is required." });
+    const slug = toStr(payload?.slug) || slugify(name);
 
-		if (!id || !name) {
-			if (typeof ack === "function") {
-				ack({ success: false, message: "id and name are required." });
-			}
-			return;
-		}
+    try {
+      await db.execute("INSERT INTO tcg_games (name, slug) VALUES (?, ?)", [name, slug]);
 
-		try {
-			await insertCategory(db, id, name);
-			const data = await loadCategories(db);
+      const [rows] = await db.query(
+        "SELECT id, name, slug, status FROM tcg_games ORDER BY name"
+      );
 
-			if (typeof ack === "function") {
-				ack({ success: true, data, message: "TCG category created." });
-			}
-
-			io.emit("tcgcategories:updated", data);
-		} catch (err) {
-			const duplicate = err?.code === "ER_DUP_ENTRY";
-			if (typeof ack === "function") {
-				ack({
-					success: false,
-					message: duplicate ? "Category ID already exists." : err?.message || "Failed to create TCG category.",
-				});
-			}
-		}
-	});
+      respond({ success: true, data: rows || [], message: "TCG game created." });
+      io.emit("tcgcategories:updated", rows || []);
+    } catch (err) {
+      const duplicate = err?.code === "ER_DUP_ENTRY";
+      respond({
+        success: false,
+        message: duplicate ? "A TCG game with that slug already exists." : "Failed to create TCG game.",
+      });
+    }
+  });
 }

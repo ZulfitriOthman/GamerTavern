@@ -1,4 +1,14 @@
 // Backend/controllers/account.controller.js
+//
+// Migrated to the NanashiCollectibles v2 schema (users / password_reset_tokens).
+//
+// NOTE (still true after migration, not addressed here): account:login issues no
+// token and cannot authenticate any later request — REST JWT (Backend/routes/api/auth.routes.js)
+// remains the canonical auth system. account:requestReset/account:resetPassword now
+// duplicate the canonical REST /api/auth/forgot-password and /api/auth/reset-password
+// endpoints added in this same migration — kept here only so this controller keeps
+// working as before; recommend retiring these two socket handlers in a future cleanup
+// once nothing depends on them.
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { requireOwnerOrAdmin } from "../modules/authz.module.js";
@@ -8,7 +18,7 @@ const toStr = (v) => (v == null ? "" : String(v)).trim();
 // ❗ Never trim passwords
 const toPassword = (v) => (v == null ? "" : String(v));
 
-/** ✅ Roles (string-based because your DB uses VARCHAR(50)) */
+/** ✅ Roles (string-based — users.role is VARCHAR(20), app-validated) */
 const ROLES = Object.freeze({
   USER: "USER",
   VENDOR: "VENDOR",
@@ -82,14 +92,15 @@ function resolveCreateRole(payload) {
 function safePublicUserRow(row) {
   if (!row) return null;
   return {
-    id: row.ID,
-    role: row.ROLE, // ✅ include role in public user
-    name: row.NAME,
-    email: row.EMAIL,
-    phone: row.PHONE,
-    profile_icon: row.PROFILE_ICON,
-    created_at: row.CREATED_AT,
-    updated_at: row.UPDATED_AT,
+    id: row.id,
+    role: row.role, // ✅ include role in public user
+    name: row.name,
+    email: row.email,
+    phone: row.phone,
+    profile_icon: row.profile_icon,
+    status: row.status,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
   };
 }
 
@@ -157,7 +168,7 @@ export default function accountSocketController({
       const passwordHash = await bcrypt.hash(password, rounds);
 
       const [result] = await db.execute(
-        `INSERT INTO PERSONAL_USER (ROLE, NAME, EMAIL, PHONE, PASSWORD, PROFILE_ICON)
+        `INSERT INTO users (role, name, email, phone, password_hash, profile_icon)
          VALUES (?, ?, ?, ?, ?, ?)`,
         [role, name, email, phone, passwordHash, payload.profileIcon || null],
       );
@@ -165,9 +176,9 @@ export default function accountSocketController({
       const userId = result.insertId;
 
       const [rows] = await db.execute(
-        `SELECT ID, ROLE, NAME, EMAIL, PHONE, PROFILE_ICON, CREATED_AT, UPDATED_AT
-         FROM PERSONAL_USER
-         WHERE ID = ?`,
+        `SELECT id, role, name, email, phone, profile_icon, status, created_at, updated_at
+         FROM users
+         WHERE id = ?`,
         [userId],
       );
 
@@ -211,9 +222,7 @@ export default function accountSocketController({
     const id = Number(payload.id);
     if (!id) return ack({ success: false, message: "id is required." });
 
-    // Previously this had no ownership check at all — any connected socket could
-    // update any account's profile fields by guessing an id. Identity comes from the
-    // verified handshake, never the payload.
+    // Identity comes from the verified handshake, never the payload (Phase 3A fix).
     const auth = requireOwnerOrAdmin(socket, id);
     if (!auth.ok) return ack({ success: false, code: auth.code, message: auth.message });
 
@@ -237,7 +246,7 @@ export default function accountSocketController({
       if (!name) {
         return ack({ success: false, message: "Name cannot be empty." });
       }
-      fields.push("NAME = ?");
+      fields.push("name = ?");
       params.push(name);
     }
     if (email !== null) {
@@ -245,7 +254,7 @@ export default function accountSocketController({
       if (!emailRegex.test(email)) {
         return ack({ success: false, message: "Email is invalid." });
       }
-      fields.push("EMAIL = ?");
+      fields.push("email = ?");
       params.push(email);
     }
     if (phone !== null) {
@@ -253,11 +262,11 @@ export default function accountSocketController({
       if (phoneErr) {
         return ack({ success: false, message: phoneErr });
       }
-      fields.push("PHONE = ?");
+      fields.push("phone = ?");
       params.push(phone || null);
     }
     if (profileIcon !== null) {
-      fields.push("PROFILE_ICON = ?");
+      fields.push("profile_icon = ?");
       params.push(profileIcon);
     }
 
@@ -274,10 +283,10 @@ export default function accountSocketController({
       }
       try {
         const [pwRows] = await db.execute(
-          `SELECT PASSWORD FROM PERSONAL_USER WHERE ID = ?`,
+          `SELECT password_hash FROM users WHERE id = ?`,
           [id],
         );
-        const currentHash = pwRows?.[0]?.PASSWORD;
+        const currentHash = pwRows?.[0]?.password_hash;
         if (!currentHash) {
           return ack({ success: false, message: "Account not found." });
         }
@@ -287,7 +296,7 @@ export default function accountSocketController({
         }
         const rounds = Number(process.env.BCRYPT_ROUNDS || 10);
         const newHash = await bcrypt.hash(newPassword, rounds);
-        fields.push("PASSWORD = ?");
+        fields.push("password_hash = ?");
         params.push(newHash);
       } catch (err) {
         console.error(`[socket][account:update] ❌ password verify failed`, err);
@@ -299,14 +308,14 @@ export default function accountSocketController({
       return ack({ success: false, message: "Nothing to update." });
     }
 
-    fields.push("UPDATED_AT = NOW()");
+    fields.push("updated_at = NOW()");
 
     try {
       params.push(id);
 
       const [result] = await db.execute(
-        `UPDATE PERSONAL_USER SET ${fields.join(", ")}
-         WHERE ID = ?`,
+        `UPDATE users SET ${fields.join(", ")}
+         WHERE id = ?`,
         params,
       );
 
@@ -315,9 +324,9 @@ export default function accountSocketController({
       }
 
       const [rows] = await db.execute(
-        `SELECT ID, ROLE, NAME, EMAIL, PHONE, PROFILE_ICON, CREATED_AT, UPDATED_AT
-         FROM PERSONAL_USER
-         WHERE ID = ?`,
+        `SELECT id, role, name, email, phone, profile_icon, status, created_at, updated_at
+         FROM users
+         WHERE id = ?`,
         [id],
       );
 
@@ -353,7 +362,7 @@ export default function accountSocketController({
   });
 
   /* =========================================================
-     LOGIN (NAME / EMAIL / IDENTIFIER)
+     LOGIN (NAME / EMAIL / IDENTIFIER) — non-canonical, see file header
      ========================================================= */
   socket.on("account:login", async (payload = {}, cb = () => {}) => {
     const ack = typeof cb === "function" ? cb : () => {};
@@ -376,15 +385,15 @@ export default function accountSocketController({
     try {
       // ✅ IMPORTANT: when logging in by NAME, pick the most recent row (avoid duplicates)
       const sql = isEmail
-        ? `SELECT ID, ROLE, NAME, EMAIL, PHONE, PROFILE_ICON, PASSWORD, CREATED_AT, UPDATED_AT
-           FROM PERSONAL_USER
-           WHERE LOWER(EMAIL) = LOWER(?)
-           ORDER BY ID DESC
+        ? `SELECT id, role, name, email, phone, profile_icon, password_hash, status, created_at, updated_at
+           FROM users
+           WHERE LOWER(email) = LOWER(?)
+           ORDER BY id DESC
            LIMIT 1`
-        : `SELECT ID, ROLE, NAME, EMAIL, PHONE, PROFILE_ICON, PASSWORD, CREATED_AT, UPDATED_AT
-           FROM PERSONAL_USER
-           WHERE LOWER(TRIM(NAME)) = LOWER(TRIM(?))
-           ORDER BY ID DESC
+        : `SELECT id, role, name, email, phone, profile_icon, password_hash, status, created_at, updated_at
+           FROM users
+           WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))
+           ORDER BY id DESC
            LIMIT 1`;
 
       const [rows] = await db.execute(sql, [identifier]);
@@ -392,12 +401,16 @@ export default function accountSocketController({
 
       if (!row) return ack({ success: false, message: "Invalid credentials." });
 
-      const ok = await bcrypt.compare(password, row.PASSWORD);
+      const ok = await bcrypt.compare(password, row.password_hash);
 
       if (!ok) return ack({ success: false, message: "Invalid credentials." });
 
+      if (row.status && row.status !== "active") {
+        return ack({ success: false, message: "This account is not active." });
+      }
+
       // ✅ Safety: invalid roles fallback to USER
-      if (!isValidRole(row.ROLE)) row.ROLE = ROLES.USER;
+      if (!isValidRole(row.role)) row.role = ROLES.USER;
 
       const account = safePublicUserRow(row);
 
@@ -413,7 +426,7 @@ export default function accountSocketController({
   });
 
   /* =========================================================
-     REQUEST RESET
+     REQUEST RESET — duplicates POST /api/auth/forgot-password, see file header
      ========================================================= */
   socket.on("account:requestReset", async (payload = {}, cb = () => {}) => {
     const ack = typeof cb === "function" ? cb : () => {};
@@ -424,7 +437,7 @@ export default function accountSocketController({
 
     try {
       const [uRows] = await db.execute(
-        `SELECT ID, EMAIL FROM PERSONAL_USER WHERE LOWER(EMAIL) = LOWER(?) ORDER BY ID DESC LIMIT 1`,
+        `SELECT id, email FROM users WHERE LOWER(email) = LOWER(?) ORDER BY id DESC LIMIT 1`,
         [email],
       );
 
@@ -444,15 +457,15 @@ export default function accountSocketController({
         .digest("hex");
 
       await db.execute(
-        `INSERT INTO RESET_PASSWORD (USER_ID, TOKEN_HASH, EXPIRES_AT, USED)
-         VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE), 0)`,
-        [user.ID, tokenHash, ttlMin],
+        `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+         VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE))`,
+        [user.id, tokenHash, ttlMin],
       );
 
       pushActivity({
         id: Date.now(),
         type: "account",
-        message: `Password reset requested (USER_ID ${user.ID})`,
+        message: `Password reset requested (user id ${user.id})`,
         timestamp: new Date().toISOString(),
       });
 
@@ -473,7 +486,7 @@ export default function accountSocketController({
   });
 
   /* =========================================================
-     RESET PASSWORD (BY TOKEN)
+     RESET PASSWORD (BY TOKEN) — duplicates POST /api/auth/reset-password, see file header
      ========================================================= */
   socket.on("account:resetPassword", async (payload = {}, cb = () => {}) => {
     const ack = typeof cb === "function" ? cb : () => {};
@@ -503,19 +516,19 @@ export default function accountSocketController({
         .digest("hex");
 
       const [rows] = await db.execute(
-        `SELECT ID, USER_ID, EXPIRES_AT, USED
-         FROM RESET_PASSWORD
-         WHERE TOKEN_HASH = ?
+        `SELECT id, user_id, expires_at, used_at
+         FROM password_reset_tokens
+         WHERE token_hash = ?
          LIMIT 1`,
         [tokenHash],
       );
 
       const rp = rows?.[0];
       if (!rp) return ack({ success: false, message: "Invalid token." });
-      if (rp.USED) return ack({ success: false, message: "Token already used." });
+      if (rp.used_at) return ack({ success: false, message: "Token already used." });
 
       const now = new Date();
-      const exp = new Date(rp.EXPIRES_AT);
+      const exp = new Date(rp.expires_at);
       if (now > exp) return ack({ success: false, message: "Token expired." });
 
       const rounds = Number(process.env.BCRYPT_ROUNDS || 10);
@@ -526,10 +539,10 @@ export default function accountSocketController({
         await conn.beginTransaction();
 
         const [uRes] = await conn.execute(
-          `UPDATE PERSONAL_USER
-           SET PASSWORD = ?, UPDATED_AT = NOW()
-           WHERE ID = ?`,
-          [passwordHash, rp.USER_ID],
+          `UPDATE users
+           SET password_hash = ?, updated_at = NOW()
+           WHERE id = ?`,
+          [passwordHash, rp.user_id],
         );
 
         if (uRes.affectedRows === 0) {
@@ -538,10 +551,10 @@ export default function accountSocketController({
         }
 
         await conn.execute(
-          `UPDATE RESET_PASSWORD
-           SET USED = 1, UPDATED_AT = NOW()
-           WHERE ID = ?`,
-          [rp.ID],
+          `UPDATE password_reset_tokens
+           SET used_at = NOW()
+           WHERE id = ?`,
+          [rp.id],
         );
 
         await conn.commit();
@@ -555,7 +568,7 @@ export default function accountSocketController({
       pushActivity({
         id: Date.now(),
         type: "account",
-        message: `Password reset completed (USER_ID ${rp.USER_ID})`,
+        message: `Password reset completed (user id ${rp.user_id})`,
         timestamp: new Date().toISOString(),
       });
 

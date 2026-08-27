@@ -23,6 +23,31 @@ body {
   @apply bg-white/20;
 }
 
+@layer utilities {
+  /* Shared focus-visible treatment for every interactive control — buttons, links,
+     interactive cards, form fields, nav items. Keeps focus rings consistent instead
+     of each component defining its own outline. */
+  .focus-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2 focus-visible:ring-offset-ink-950;
+  }
+}
+
+/* Mobile nav open transition. Neutralized automatically by the
+   prefers-reduced-motion override below since it targets all animations. */
+@keyframes mobile-nav-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.mobile-nav-enter {
+  animation: mobile-nav-in 150ms ease-out;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

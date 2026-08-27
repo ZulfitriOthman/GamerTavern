@@ -1,343 +1,2484 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides operational guidance to Claude Code when working with this repository.
 
-## 1. Project Overview
-
-- **Name:** NanashiCollectibles — confirmed brand for both the business and this frontend. (`package.json`'s `"name": "nanashicollectibles-office"` is an internal package name, left as-is.)
-- **What it is:** The customer-facing frontend of NanashiCollectibles, one app inside the `GamerTavern` monorepo (git root is one directory above this folder — sibling projects are `Backend/`, `Database/`, and unrelated `Portfolio_Jae/Recce/Zulfitri` sites).
-- **Business direction:** a multi-purpose platform spanning TCG ecommerce/community, collectibles/Gunpla/drone/computer-parts shop categories, professional services (drone, website, application development), and RVS esports tournament registration (starting with Apex Legends).
-- **Architecture:** React 19 SPA (this folder) talking to a separate Express + Socket.IO backend (`../Backend/`) backed by MySQL (`../Database/`).
-- **Current development status:** Phase 1 (frontend foundation), Phase 2 (auth architecture + RVS Esports/Tournament, the first live vertical), and Phase 3A (Socket.IO authentication/authorization hardening — backend-only) are complete. See §21/§22.
-
-## 2. Repository Structure
-
-```text
-NanashiCollectibles/                  (this app — git root is one level up, at GamerTavern/)
-├── src/
-│   ├── app/App.jsx                   route table (react-router-dom v7, nested under Layout)
-│   ├── main.jsx                      BrowserRouter > AuthProvider > SocketProvider > App
-│   ├── index.css                     Tailwind directives + base styles, reduced-motion support
-│   ├── config/site.js                single source of truth for nav items, business-domain content
-│   ├── components/
-│   │   ├── layout/                   Layout (Header+Outlet+Footer), Container, Section, Footer
-│   │   ├── navigation/                Header (nav + Services dropdown + auth controls), MobileNav
-│   │   └── ui/                       Button, Card, Badge, SectionHeading — design-system primitives
-│   ├── features/
-│   │   ├── auth/                     AuthContext.js, AuthProvider.jsx, authService.js, LoginPage.jsx,
-│   │   │                             RegisterPage.jsx — see §8
-│   │   └── tournament/                tournamentService.js, useTournaments.js, TournamentCard.jsx,
-│   │                                  TournamentRegistrationForm.jsx, format.js
-│   ├── services/socket/              SocketContext.js, SocketProvider.jsx — central Socket.IO client
-│   └── pages/
-│       ├── HomePage.jsx, ShopPage.jsx, ServicesPage.jsx, TcgPage.jsx, EsportsPage.jsx,
-│       │   AboutPage.jsx, ContactPage.jsx, NotFoundPage.jsx
-│       ├── services/                 ServiceDetailPage.jsx (shared template) + 3 wrapper pages
-│       └── esports/                  TournamentListPage.jsx, TournamentDetailPage.jsx
-├── public/assets/game-bg/            unused (pre-reset app leftovers)
-├── index.html                        branded as NanashiCollectibles; Google Fonts link
-├── vite.config.js                    **`allowedHosts` value is intentional — see §16, do not revert/edit**
-├── tailwind.config.js                ESM; `ink`/`brand`/`gold`/`signal` color tokens + fonts
-├── .env                              non-secret URLs only (see §10)
-└── CLAUDE.md
-
-../Backend/                           separate Express 5 + Socket.IO 4 server — see §4, §8, §9
-├── server.js                         io.use() JWT handshake middleware added Phase 3A — see §8
-├── routes/api/                       auth (uses modules/jwt.module.js), health, clientPortfolio,
-│                                      payment, merchant (unmounted)
-├── controllers/                      one Socket.IO controller per domain — see §8's access matrix
-├── modules/
-│   ├── db.module.js                  MySQL pool
-│   ├── mailer.module.js
-│   ├── jwt.module.js                 NEW (Phase 3A) — single source of JWT secret/sign/verify,
-│   │                                  used by both REST auth and the socket handshake middleware
-│   └── authz.module.js               NEW (Phase 3A) — requireAuthenticated/requireAdmin/
-│                                      requireOwnerOrAdmin, all keyed off verified `socket.user`
-├── env.example                       variable names only, see §10
-└── public/uploads/{products,avatars}/
-
-../Database/                          schema — All.dbml confirmed STALE for PARTICIPANTS, see §9
-└── All.sql / All.dbml / All.dbdiagram
-```
-
-Not documented: `node_modules/`, `dist/`, the unrelated `Portfolio_*` sibling projects.
-
-## 3. Technology Stack
-
-**Frontend:** React 19.2, React Router DOM 7.10, Tailwind CSS 3.4 (ESM config), ESLint 9 with `eslint-plugin-react-hooks@7` (strict `set-state-in-effect`/`refs` rules — see §14), `socket.io-client` 4.8, Vite via `rolldown-vite@7.2.5` override.
-
-**Backend (`../Backend/package.json`):** Node ESM, Express 5, Socket.IO 4, `mysql2`, `bcrypt` **and** `bcryptjs` (both present, redundant — see §8), `jsonwebtoken`, `cybersource-rest-client`, `nodemailer`, `multer`, `nodemon`. `node_modules` installed as of Phase 3A (previously absent) for isolated local testing — see §20/§22.
-
-**Database:** MySQL/MariaDB, schema in `../Database/All.sql`/`.dbml`. `Backend/.env.dev` points `MYSQL_HOST` at a remote hosted instance (`*.mysecurecloudhost.com`) with `CLIENT_URL=https://nanashicollectibles.com` — **this looks like the production-linked database.** Never run the Backend against it for testing without explicit sign-off; see §9's `DB_BOOTSTRAP` finding and §21.
-
-## 4. Application Architecture
-
-```text
-React SPA (this app)
-   ↓  fetch (REST)                              features/auth
-   ↓  socket.io-client, auth: { token }          services/socket
-Express + Socket.IO (Backend/server.js)
-   ├── io.use() JWT handshake middleware — sets socket.user (verified) or null (guest)
-   ├── REST routes — auth (real), health, client-portfolio, payments (merchant unmounted)
-   ├── Socket.IO controllers — account, chat, product, shop, trade, news, tournament, decklist,
-   │   country, tcgcategories — each now derives identity from `socket.user`, not the payload
-   ↓  mysql2 pool (Backend/modules/db.module.js)
-MySQL (Database/All.sql schema)
-```
-
-Only **Tournament** is wired end-to-end from the frontend. Shop, TCG categories, and News are confirmed publicly-readable but not yet connected — recommended next slice (§21).
-
-## 5. Routing
-
-`src/app/App.jsx` — unchanged since Phase 2:
-
-```text
-/, /shop, /services(+3 sub-pages), /tcg, /about, /contact, /login, /register, *
-/esports                               RVS Esports landing
-/esports/tournaments                   Live tournament list (backend-connected)
-/esports/tournaments/:id               Tournament detail + registration (numeric TOURNAMENT.ID)
-```
-
-## 6. Important Components
-
-Unchanged since Phase 2 — see `Layout`, `Header`/`MobileNav`, `ui/` primitives, `AuthProvider`, `SocketProvider`, `TournamentRegistrationForm`, `ServiceDetailPage`. Phase 3A made no frontend changes.
-
-## 7. Data Flow
-
-Unchanged since Phase 2 (`config/site.js` for static content, `authService.js` for REST, feature-level socket wrappers for realtime). The one behavioral change: `tournament:join`/`tournament:leave` now ignore any `userId` the frontend sends and derive identity from the authenticated session server-side — the existing frontend code already only ever sent the correct value, so this is invisible to the UI (see §8).
-
-## 8. Authentication
-
-### Canonical auth system (unchanged decision)
-
-**REST JWT auth (`Backend/routes/api/auth.routes.js`, mounted at `/api/auth`) is canonical.** `POST /register`, `POST /login`, `GET /me`. `signToken`/`getJwtSecret`/`verifyToken` now live in **`Backend/modules/jwt.module.js`** (extracted in Phase 3A so REST and the new Socket.IO middleware share one implementation, one secret, one cache — `auth.routes.js` was updated to import from it instead of keeping its own copy). Behavior is unchanged: production throws on boot if `JWT_SECRET` is missing; dev falls back to a cached random secret with a warning.
-
-### Socket.IO authentication (fixed in Phase 3A)
-
-**Model:** identity (who the caller is) is now handled centrally by an `io.use()` handshake middleware in `Backend/server.js`; authorization (what they can do) stays per-controller, using shared helpers.
-
-```js
-io.use((socket, next) => {
-  const token = socket.handshake.auth?.token;
-  if (!token) { socket.user = null; return next(); }      // no token -> guest
-  try {
-    const decoded = verifyToken(token);                    // same secret/verify as REST
-    socket.user = { id: decoded.sub, email: decoded.email, name: decoded.name, role: decoded.role };
-  } catch {
-    socket.user = null;                                     // invalid/expired/malformed -> guest, NEVER authenticated
-  }
-  next();                                                   // always allow the connection through
-});
-```
-
-- **`socket.user` shape:** `{ id, email, name, role }` — only fields taken from a cryptographically verified JWT, never copied from client claims. `null` means guest.
-- **The connection is never rejected** for a missing/bad token — public functionality (tournament list/detail, guest registration, future public Shop/TCG/News reads) must keep working for anonymous sockets. A bad token degrades to guest rather than blocking the socket.
-- **Every per-event `payload.userId` / `payload.currentUser` / `payload.adminId`-style identity field has been removed** from every controller's authorization decisions. Resource-id fields (`tournamentId`, `productId`, `id`, etc.) were left untouched — those are legitimate client input identifying *what*, not *who*.
-
-**`Backend/modules/authz.module.js`** (new, shared, small — used by every controller that needs it):
-```text
-requireAuthenticated(socket)          -> { ok, user } | { ok:false, code:"AUTH_REQUIRED" }
-requireAdmin(socket)                  -> also requires socket.user.role === "ADMIN" (case-insensitive)
-                                          -> { ok:false, code:"ADMIN_REQUIRED" }
-requireOwnerOrAdmin(socket, ownerId)  -> socket.user.id === ownerId, or admin
-                                          -> { ok:false, code:"NOT_OWNER" }; null ownerId fails closed
-```
-All three trust only `socket.user` (set once, server-side, at handshake). `requireAdmin`/ownership checks trust the **role embedded in the JWT** rather than re-querying the DB per call (except `product.controller.js`/`tcgcategories.controller.js`, which kept their pre-existing live `resolveRoleFromDb` lookup — only the *input* to that lookup changed, from a spoofable payload field to the verified `socket.user.id`). **Trade-off, consistent with the existing REST `/me` behavior:** a role change (e.g. promotion/demotion) only takes effect after the affected user's token is reissued (next login) for the JWT-trusting paths — this is not a regression, it's how the canonical REST auth already worked.
-
-Ack error responses now include both `code` (new, additive) and `message` (unchanged, still the primary field the frontend reads) — backward compatible with `features/tournament/tournamentService.js`.
-
-### Socket.IO authorization matrix (confirmed via full source read, Phase 3A)
-
-| Event(s) | Controller | Access | Identity source |
-|---|---|---|---|
-| `tournament:list`, `news:list`, `decklist:list`, `tcgcategories:list`, `country:list`, `product:list`, `trade:list` | various | Public read | none needed |
-| `tournament:join` | tournament | Public — guest (name) or authenticated | `socket.user.id` if present, else `payload.guestName` |
-| `tournament:leave` (own entry) | tournament | Authenticated, self only | `socket.user.id` |
-| `tournament:leave` (by `participantId`) | tournament | Owner or Admin | `socket.user` via owner/role check |
-| `tournament:create/update/delete` | tournament | Admin | `requireAdmin(socket)` |
-| `news:create/update/delete`, `decklist:create/update/delete` | news, decklist | Admin | `requireAdmin(socket)` |
-| `tcgcategories:create` | tcgcategories | Vendor or Admin | `socket.user.id` → live DB role lookup |
-| `product:create/update/delete/inventory:adjust/image:upload` | product | Vendor(owner) or Admin | `socket.user.id` → live DB role lookup + DB-loaded owner comparison |
-| `trade:create` | trade | Authenticated | `socket.user.id` |
-| `trade:delete` | trade | Owner only | `socket.user.id` vs. DB-loaded `USER_ID` |
-| `account:create`, `account:login`, `account:requestReset`, `account:resetPassword` | account | Public (pre-auth flows by nature) | n/a — unchanged, not part of canonical auth (§21) |
-| `account:update` | account | **Owner or Admin — FIXED, previously had no check at all** | `requireOwnerOrAdmin(socket, payload.id)` |
-| `user:join`, `product:new`, `cart:add` (shop), `chat:*` | shop, chat | Public, no identity concept | unchanged — legacy/demo session-scoped presence, not tied to accounts; nothing to spoof |
-
-### Frontend auth architecture
-
-Unchanged since Phase 2 (`AuthProvider`/`AuthContext`, `authService`, Login/Register pages, `localStorage` token, `SocketProvider` sends the JWT via the handshake `auth: { token }` field). **That handshake token is now actually verified server-side** — Phase 2 sent it forward-compatibly before any backend support existed; Phase 3A is the backend catching up. No frontend code changed.
-
-## 9. Database
-
-- **Engine:** MySQL, via `mysql2/promise` pool in `Backend/modules/db.module.js`.
-- **Schema source of truth (resolved, Phase 3B): `Database/All.sql` is accurate and current** — verified by direct comparison against `tournament.controller.js`'s queries. Its `PARTICIPANTS` table has `USER_ID INT NULL REFERENCES PERSONAL_USER(ID)`, `GUEST_NAME`, `NICKNAME`, `TEAM_NAME`, plus a `UNIQUE KEY (TOURNAMENT_ID, USER_ID)` (MySQL allows multiple NULLs in a unique key, so this doesn't block multiple guest registrations) — this matches the live code exactly. **Only `Database/All.dbml`/`All.dbdiagram` (the ER *diagrams*) are stale** (they still show `PARTICIPANTS.ACCOUNT_ID -> ACCOUNTS`, not `USER_ID -> PERSONAL_USER`) — they were generated from an older version of `All.sql` and never regenerated. If schema diagrams are ever refreshed, regenerate them *from* `All.sql`, not the other way around.
-- **Backend startup path (confirmed, Phase 3B) — no automatic schema management of any kind:**
-  1. `server.js` → `dotenv.config({ path: "Backend/.env.dev", override: true })`.
-  2. `initDB()` (`db.module.js`) creates a `mysql2` connection **pool** — this does not connect yet (lazy).
-  3. `start()` calls `dbPing()` once at boot; on failure it just logs a warning and sets `isHealthy = false` — it does not crash, retry-loop, or mutate anything.
-  4. `httpServer.listen(PORT)`.
-  There is **no migration runner, no `.sql` file ever executed by the app, no seed logic anywhere in `Backend/`** (confirmed by repo-wide grep for `CREATE TABLE`/`migrate`/`seed`/`bootstrap` and a glob for `*.sql` — nothing found outside `Database/All.sql` itself, which nothing in `Backend/` reads). **The backend requires the schema in `Database/All.sql` to already exist** in whatever database `MYSQL_*` points at; it will not create it.
-- **`DB_BOOTSTRAP` env var: dead / not wired to any code** (confirmed via full-repo grep). Appears in `Backend/.env.dev` (`true`) and `env.example` only. Does nothing today — don't treat it as a safety net or a risk.
-- **Tables:** `PERSONAL_USER`, `RESET_PASSWORD`, `ACCOUNTS`, `SHOP`, `PRODUCTS`, `MANAGE_INVENTORY`, `CATEGORIES`, `DISCOUNTS`, `ORDERS`, `CARTS`, `WISHLISTS`, `REVIEWS`, `PAYMENTS`, `DELIVERIES`, `TRADE_LISTINGS`, `TRADE_OFFERS`, `CARD_GAMES`, `SINGLES`, `HISTORY_PURCHASE`, `TOURNAMENT`, `PARTICIPANTS`, `POINT_SYSTEM`, `PRIZES`, `PRIZE_POINT`, `NEWS`.
-- No destructive migrations, no renaming existing tables, never touch `information_schema` or other MariaDB system schemas.
-
-**`render.yaml` finding (Phase 3B):** lives inside `NanashiCollectibles/` (the frontend folder) despite describing the `nanashicollectibles-server` Backend service, and its `startCommand: npm run server:prod` **does not exist** in `Backend/package.json` (only `start`/`dev`/`server` do — see §11). Only `NODE_ENV`/`CLIENT_URL` are set there; every other secret (`MYSQL_*`, `JWT_SECRET`, etc.) must be configured directly in Render's dashboard for the real deployment — confirming `Backend/.env.dev` is a **local-only developer convenience file**, not something the production deploy reads. Not fixed this phase (deployment config, out of scope for security hardening) — flagging for whoever next touches deployment.
-
-**Environment separation — recommended, not implemented (blocked, see Phase 3B report):**
-```text
-Production   -> Production DB (mysecurecloudhost.com) — already isolated via Render's own env var dashboard, not this repo
-Development  -> a separate, disposable Dev DB — Backend/.env.dev should point here, not at production
-Testing      -> an isolated/disposable Test DB, or continue using unit-level mocks (Phase 2/3A's approach)
-```
-This environment has no MySQL server, MySQL client, or Docker installed (confirmed: `which docker/mysql/mysqld/mariadb` all not found, nothing listening on `:3306`) — a real integration-tested Dev/Test DB could not be created without the owner installing one of those or providing connection details to an existing isolated instance. See Phase 3B's completion report for options.
-
-## 10. Environment Configuration
-
-**This app — `NanashiCollectibles/.env`** (unchanged): `VITE_SOCKET_URL`, `VITE_API_BASE`.
-
-**Backend — `Backend/.env.dev`** (real file, gitignored, points at the production-linked DB — see §3/§9) **and `Backend/env.example`** (names only, tracked):
-```env
-PORT= CLIENT_URL= EXTRA_ORIGINS=
-MYSQL_HOST= MYSQL_PORT= MYSQL_USER= MYSQL_DATABASE= MYSQL_PASSWORD=
-JWT_SECRET= JWT_EXPIRES_IN=
-BCRYPT_ROUNDS= RESET_TOKEN_TTL_MIN= DB_BOOTSTRAP= USE_DB_PRODUCTS=
-CYBERSOURCE_RUN_ENVIRONMENT= CYBERSOURCE_MERCHANT_ID= CYBERSOURCE_KEY_ID= CYBERSOURCE_SHARED_SECRET=
-SMTP_HOST= SMTP_PORT= SMTP_USER= SMTP_PASS= SMTP_FROM=
-```
-Unchanged this phase. Values are never included here — only variable names.
-
-## 11. Development Commands
-
-**This app:** `npm install`, `npm run dev`, `npm run build` (verified), `npm run lint` (verified, 0 errors), `npm run preview`. No test runner.
-
-**Backend (`../Backend/`):** `npm install`, `npm run dev` (nodemon), `npm start`. No `build`/`lint`/test script exists — confirmed again in Phase 3A. `node_modules` was installed during Phase 3A for isolated local unit testing (see §22); it wasn't present before.
-
-**Do not run the Backend against `Backend/.env.dev`** for exploration or testing — it points at what looks like the production database. Phase 3A's security logic was verified instead via a standalone script that imports `modules/jwt.module.js`/`modules/authz.module.js` directly and exercises them with constructed fake tokens/sockets — no server boot, no database, no `.env.dev` involvement. That script was deleted after use; recreate a similar one rather than booting the real server if you need to re-verify this logic.
-
-## 12. Coding Conventions
-
-Unchanged — see prior phases. Backend addition: put shared, cross-cutting server logic (JWT, authorization) in `Backend/modules/*.module.js` and import it, rather than duplicating a local copy per controller (this is exactly what Phase 3A fixed — `requireAdmin` had been copy-pasted nearly verbatim into `tournament.controller.js`, `news.controller.js`, and `decklist.controller.js`).
-
-## 13. UI / Design Rules
-
-Unchanged since Phase 2 — no frontend changes this phase.
-
-## 14. React Rules
-
-Unchanged since Phase 2 (`react-hooks/set-state-in-effect`/`refs` guidance still applies — see prior version of this doc / git history if needed). No frontend changes this phase.
-
-## 15. API / Backend Rules
-
-- Verify frontend/backend contracts before changing either side — read the controller, don't infer from grep alone (this cost real time in Phase 2: a grep-based claim about tournament/news/decklist "having JWT auth" was wrong).
-- Use parameterized SQL — every query already does this; never string-concatenate.
-- **Identity (who the caller is) must come from `socket.user` for Socket.IO, or `req.user`/`requireAuth` for REST — never from a client-supplied payload/body field.** This is the core rule Phase 3A exists to enforce; don't reintroduce a `payload.userId`-style check when adding new socket events.
-- Resource identifiers (`tournamentId`, `productId`, etc.) are legitimate client input and are unaffected by the above — don't confuse the two categories.
-- Use the shared helpers (`requireAuthenticated`/`requireAdmin`/`requireOwnerOrAdmin` from `modules/authz.module.js`) for new authorization checks rather than writing a new one-off per controller.
-- Never expose secrets, stack traces, or DB structure to clients.
-
-## 16. Security Rules
-
-Never: commit secrets, hard-code credentials, weaken auth to solve a bug, remove authorization checks to make a feature work, trust frontend-supplied identity, or build unsafe/string-concatenated SQL.
-
-**Confirmed findings, Phase 3A status:**
-- **Socket.IO authentication — FIXED.** `io.use()` JWT middleware now verifies the handshake token; every controller's authorization check now uses `socket.user` instead of a spoofable payload field. See §8 for the full matrix.
-- **`account:update` had no ownership check at all (not just spoofable — completely open)** — any connected socket could edit any user's profile fields by guessing an id. **Fixed** via `requireOwnerOrAdmin`.
-- **Remaining, accepted trade-off — JWT role lifetime (quantified, Phase 3B):** `requireAdmin`/`requireOwnerOrAdmin` trust the role embedded in the JWT at login time, not a fresh DB lookup (except `product`/`tcgcategories`, which already did fresh lookups and were left that way). `JWT_EXPIRES_IN` is unset in `Backend/.env.dev`, so the actual runtime default is **`jsonwebtoken`'s `7d`** — a demoted/deactivated admin keeps admin socket privileges (and a valid REST session) for **up to 7 days** unless they log out or the value is changed. Same characteristic the canonical REST `/me` already has, not a new gap. Recommendation (not implemented — no code change without a specific ask): if this exposure window is unacceptable, the lowest-effort fix is setting a shorter `JWT_EXPIRES_IN` (e.g. `1d` or `1h`) in `.env.dev`/production config; token versioning or a refresh-token architecture would close the gap more precisely but is real added complexity — don't build either speculatively.
-- **Payments (`Backend/routes/api/payment.routes.js`)** — untouched, still requires a dedicated security review before any expansion. Do not modify CyberSource/PAN/CVV/checkout code.
-- **Merchant auth (`merchant.routes.js`)** — confirmed unsafe, confirmed unmounted, untouched, must stay that way.
-- **`shop.controller.js`, `chat.controller.js`, `country.controller.js`** have no identity concept at all (session-scoped, not account-tied) — nothing to spoof, out of scope for this hardening pass, not touched.
-- **`NanashiCollectibles/vite.config.js`'s `allowedHosts` value is intentional (confirmed instruction, Phase 3A) — do not revert or modify it**, including "cleaning up" an apparent dev-server-triggered change. (Earlier phases treated an observed rewrite of this value as accidental and reverted it; that assumption was wrong — the current value is deliberate. If `npm run dev` appears to rewrite this file again, leave the result as-is rather than reverting.)
-- `Backend/.env.dev` points at what looks like the production database (§3/§9) — be deliberate about ever running the Backend locally against it. `DB_BOOTSTRAP=true` in that file does nothing today (§9) — don't assume it's a safety net or a risk; it's simply unused.
-
-If a requested solution would create a new vulnerability, explain the risk and propose a safer approach instead of implementing it as asked.
-
-## 17. Debugging Rules
-
-Unchanged — see prior phases.
-
-## 18. Modification Rules
-
-Unchanged — see prior phases.
-
-## 19. Files That Require Extra Care
-
-- **`Backend/modules/jwt.module.js`** — the one JWT secret/sign/verify implementation shared by REST auth and the Socket.IO handshake; a bug here affects every authenticated request and connection at once.
-- **`Backend/modules/authz.module.js`** — the one set of authorization helpers used across `account`/`tournament`/`news`/`decklist`; a bug here has the same blast radius as the vulnerability it fixed.
-- **`Backend/server.js`**'s `io.use()` block — controls whether every socket connection gets guest or authenticated status; a mistake here could either lock out guests (breaking public functionality) or grant authenticated status to bad tokens.
-- Everything listed in the Phase 1/2 versions of this section still applies (`src/app/App.jsx`, `AuthProvider.jsx`, `SocketProvider.jsx`, `Backend/routes/api/auth.routes.js`, `Database/All.sql`/`.dbml`).
-- **`NanashiCollectibles/vite.config.js`** — `allowedHosts` is intentional, do not edit/revert (§16).
-
-## 20. Known Issues / Technical Debt
-
-**Confirmed problems:**
-- **`tournament:join` has a TOCTOU race on capacity (found via code review, Phase 3B, not fixed — out of scope):** the `MAX_TEAMS` capacity check (`SELECT COUNT(*) ...`) and the `INSERT` happen as separate statements with no transaction or row lock between them. Two concurrent joins near the last open slot could both pass the check and both insert, exceeding capacity. The DB's `UNIQUE (TOURNAMENT_ID, USER_ID)` constraint prevents the *same* user from double-registering, but does not prevent over-capacity from two *different* users racing. Fix would be wrapping the check+insert in a transaction (e.g. `SELECT ... FOR UPDATE` on a capacity-tracking row, or re-checking count inside the same transaction as the insert) — not done, flagging only.
-- `Database/All.dbml`/`All.dbdiagram` stale for `PARTICIPANTS` — `Database/All.sql` itself is confirmed accurate (§9).
-- `merchant.routes.js` intentionally unmounted (unsafe dev-only auth).
-- `shop.controller.js` (legacy in-memory demo) likely superseded by `product.controller.js` — not confirmed removable without checking other consumers.
-- No enquiry-submission backend for `ContactPage.jsx`'s form.
-- No `ProtectedRoute` / protected frontend pages exist yet (deliberately deferred).
-- Two bcrypt packages (`bcrypt` + `bcryptjs`) doing the same job across REST vs. socket account systems.
-- The socket-based `account.controller.js`'s two useful capabilities (password reset, richer registration validation) are still not ported into REST — recommended for Phase 3B/4, not done (Phase 3A scope was security fixes, not feature migration, per explicit instruction).
-- Full integration testing against a real database has never been performed for the auth/authorization changes (Phase 2 or 3A) — only unit-level/mock verification. This is a real gap before calling the tournament vertical (or the hardened socket auth) production-ready — **blocked in Phase 3B by this environment having no MySQL/Docker available**; see Phase 3B's completion report for what's needed to close it.
-- Other multi-step writes reviewed for the same TOCTOU class of bug (Phase 3B, code-review only): `product:create`, `inventory:adjust`, `product:delete`, and `account:resetPassword` already wrap their multi-statement writes in a real `conn.beginTransaction()`/`commit()` transaction — no issue found. `tournament:join` (above) is the one confirmed gap.
-
-**Potential improvements:**
-- `framer-motion` installed and unused.
-- Consider consolidating `bcrypt`/`bcryptjs` to one package.
-- Consider whether `requireAdmin`/`requireOwnerOrAdmin`'s JWT-cached-role trade-off (§16) is acceptable long-term, or whether a shorter `JWT_EXPIRES_IN` / a live DB role check (like `product`/`tcgcategories` already do) is worth the extra query cost.
-
-## 21. Current Project Decisions
-
-*(Phase 1/2 decisions — brand, `src/` reset, backend-as-infrastructure, merchant routes unmounted, payments out of scope, tournament uses real numeric IDs — all still stand, see git history for full text if needed.)*
-
-### Decision: REST JWT is canonical; Socket.IO now has real authentication built on the same tokens
-Confirmed no second JWT implementation was introduced — `Backend/modules/jwt.module.js` is shared by REST and Socket.IO. `account.controller.js` remains non-canonical for identity (issues no token); its password-reset and richer-validation capabilities are still recommended, not yet ported, for a future phase.
-
-### Decision: Socket.IO never rejects a connection for a missing/invalid token
-No-token and bad-token both resolve to `socket.user = null` (guest), preserving all existing public/guest functionality (tournament list/detail, guest registration). Only the *capabilities* granted to a connection are gated, never the connection itself.
-
-### Decision: Identity for authorization always comes from `socket.user`, never from the event payload
-Applied across `account`, `product`, `trade`, `tournament`, `news`, `decklist`, `tcgcategories`. `shop`/`chat`/`country` were left alone — they have no identity concept to fix.
-
-### Decision: `account:update`'s missing ownership check was a real, unrelated bug — fixed
-Found while auditing for spoofable identity trust; not merely spoofable, it had no check at all. Fixed with `requireOwnerOrAdmin`.
-
-### Decision: `vite.config.js`'s `allowedHosts` value is intentional — do not touch it
-Explicit instruction, Phase 3A (§16, §19). Supersedes the earlier-phase assumption that an observed change to this file was an unwanted side effect.
-
-### Decision: Phase 3A verification used isolated unit-level tests, not the real database
-`Backend/.env.dev` points at what looks like production (§3/§9). Attempting to write a safe local `.env.dev` for a real server-boot test was itself blocked by the environment's own permission system when attempted — respected rather than worked around. Verification instead exercised `jwt.module.js`/`authz.module.js` directly (26 assertions: token sign/verify/expiry/forgery, production fail-safe, dev-secret caching, every authorization helper outcome including the core spoofing-prevention case, and a faithful simulation of the `io.use()` handshake branching) — all passed. This is real but partial confidence: full integration testing (an actual client connecting to an actual running server with an actual database) has not been done — see §20.
-
-### Decision: `Database/All.sql` is the schema source of truth; `All.dbml`/`All.dbdiagram` are stale diagrams only
-Confirmed by direct comparison (Phase 3B) — `All.sql`'s `PARTICIPANTS` table matches `tournament.controller.js` exactly. The diagrams were generated from an older version of the SQL and never regenerated.
-
-### Decision (blocked): Phase 3B could not create a real isolated Dev/Test database via Docker
-This sandboxed environment has no MySQL server, MySQL client, or Docker available (confirmed: `docker`/`mysql`/`mysqld`/`mariadb` all absent from PATH, nothing listening on `:3306`). Superseded by the decision below — the owner is creating the database manually instead.
-
-### Decision: database schema creation and all destructive database operations are manually controlled by the project owner
-Claude may audit the schema, design/recommend table structures, and generate SQL — but must never create, drop, or import into any production or development schema automatically, and must never connect to or execute SQL against any real MySQL instance, unless explicitly authorized for that specific action. The owner reviews and runs all schema SQL manually (currently via MySQL Workbench). This supersedes the Docker-based plan above.
-
-### Decision: moving toward a clean, coherent NanashiCollectibles schema rather than preserving stale legacy design
-A full audit found `Database/All.sql` is accurate for the actively-used tables but that roughly 15 of its 24 tables have **zero references anywhere in the current backend** — orphaned by an abandoned `ACCOUNTS` (VARCHAR id) user model that was superseded by `PERSONAL_USER` (INT id) everywhere live code actually runs; two tables live code depends on (`CATEGORIES_TCG`, `COUNTRIES`) aren't in `All.sql` at all. The owner approved a greenfield v2 schema, `snake_case`/plural naming, `INT UNSIGNED AUTO_INCREMENT` PKs throughout, `utf8mb4`/`utf8mb4_unicode_ci` (chosen over newer collations since the exact target MySQL/MariaDB version isn't confirmed), no CHECK constraints (unreliable pre-8.0.16), and real relational structure for tournament teams (`tournament_teams`/`tournament_team_members`, cross-table tournament-consistency enforced via composite FKs, not triggers) rather than a free-text `team_name` label. **`Database/NanashiCollectibles_v2.sql` has been generated (19 tables) — nothing has been executed against any database; the owner runs it manually via MySQL Workbench.** Backend query migration and Phase 3B integration testing both still come after that, once the owner confirms the tables were created successfully. The legacy `Database/All.sql`/production database are untouched and not being retired yet.
-
-## 22. Change Log / Recent Significant Work
-
-- **2026-08-26 (Phase 1)** — Frontend foundation: routing, layout, design system, 11 static routes, rebrand, `tailwind.config.js` ESM fix, `Backend/env.example`.
-- **2026-08-26 (Phase 2)** — Auth architecture audit (REST JWT confirmed canonical; socket `account.controller.js` confirmed non-canonical, issues no token) + RVS Esports/Tournament as the first live-connected vertical (list/detail/guest-or-authenticated registration/leave). Confirmed Socket.IO had no real authentication anywhere, deliberately deferred fixing it.
-- **2026-08-26 (Phase 3A)** — Socket.IO authentication + authorization hardening (backend-only, no frontend changes). Added `Backend/modules/jwt.module.js` (shared secret/sign/verify, also adopted by `auth.routes.js`, removing a duplicate local copy) and `Backend/modules/authz.module.js` (`requireAuthenticated`/`requireAdmin`/`requireOwnerOrAdmin`). Added `io.use()` handshake middleware to `server.js`: no/bad token → guest (`socket.user = null`), never rejected. Replaced every spoofable `payload.userId`/`payload.currentUser`/`payload.adminId`-style identity check with `socket.user`-derived identity across `account`, `tournament`, `news`, `decklist`, `product`, `trade`, `tcgcategories` controllers (full matrix in §8). Fixed `account:update`, which had no ownership check at all. Confirmed `DB_BOOTSTRAP` is dead/unused in current code (§9). Verified via 26 isolated unit-level assertions (no server boot, no database) — see §21. `npm install` run for `Backend/` (previously had no `node_modules`). Frontend `lint`/`build` re-verified clean (no frontend changes made). `vite.config.js` left untouched per explicit instruction (§16).
-- **2026-08-26 (Phase 3B)** — Attempted real database/integration validation; **blocked by missing MySQL/Docker in this environment** (no code changes made). Completed everything achievable without a live database: confirmed `Database/All.sql` (not the `.dbml`/`.dbdiagram` diagrams) is the accurate schema source of truth; audited the full backend startup path and confirmed no migration/seed/bootstrap logic exists anywhere (`DB_BOOTSTRAP` is dead code); found and documented a real TOCTOU capacity race in `tournament:join` (not fixed — flagged as technical debt); confirmed other multi-step writes (`product:create`, `inventory:adjust`, `product:delete`, `account:resetPassword`) are already correctly transactional; quantified the JWT role-trust exposure window at up to 7 days (`JWT_EXPIRES_IN` unset, defaults to `jsonwebtoken`'s `7d`); found `render.yaml`'s `startCommand` references a non-existent `server:prod` script. Frontend `lint`/`build` re-verified clean.
-- **2026-08-26 (DB redesign, pre-Phase-3B)** — Owner pivoted away from Docker; will create the new database manually via MySQL Workbench and run all schema SQL themselves. Full audit of every table against every controller/route found ~15 of 24 tables in `Database/All.sql` are unreferenced by any live backend code (orphaned `ACCOUNTS`/`ORDERS`/`CARTS`/`WISHLISTS`/`REVIEWS`/`PAYMENTS`/`DELIVERIES`/`SHOP`/`DISCOUNTS`/`CARD_GAMES`/`SINGLES`/`HISTORY_PURCHASE`/`POINT_SYSTEM`/`PRIZES`/`PRIZE_POINT`/`TRADE_OFFERS`); also found two tables live code depends on (`CATEGORIES_TCG` used by `tcgcategories.controller.js`, `COUNTRIES` used by `country.controller.js`) that don't exist in `All.sql` at all. Two-round schema proposal review with the owner (naming/PK/module scope, then FK delete-behavior and tournament-team relational integrity) — both approved. **Generated `Database/NanashiCollectibles_v2.sql`** (19 tables: `users`, `password_reset_tokens`, `countries`, `product_categories`, `tcg_games`, `esports_games`, `news_categories`, `products`, `product_images`, `inventory_movements`, `deck_lists`, `tournaments`, `tournament_registrations`, `tournament_teams`, `tournament_team_members`, `trade_listings`, `news`, `services`, `enquiries`) — schema only, no seed data, no `CREATE`/`DROP DATABASE`, no destructive statements. Nothing executed against any database. Tournament team integrity (a team member's registration and a team's captain must belong to the same tournament) enforced via composite foreign keys, not triggers. **Next steps, in order: owner runs the SQL manually → confirms table creation → backend query migration → Phase 3B integration testing.** Not started yet.
-
-(Do not log routine tweaks here — only architecture-level changes.)
+Treat this document as the project's current operating contract.
 
 ---
 
-## Working with this file (instructions for Claude Code)
+# 1. Project Overview
 
-Before doing substantial work on this repository:
-1. Read this file.
-2. Inspect the relevant source files directly — treat current source code as the final authority. Prefer reading actual code over grepping for keywords when the conclusion has security implications.
-3. Update this file when an important architectural decision, dependency, workflow, or project-wide behavior changes (especially §20, §21, §22).
+* **Project name:** NanashiCollectibles
+* **Brand:** NanashiCollectibles is the confirmed frontend/business brand.
+* **Repository context:** This frontend is one application inside the `GamerTavern` monorepo.
+* **Git root:** One directory above this folder.
+* **Related sibling projects:**
 
-Keep this file a concise technical reference, not an activity log. Do not record every small change.
+  * `Backend/`
+  * `Database/`
+  * unrelated `Portfolio_*` sites
+
+## Product direction
+
+NanashiCollectibles is intended to support multiple business verticals rather than a single niche.
+
+Current/planned areas include:
+
+* TCG ecommerce
+* TCG community
+* collectibles
+* Gunpla
+* drone-related products/services
+* computer parts
+* professional drone services
+* website development
+* application development
+* esports
+* tournament registration
+* future Nanashi business verticals
+
+The first actively implemented vertical is:
+
+**RVS Esports → Tournament registration**
+
+The product must not be architected or visually designed as though Nanashi is only:
+
+* a gaming brand
+* a TCG store
+* an esports organization
+* a drone company
+* a software agency
+
+The master platform must remain adaptable to future business categories.
+
+---
+
+# 2. Current Development Status
+
+Completed:
+
+* Phase 1 — frontend foundation
+* Phase 2 — authentication architecture + Tournament as first live vertical
+* Phase 3A — Socket.IO authentication and authorization hardening
+* backend migration to the redesigned `NanashiCollectibles_v2` database contract
+
+Current backend code queries the v2 schema exclusively.
+
+The legacy tables in `Database/All.sql`, including old models such as:
+
+* `PERSONAL_USER`
+* `TOURNAMENT`
+* related legacy tables
+
+are no longer used by live backend code.
+
+## Important verification status
+
+The v2 database design and backend migration have been reviewed and syntax-checked.
+
+However:
+
+**Real integration testing against an actual MySQL instance using the v2 schema has not yet been completed.**
+
+Until the owner provisions and validates the v2 database, treat the migration as:
+
+> code-reviewed and contract-tested, but not production-verified against real MySQL.
+
+Do not represent it as fully production-verified.
+
+---
+
+# 3. Repository Structure
+
+```text
+NanashiCollectibles/
+├── src/
+│   ├── app/
+│   │   └── App.jsx
+│   │
+│   ├── main.jsx
+│   │
+│   ├── config/
+│   │   └── site.js
+│   │
+│   ├── components/
+│   │   ├── layout/
+│   │   ├── navigation/
+│   │   └── ui/
+│   │
+│   ├── features/
+│   │   ├── auth/
+│   │   │   ├── AuthContext.js
+│   │   │   ├── AuthProvider.jsx
+│   │   │   ├── authService.js
+│   │   │   ├── LoginPage.jsx
+│   │   │   └── RegisterPage.jsx
+│   │   │
+│   │   └── tournament/
+│   │       ├── tournamentService.js
+│   │       ├── useTournaments.js
+│   │       ├── TournamentCard.jsx
+│   │       ├── TournamentRegistrationForm.jsx
+│   │       └── format.js
+│   │
+│   ├── services/
+│   │   └── socket/
+│   │       ├── SocketContext.js
+│   │       └── SocketProvider.jsx
+│   │
+│   └── pages/
+│       ├── Home
+│       ├── Shop
+│       ├── Services
+│       ├── Tcg
+│       ├── Esports
+│       ├── About
+│       ├── Contact
+│       ├── services/
+│       └── esports/
+│
+├── index.html
+├── vite.config.js
+├── .env
+└── CLAUDE.md
+```
+
+Sibling backend:
+
+```text
+../Backend/
+├── server.js
+├── routes/
+│   └── api/
+├── controllers/
+├── modules/
+│   ├── db.module.js
+│   ├── mailer.module.js
+│   ├── jwt.module.js
+│   └── authz.module.js
+├── env.example
+└── public/
+    └── uploads/
+        ├── products/
+        └── avatars/
+```
+
+Sibling database:
+
+```text
+../Database/
+├── All.sql
+├── All.dbml
+├── All.dbdiagram
+├── NanashiCollectibles_v2.sql
+└── NanashiCollectibles_v2_seed.sql
+```
+
+## Canonical files
+
+Current database schema:
+
+```text
+Database/NanashiCollectibles_v2.sql
+```
+
+Reference seed data:
+
+```text
+Database/NanashiCollectibles_v2_seed.sql
+```
+
+Legacy only:
+
+```text
+Database/All.sql
+Database/All.dbml
+Database/All.dbdiagram
+```
+
+Do not use the legacy schema as the source of truth for current backend behavior.
+
+---
+
+# 4. Technology Stack
+
+## Frontend
+
+* React 19.2
+* React Router DOM 7.10
+* Tailwind CSS 3.4
+* ESLint 9
+* `eslint-plugin-react-hooks@7`
+* Socket.IO Client 4.8
+* Vite through `rolldown-vite@7.2.5`
+
+The React Hooks lint configuration includes strict rules such as:
+
+* `set-state-in-effect`
+* `refs`
+
+Do not suppress these rules merely to silence lint errors.
+
+Fix the architectural cause.
+
+## Backend
+
+* Node.js
+* ESM
+* Express 5
+* Socket.IO 4
+* `mysql2`
+* `bcrypt`
+* `bcryptjs`
+* `jsonwebtoken`
+* `cybersource-rest-client`
+* `nodemailer`
+* `multer`
+* `nodemon`
+
+`bcrypt` and `bcryptjs` are currently redundant and may eventually be consolidated.
+
+## Database
+
+* MySQL / MariaDB compatible design
+* snake_case naming
+* plural table names
+* `INT UNSIGNED AUTO_INCREMENT` primary keys
+* `utf8mb4_unicode_ci`
+
+## Important backend environment warning
+
+The old:
+
+```text
+Backend/.env.dev
+```
+
+may reference an externally hosted or production-like database.
+
+Never use it casually for development or migration testing.
+
+Do not run destructive or integration operations against a real database without explicit authorization.
+
+---
+
+# 5. Application Architecture
+
+```text
+React SPA
+   │
+   ├── REST fetch
+   │     └── canonical authentication flows
+   │
+   └── socket.io-client
+         └── realtime feature contracts
+                 │
+                 ▼
+Express + Socket.IO
+   │
+   ├── io.use()
+   │     └── JWT socket handshake
+   │
+   ├── REST routes
+   │
+   └── Socket.IO controllers
+         │
+         ▼
+mysql2 pool
+         │
+         ▼
+NanashiCollectibles_v2 MySQL schema
+```
+
+## Socket identity
+
+`Backend/server.js` uses Socket.IO middleware.
+
+A valid JWT produces:
+
+```js
+socket.user = {
+  id,
+  email,
+  name,
+  role
+}
+```
+
+Unauthenticated or invalid-token connections result in:
+
+```js
+socket.user = null
+```
+
+Connections are not rejected solely because authentication is absent.
+
+Authorization is enforced per operation.
+
+Never trust user identity supplied through event payloads.
+
+Identity must come from:
+
+```js
+socket.user
+```
+
+---
+
+# 6. Routing
+
+Current main application routes include:
+
+```text
+/
+ /shop
+ /services
+ /services/...
+ /tcg
+ /about
+ /contact
+ /login
+ /register
+ /esports
+ /esports/tournaments
+ /esports/tournaments/:id
+ *
+```
+
+## Esports
+
+```text
+/esports
+```
+
+RVS Esports landing.
+
+```text
+/esports/tournaments
+```
+
+Live tournament listing.
+
+```text
+/esports/tournaments/:id
+```
+
+Tournament detail and registration.
+
+The registration form is selected automatically from:
+
+```text
+tournament.registration_type
+```
+
+Supported values:
+
+```text
+individual
+team
+```
+
+---
+
+# 7. Current Frontend Data Flow
+
+Use:
+
+```text
+src/config/site.js
+```
+
+as the frontend source of truth for static business/domain configuration.
+
+It also provides the reference values used to generate:
+
+```text
+Database/NanashiCollectibles_v2_seed.sql
+```
+
+## API responsibilities
+
+Use:
+
+```text
+authService.js
+```
+
+for REST authentication.
+
+Use feature-level service wrappers for Socket.IO interactions.
+
+Use:
+
+```text
+SocketProvider
+```
+
+as the central socket connection owner.
+
+Do not create unrelated parallel Socket.IO clients inside individual pages.
+
+## Tournament realtime events
+
+`useTournaments.js` must account for relevant events including:
+
+```text
+tournament:created
+tournament:updated
+tournament:deleted
+tournament:participants_updated
+tournament:teams_updated
+```
+
+Do not remove `tournament:teams_updated`.
+
+Team registrations depend on this event for live UI updates.
+
+---
+
+# 8. Authentication and Authorization
+
+## Canonical authentication
+
+REST authentication is canonical.
+
+Relevant implementation:
+
+```text
+Backend/routes/api/auth.routes.js
+Backend/modules/jwt.module.js
+```
+
+Canonical REST auth includes:
+
+* register
+* login
+* `/me`
+* forgot password
+* reset password
+
+## Public user contract
+
+Register and login must return a consistent public user shape.
+
+Canonical shape:
+
+```js
+{
+  sub,
+  email,
+  name,
+  role
+}
+```
+
+Do not return raw database rows to the frontend.
+
+Use the shared public-user normalization logic.
+
+## Login status enforcement
+
+Login rejects users whose:
+
+```text
+users.status
+```
+
+is not:
+
+```text
+active
+```
+
+Status should only be checked after successful password verification.
+
+This avoids exposing unnecessary account-status information to unauthenticated probes.
+
+## Last login
+
+Successful login updates:
+
+```text
+users.last_login_at
+```
+
+This update is best-effort.
+
+Failure to update the timestamp should not invalidate an otherwise valid login.
+
+---
+
+# 9. Password Reset
+
+Canonical REST endpoints:
+
+```text
+POST /api/auth/forgot-password
+POST /api/auth/reset-password
+```
+
+Storage:
+
+```text
+password_reset_tokens
+```
+
+Only the SHA-256 hash of the reset token is stored.
+
+The raw token must not be stored in the database.
+
+Current implementation does not yet include normal production email delivery for reset tokens.
+
+Do not silently represent password reset as production-complete until delivery behavior is implemented appropriately.
+
+## Legacy duplication
+
+These socket events currently duplicate canonical REST behavior:
+
+```text
+account:requestReset
+account:resetPassword
+```
+
+They are technical debt and should eventually be removed once no frontend dependency remains.
+
+---
+
+# 10. Authorization Rules
+
+Use:
+
+```text
+Backend/modules/authz.module.js
+```
+
+Canonical helpers include:
+
+```text
+requireAuthenticated
+requireAdmin
+requireOwnerOrAdmin
+```
+
+Every protected write must derive identity from verified server-side socket/auth context.
+
+Never authorize based on client-submitted:
+
+```text
+userId
+accountId
+ownerId
+role
+email
+```
+
+unless the server independently verifies it against authenticated identity.
+
+Client-supplied ownership fields are data, not authority.
+
+---
+
+# 11. Backend Domain Contract
+
+Current v2 domain mapping:
+
+| Domain             | Current table(s)                                                                         |
+| ------------------ | ---------------------------------------------------------------------------------------- |
+| Identity           | `users`, `password_reset_tokens`                                                         |
+| Countries          | `countries`                                                                              |
+| TCG games          | `tcg_games`                                                                              |
+| Product categories | `product_categories`                                                                     |
+| Products           | `products`, `product_images`                                                             |
+| Inventory          | `inventory_movements`                                                                    |
+| Deck lists         | `deck_lists`                                                                             |
+| Trades             | `trade_listings`                                                                         |
+| Tournaments        | `tournaments`, `tournament_registrations`, `tournament_teams`, `tournament_team_members` |
+| News               | `news`, `news_categories`                                                                |
+| Services           | `services`                                                                               |
+| Enquiries          | `enquiries`                                                                              |
+
+---
+
+# 12. Product and Inventory Rules
+
+Products use normalized category relationships.
+
+Do not restore legacy free-text category behavior.
+
+Use:
+
+```text
+category_id
+tcg_game_id
+```
+
+where applicable.
+
+## Product price
+
+Product price uses:
+
+```text
+DECIMAL(10,2)
+```
+
+Do not regress it to integer storage.
+
+## Images
+
+Products use:
+
+```text
+product_images
+```
+
+for multiple images.
+
+Important fields include ordering and primary-image behavior.
+
+Do not reintroduce a cached:
+
+```text
+products.image_url
+```
+
+column merely for convenience.
+
+Query the normalized image table.
+
+## Inventory
+
+Inventory changes are represented through:
+
+```text
+inventory_movements
+```
+
+Do not treat inventory as a duplicate mirrored stock table.
+
+Inventory adjustment should:
+
+* lock the relevant product/stock row
+* calculate the new quantity
+* reject invalid negative outcomes
+
+Do not silently clamp negative stock to zero.
+
+---
+
+# 13. Tournament Contract
+
+`tournaments.registration_type` supports:
+
+```text
+individual
+team
+```
+
+The schema and backend must not hard-code Apex Legends or a specific team size.
+
+---
+
+## Individual registration
+
+One participant creates one:
+
+```text
+tournament_registrations
+```
+
+row.
+
+For individual tournaments:
+
+```text
+max_entries
+```
+
+counts participants.
+
+---
+
+## Team registration
+
+A team consists of:
+
+```text
+tournament_teams
+tournament_registrations
+tournament_team_members
+```
+
+`tournament_registrations` remains the participation ledger.
+
+A team is a grouping of registrations.
+
+For team tournaments:
+
+```text
+max_entries
+```
+
+counts teams, not players.
+
+## Team join payload
+
+The current team join flow accepts values conceptually equivalent to:
+
+```js
+{
+  teamName,
+  guestName,
+  nickname,
+  teammates: [
+    {
+      guestName,
+      nickname
+    }
+  ]
+}
+```
+
+The authenticated caller is always the captain.
+
+If authenticated, their identity comes from:
+
+```text
+socket.user
+```
+
+Otherwise they provide their own guest identity.
+
+Additional teammates are guest entries.
+
+Do not allow the submitter to claim another registered user's identity without a real invite/accept mechanism.
+
+---
+
+# 14. Tournament Transaction Rules
+
+Team creation must remain atomic.
+
+The following belong inside one database transaction:
+
+* team creation
+* captain registration
+* teammate registrations
+* team membership links
+* captain assignment
+
+If one operation fails, the entire operation must roll back.
+
+Do not permit partially created teams.
+
+---
+
+# 15. Tournament Captain Integrity
+
+`tournament_teams.captain_registration_id` references a registration.
+
+The database uses a normal FK on:
+
+```text
+captain_registration_id
+```
+
+Do not recreate the previously rejected composite FK design using:
+
+```text
+(captain_registration_id, tournament_id)
+```
+
+with `ON DELETE SET NULL`.
+
+That design conflicts with MySQL behavior when the composite includes a non-nullable `tournament_id`.
+
+The invariants:
+
+* captain belongs to the tournament
+* captain belongs to the team
+
+are enforced by backend transaction/application logic.
+
+Preserve those checks.
+
+---
+
+# 16. Tournament Leave Rules
+
+`tournament:leave` may conceptually support:
+
+```text
+participantId
+teamId
+neither
+```
+
+Behavior:
+
+### `participantId`
+
+Remove a participant when authorization allows:
+
+* owner/self
+* admin
+
+### `teamId`
+
+Withdraw the entire team when caller is:
+
+* team captain
+* admin
+
+Team withdrawal deletes member registrations and related membership records correctly through transactional/cascade behavior.
+
+### Neither
+
+Remove the authenticated caller's own registration.
+
+Do not weaken authorization on these paths.
+
+---
+
+# 17. Known Tournament Concurrency Risk
+
+A known technical debt item remains:
+
+**capacity and duplicate-registration checks occur before the write and are vulnerable to a TOCTOU race.**
+
+Under concurrent registrations, two requests may both pass validation before either commits.
+
+This can theoretically allow:
+
+* capacity overflow
+* duplicate participation
+
+The likely future fix is one of:
+
+* row locking
+* transactional re-check
+* a dedicated capacity-tracking lock
+* stronger unique/index constraints where applicable
+
+Do not claim this race is solved unless the implementation actually changes.
+
+---
+
+# 18. News Rules
+
+Public news reads return:
+
+```text
+status = published
+```
+
+Draft content must not be exposed to normal public users.
+
+Administrative reads may access drafts where authorized.
+
+News categories come from:
+
+```text
+news_categories
+```
+
+Do not restore hard-coded category arrays.
+
+---
+
+# 19. Services and Enquiries
+
+Public services use:
+
+```text
+services:list
+```
+
+Enquiries use:
+
+```text
+enquiries:create
+```
+
+## PII rule
+
+Enquiries contain personally identifiable information such as:
+
+* name
+* email
+* phone
+* message
+
+Do not broadcast enquiry payloads globally over Socket.IO.
+
+`enquiries:create` deliberately does not use a general:
+
+```js
+io.emit(...)
+```
+
+broadcast.
+
+Preserve this privacy boundary.
+
+---
+
+# 20. Database Rules
+
+Canonical schema:
+
+```text
+Database/NanashiCollectibles_v2.sql
+```
+
+Reference seed:
+
+```text
+Database/NanashiCollectibles_v2_seed.sql
+```
+
+Legacy:
+
+```text
+Database/All.sql
+Database/All.dbml
+Database/All.dbdiagram
+```
+
+## Database ownership policy
+
+Database creation, import, migration execution, destructive SQL, and real database changes are manually controlled by the project owner.
+
+Claude may:
+
+* inspect SQL
+* audit SQL
+* design schemas
+* recommend changes
+* generate SQL
+* review migrations
+
+Claude must not independently:
+
+* create a real schema
+* drop a real schema
+* import a real database
+* modify production data
+* truncate tables
+* delete databases
+* run destructive migration scripts
+* connect to real database infrastructure
+
+unless explicitly authorized for that specific action.
+
+## System schemas
+
+Never modify:
+
+```text
+information_schema
+mysql
+performance_schema
+sys
+```
+
+---
+
+# 21. Environment Configuration
+
+Frontend:
+
+```text
+.env
+.env.local
+```
+
+Backend:
+
+```text
+Backend/.env.dev
+Backend/env.example
+```
+
+Do not:
+
+* print secrets
+* expose passwords
+* expose JWT secrets
+* commit sensitive environment values
+* echo database credentials
+* log tokens
+
+When debugging environment problems, validate variable presence and format without unnecessarily displaying secret values.
+
+---
+
+# 22. Development Commands
+
+## Frontend
+
+Common commands:
+
+```bash
+npm run dev
+npm run build
+npm run lint
+npm run preview
+```
+
+Current frontend has no dedicated automated test runner.
+
+## Backend
+
+Common commands:
+
+```bash
+npm install
+npm run dev
+npm run start
+```
+
+Current backend has no dedicated:
+
+* build script
+* lint script
+* automated test suite
+
+When real infrastructure is unavailable, syntax validation may use:
+
+```bash
+node --check <file>
+```
+
+Do not treat syntax validation as integration testing.
+
+---
+
+# 23. Frontend Engineering Rules
+
+Treat the frontend as a maintained product, not as a blank-slate prototype.
+
+Before making substantial frontend changes:
+
+1. inspect the current page
+2. inspect relevant components
+3. search for reusable primitives
+4. identify existing design patterns
+5. identify dependencies
+6. understand the existing data flow
+7. preserve working contracts
+8. make the smallest coherent change
+
+Do not perform broad rewrites when a scoped improvement is sufficient.
+
+---
+
+## Component reuse
+
+Before creating a reusable component, inspect:
+
+```text
+src/components/ui/
+src/components/layout/
+src/components/navigation/
+src/features/
+```
+
+Prefer extending or composing existing primitives.
+
+Avoid duplicate implementations of:
+
+* Button
+* Input
+* Textarea
+* Select
+* Checkbox
+* Radio
+* Modal
+* Dialog
+* Drawer
+* Card
+* Badge
+* Tabs
+* Alert
+* Toast
+* Empty State
+* Skeleton
+* Spinner
+* Page Header
+* Navigation
+* Pagination
+* Form Field
+
+Create a new primitive only when the existing abstraction cannot reasonably support the requirement.
+
+---
+
+# 24. React Rules
+
+Use:
+
+* functional components
+* hooks
+* clear composition
+* narrow component responsibilities
+
+Avoid:
+
+* unnecessary `useEffect`
+* derived values stored unnecessarily in state
+* duplicated state
+* premature memoization
+* deeply coupled page components
+* hidden side effects
+
+Page components should primarily orchestrate:
+
+* data
+* layout
+* features
+
+Move reusable logic into:
+
+* hooks
+* services
+* helpers
+* components
+
+## ESLint
+
+Do not suppress React Hooks lint rules merely to make a warning disappear.
+
+Fix the dependency, state, effect, or architectural issue correctly.
+
+---
+
+# 25. Styling Rules
+
+The frontend currently uses:
+
+```text
+Tailwind CSS
+```
+
+Prefer:
+
+* Tailwind utilities
+* reusable component variants
+* shared design tokens
+* existing project abstractions
+
+Avoid:
+
+* excessive inline style objects
+* duplicated hard-coded style values
+* arbitrary CSS files for trivial Tailwind-supported styling
+* unnecessary new styling frameworks
+
+Avoid excessive arbitrary Tailwind values such as:
+
+```text
+mt-[37px]
+w-[413px]
+gap-[19px]
+```
+
+unless the design genuinely requires them.
+
+Use consistent scales whenever possible.
+
+---
+
+# 26. UI / UX Design Constitution
+
+Claude must approach meaningful UI work as both:
+
+* a senior frontend engineer
+* a senior product designer
+
+The objective is not merely:
+
+> make it modern
+
+The interface should feel:
+
+* intentional
+* professional
+* coherent
+* trustworthy
+* polished
+* visually balanced
+* responsive
+* usable
+* production-ready
+* human-designed
+
+The UI must avoid the stereotypical appearance of an automatically generated or "vibe-coded" application.
+
+---
+
+# 27. Mandatory Design Workflow
+
+For substantial redesign tasks:
+
+```text
+Audit
+↓
+Problem identification
+↓
+Information hierarchy
+↓
+Component strategy
+↓
+Design direction
+↓
+Implementation
+↓
+Responsive review
+↓
+Accessibility review
+↓
+Visual refinement
+```
+
+Do not immediately rewrite JSX after seeing a screenshot.
+
+First understand what is actually wrong.
+
+For small UI fixes, use judgment and avoid unnecessary ceremony.
+
+---
+
+# 28. Design Audit Criteria
+
+When auditing a page, inspect:
+
+* information hierarchy
+* spacing
+* alignment
+* typography
+* color usage
+* contrast
+* grouping
+* visual density
+* navigation
+* primary CTA
+* secondary actions
+* form usability
+* component consistency
+* loading states
+* empty states
+* error states
+* responsive behavior
+* accessibility
+* motion
+* user feedback
+
+Significant design decisions should be explainable as:
+
+```text
+Problem
+→ Design decision
+→ User benefit
+```
+
+Do not redesign something solely because another design looks newer.
+
+---
+
+# 29. Avoid Generic AI / Vibe-Coded Design
+
+Do not automatically use fashionable effects merely because they are visually impressive.
+
+Avoid excessive:
+
+* gradients
+* glassmorphism
+* neon
+* glowing borders
+* blurred blobs
+* animated backgrounds
+* giant headings
+* unnecessary floating shapes
+* cards inside cards
+* excessive rounded rectangles
+* excessive shadows
+* excessive pill components
+* random icons
+* dashboard metrics without real meaning
+* meaningless decorations
+* animation on every element
+
+A page must not resemble a component-library demonstration.
+
+Every visual effect should support at least one of:
+
+* hierarchy
+* branding
+* comprehension
+* interaction
+* feedback
+* storytelling
+
+If removing an effect improves clarity, remove it.
+
+---
+
+# 30. Information Hierarchy
+
+Each page should answer quickly:
+
+1. Where am I?
+2. What is this page for?
+3. What matters most?
+4. What can I do here?
+5. What should I do next?
+
+Do not give every component equal visual weight.
+
+Primary actions should clearly dominate secondary actions.
+
+Destructive actions must be visually distinguishable and must not compete with normal primary actions.
+
+Supporting information should not overpower core content.
+
+---
+
+# 31. Spacing System
+
+Prefer a consistent spacing rhythm based approximately on:
+
+```text
+4
+8
+12
+16
+24
+32
+48
+64
+96
+```
+
+These values are guidance rather than absolute constraints.
+
+Spacing should communicate relationships.
+
+Example:
+
+```text
+related content
+→ small spacing
+
+separate concepts
+→ medium spacing
+
+major sections
+→ large spacing
+```
+
+Whitespace is structural.
+
+Do not fill empty space merely to make a layout appear busy.
+
+---
+
+# 32. Typography
+
+Maintain a restrained hierarchy.
+
+Typical roles:
+
+```text
+Display / Hero
+Page title
+Section heading
+Component heading
+Body
+Supporting text
+Metadata
+Caption
+```
+
+Avoid excessive combinations of:
+
+* font size
+* font weight
+* uppercase
+* letter spacing
+
+Do not make every heading:
+
+* bold
+* oversized
+* uppercase
+
+Prioritize readability.
+
+Maintain reasonable line lengths for body content.
+
+---
+
+# 33. Nanashi Visual Character
+
+Nanashi is a broad umbrella brand.
+
+Its UI should feel capable of supporting:
+
+* ecommerce
+* professional services
+* community
+* technology
+* gaming
+* esports
+* collectibles
+* future industries
+
+Preferred visual character:
+
+* modern
+* confident
+* clean
+* structured
+* technology-aware
+* premium without being luxury-only
+* gaming-aware without looking like an esports clan page
+* expressive without becoming noisy
+
+Avoid locking the identity entirely to:
+
+* cyberpunk
+* anime
+* TCG
+* RGB gaming
+* drone visuals
+* developer aesthetics
+
+Brand expression should be deliberate rather than saturated across every component.
+
+---
+
+# 34. Color Rules
+
+Use color structurally.
+
+Color should communicate:
+
+* brand
+* hierarchy
+* state
+* emphasis
+* feedback
+
+Do not assign unrelated colors merely for visual variety.
+
+Maintain clear semantic meaning for:
+
+* success
+* warning
+* error
+* information
+* neutral
+* primary action
+* secondary action
+
+Avoid overusing the primary brand color.
+
+A strong brand color becomes more effective when used selectively.
+
+---
+
+# 35. Responsive Design
+
+Every meaningful UI feature must work across:
+
+* mobile
+* tablet
+* desktop
+
+Do not simply shrink desktop layouts.
+
+Responsive design may require structural changes.
+
+Example:
+
+```text
+Desktop
+sidebar + main content
+
+Mobile
+drawer + stacked content
+```
+
+Example:
+
+```text
+Desktop
+4-column product layout
+
+Tablet
+2-column layout
+
+Mobile
+1-column layout
+```
+
+Choose responsive behavior based on usability, not mechanical breakpoint conversion.
+
+---
+
+# 36. Mobile Requirements
+
+Check:
+
+* horizontal overflow
+* clipped content
+* touch target size
+* navigation usability
+* form readability
+* keyboard collisions
+* modal dimensions
+* table usability
+* fixed-position element collisions
+* content order
+* CTA visibility
+
+Do not hide critical functionality merely to make mobile easier.
+
+For wide data tables, intentionally choose between:
+
+* horizontal scrolling
+* responsive column reduction
+* stacked representation
+* card transformation
+
+Do not allow accidental overflow.
+
+---
+
+# 37. Accessibility
+
+Maintain:
+
+* semantic HTML
+* keyboard navigation
+* visible focus indicators
+* labels
+* accessible form controls
+* appropriate headings
+* useful alt text
+* adequate contrast
+* meaningful button labels
+
+Do not rely on color alone to communicate state.
+
+Avoid clickable `<div>` elements when semantic controls such as:
+
+```html
+<button>
+<a>
+<input>
+```
+
+are appropriate.
+
+---
+
+# 38. Interactive States
+
+Interactive components must consider:
+
+```text
+default
+hover
+active
+focus
+disabled
+loading
+```
+
+Data-driven components should consider:
+
+```text
+loading
+empty
+success
+error
+```
+
+Forms should consider:
+
+```text
+default
+validation
+submitting
+success
+failure
+disabled
+```
+
+Do not implement only the happy path visually.
+
+---
+
+# 39. Motion and Interaction Rules
+
+Animation is a communication tool.
+
+Use motion to communicate:
+
+* navigation
+* hierarchy
+* state change
+* feedback
+* spatial relationship
+* element continuity
+
+Do not animate something simply because animation is available.
+
+---
+
+## Preferred motion hierarchy
+
+Use CSS transitions for simple interactions such as:
+
+* color
+* opacity
+* transform
+* hover feedback
+* focus feedback
+
+Use a dedicated motion library only when the interaction genuinely benefits from:
+
+* spring physics
+* enter/exit orchestration
+* layout animation
+* gesture interaction
+* coordinated transitions
+* complex sequences
+
+---
+
+## Motion timing
+
+Typical interface transitions should generally remain within approximately:
+
+```text
+150–350ms
+```
+
+Longer animation may be appropriate for:
+
+* major page transitions
+* storytelling
+* marketing sections
+
+Avoid unnecessarily slow interaction.
+
+---
+
+## Avoid
+
+* excessive bouncing
+* constant floating
+* repeated pulsing
+* hover movement that causes layout shift
+* excessive scale effects
+* animating every child independently
+* motion that delays user input
+* animated decoration with no purpose
+
+Respect reduced-motion preferences where practical.
+
+---
+
+# 40. Existing Motion Dependency
+
+`framer-motion` is currently installed but unused.
+
+Do not introduce it merely because the package exists.
+
+Before using it, determine whether:
+
+```text
+CSS
+```
+
+is sufficient.
+
+If motion becomes a deliberate architectural dependency across the project, document that decision in this file.
+
+Do not mix multiple motion libraries without a clear reason.
+
+---
+
+# 41. Design Reference Rules
+
+External references may inform the design.
+
+They must not replace design reasoning.
+
+Useful categories include:
+
+* Mobbin — real product UX patterns
+* 21st.dev — component inspiration
+* Godly — visual web inspiration
+* Aceternity UI — advanced interaction inspiration
+* Motion documentation
+* React Spring documentation
+
+When using a reference, analyze:
+
+* hierarchy
+* spacing
+* typography
+* layout
+* density
+* component treatment
+* navigation
+* interaction
+* responsive behavior
+* motion philosophy
+
+Do not blindly copy:
+
+* branding
+* proprietary content
+* imagery
+* entire layouts
+* decorative effects
+* page structure
+
+Translate relevant principles into Nanashi's own system.
+
+---
+
+# 42. External Library Rules
+
+Before adding a new UI or frontend dependency, evaluate:
+
+* whether the project already solves the problem
+* bundle impact
+* accessibility
+* maintenance burden
+* compatibility
+* styling conflicts
+* long-term architecture
+
+Do not install an entire UI framework to solve one component.
+
+Do not mix multiple competing component systems without explicit justification.
+
+Avoid turning the project into:
+
+```text
+Tailwind
++
+MUI
++
+shadcn
++
+multiple animation libraries
++
+random CSS frameworks
+```
+
+without architectural intent.
+
+---
+
+# 43. UI Completion Checklist
+
+Before considering a substantial UI task complete, review:
+
+## Structure
+
+* Is the page purpose obvious?
+* Is the information hierarchy clear?
+* Is the primary CTA obvious?
+* Are related elements grouped correctly?
+* Is unnecessary content present?
+
+## Visual design
+
+* Is spacing consistent?
+* Is alignment intentional?
+* Is typography restrained?
+* Is color usage coherent?
+* Are there unnecessary effects?
+* Is there enough whitespace?
+
+## Components
+
+* Were existing components reused?
+* Were duplicate primitives created?
+* Is repeated UI actually reusable?
+* Is the component API unnecessarily complicated?
+
+## States
+
+Check:
+
+* loading
+* empty
+* error
+* success
+* disabled
+
+## Responsive
+
+Check:
+
+* mobile
+* tablet
+* desktop
+* overflow
+* navigation
+* forms
+* modals
+* tables
+* CTA positioning
+
+## Accessibility
+
+Check:
+
+* keyboard
+* focus
+* labels
+* contrast
+* semantic HTML
+
+## Interaction
+
+Check:
+
+* hover behavior
+* click feedback
+* async feedback
+* motion purpose
+* transition speed
+
+## Final visual test
+
+Ask:
+
+> Does this look like one coherent product designed intentionally?
+
+Do not optimize for:
+
+> Does every individual component look impressive?
+
+If the result feels:
+
+* AI-generated
+* noisy
+* inconsistent
+* overly decorative
+* like a component-library showcase
+
+simplify and refine it.
+
+---
+
+# 44. API Rules
+
+Do not change frontend/backend contracts casually.
+
+Before changing:
+
+* REST endpoint
+* Socket.IO event
+* request shape
+* response shape
+* authentication structure
+* database field name
+
+inspect all consumers.
+
+Search the repository for usage.
+
+If a contract must change:
+
+1. update backend
+2. update frontend consumers
+3. update validation
+4. update relevant documentation
+5. verify compatibility
+
+Do not create silent contract drift.
+
+---
+
+# 45. Backend Modification Rules
+
+Before editing a backend controller:
+
+1. inspect current schema
+2. inspect auth requirements
+3. inspect all event listeners/callers
+4. inspect transaction behavior
+5. inspect emitted events
+6. inspect privacy impact
+
+Prefer explicit validation.
+
+Do not trust incoming payloads.
+
+Validate:
+
+* required fields
+* types
+* allowed values
+* ownership
+* state transitions
+
+---
+
+# 46. SQL Rules
+
+Always use parameterized queries.
+
+Never concatenate untrusted input directly into SQL.
+
+Prefer transactions when multiple related writes must remain consistent.
+
+Use row locking where concurrency integrity requires it.
+
+Prefer database constraints where they cleanly express invariants.
+
+Examples:
+
+* FK constraints
+* unique constraints
+* non-null constraints
+* enum/check-style constraints where appropriate
+
+Do not force a database constraint when the database cannot correctly express the required behavior.
+
+Validate the actual MySQL semantics before relying on a complex FK.
+
+---
+
+# 47. Security Rules
+
+Security takes priority over convenience.
+
+Never weaken:
+
+* authentication
+* authorization
+* ownership checks
+* role checks
+* token validation
+* password handling
+* PII boundaries
+
+Never trust client-provided identity.
+
+Never log:
+
+* plaintext passwords
+* password reset tokens
+* JWT secrets
+* database passwords
+* complete authorization headers
+* sensitive personal data unnecessarily
+
+Do not broadcast private data through realtime events.
+
+---
+
+# 48. Debugging Rules
+
+When debugging:
+
+1. reproduce the problem
+2. inspect the actual failing path
+3. identify root cause
+4. change the smallest appropriate area
+5. verify affected behavior
+6. check for regressions
+
+Do not blindly rewrite working modules because one feature fails.
+
+Avoid speculative fixes.
+
+If a problem appears related to:
+
+* DNS
+* database connectivity
+* authentication
+* environment variables
+* network access
+
+distinguish infrastructure failures from application-code failures.
+
+---
+
+# 49. Modification Discipline
+
+Before significant modifications:
+
+* inspect the actual source
+* understand dependencies
+* identify blast radius
+* preserve unrelated behavior
+
+Avoid:
+
+* unnecessary refactors
+* unrelated formatting changes
+* renaming unrelated files
+* changing architecture while fixing a small bug
+
+A focused patch is preferred when appropriate.
+
+A larger refactor is justified only when the underlying architecture is the cause of the problem.
+
+---
+
+# 50. Vite Configuration Warning
+
+The current:
+
+```text
+vite.config.js
+```
+
+contains an intentional:
+
+```text
+allowedHosts
+```
+
+configuration.
+
+Do not remove, revert, or casually modify it.
+
+Only change it when explicitly required and after understanding the deployment reason.
+
+---
+
+# 51. Files Requiring Extra Care
+
+## `Backend/controllers/tournament.controller.js`
+
+This is currently one of the most complex backend controllers.
+
+It includes:
+
+* individual registration
+* team registration
+* transactions
+* captain logic
+* capacity rules
+* tournament state
+* leave behavior
+
+Changes here have a large blast radius.
+
+Inspect thoroughly before modification.
+
+---
+
+## `Database/NanashiCollectibles_v2.sql`
+
+This schema is the contract assumed by migrated backend code.
+
+Changing column names, constraints, or relationships without corresponding backend changes will cause runtime failures.
+
+Remember:
+
+the schema has not yet been fully integration-tested against a real database.
+
+---
+
+## `Backend/server.js`
+
+Contains global Socket.IO authentication middleware and controller wiring.
+
+Changes can affect every realtime domain.
+
+---
+
+## Authentication modules
+
+Extra care:
+
+```text
+Backend/routes/api/auth.routes.js
+Backend/modules/jwt.module.js
+Backend/modules/authz.module.js
+```
+
+Do not modify auth behavior casually.
+
+---
+
+# 52. Known Issues / Technical Debt
+
+Confirmed:
+
+### Database integration
+
+The v2 schema has not yet been validated through full integration against a real MySQL instance.
+
+This is the highest-priority infrastructure verification item.
+
+### Tournament concurrency
+
+Capacity and duplicate-registration checks contain a TOCTOU race.
+
+Not yet fixed.
+
+### Duplicate password reset paths
+
+Socket:
+
+```text
+account:requestReset
+account:resetPassword
+```
+
+duplicate canonical REST endpoints.
+
+Consider removal once unused.
+
+### Missing frontend verticals
+
+Backend contracts exist but frontend implementation is incomplete for:
+
+* Shop/product browsing
+* TCG deck lists
+* News
+* Services
+* Enquiries
+
+### Admin frontend
+
+Backend admin events exist, but there is currently no complete frontend administration UI for:
+
+* tournaments
+* products
+* news
+* other administrative features
+
+### Legacy schema docs
+
+These remain intentionally stale:
+
+```text
+Database/All.sql
+Database/All.dbml
+Database/All.dbdiagram
+```
+
+They document the retired schema.
+
+### Dependencies
+
+`bcrypt` and `bcryptjs` are both installed.
+
+Potential future consolidation.
+
+### Motion
+
+`framer-motion` is installed but currently unused.
+
+---
+
+# 53. Current Architectural Decisions
+
+These decisions remain in force unless explicitly revisited.
+
+---
+
+## Canonical authentication
+
+REST JWT authentication is canonical.
+
+Socket authentication derives from the JWT handshake.
+
+Do not create a second incompatible identity system.
+
+---
+
+## Socket.IO guest model
+
+Guest Socket.IO connections are allowed.
+
+Protected operations enforce authorization individually.
+
+Do not reject all unauthenticated socket connections globally unless the architecture is deliberately changed.
+
+---
+
+## Database v2
+
+`NanashiCollectibles_v2` is the current canonical schema design.
+
+Backend code has been migrated away from the legacy schema.
+
+Do not restore old table dependencies.
+
+---
+
+## Database execution ownership
+
+Real database execution is controlled by the project owner.
+
+Claude can prepare SQL but must not independently run destructive database operations.
+
+---
+
+## Merchant routes
+
+Merchant routes currently remain intentionally unmounted.
+
+Do not mount them merely because the files exist.
+
+---
+
+## Payments
+
+Payments are currently outside the active development scope unless explicitly requested.
+
+Do not expand payment architecture opportunistically during unrelated work.
+
+---
+
+## `vite.config.js`
+
+The current allowed-host configuration is intentional.
+
+Preserve it.
+
+---
+
+# 54. Current Product Implementation Priority
+
+Tournament is currently the most complete frontend/backend vertical.
+
+Other backend domains are available for future frontend connection.
+
+When beginning a new frontend vertical:
+
+1. inspect the existing backend contract
+2. inspect the database model
+3. define the frontend information architecture
+4. reuse existing layout/design primitives
+5. implement loading/error/empty states
+6. connect realtime behavior only where justified
+7. maintain the design constitution in this document
+
+Do not build frontend pages before understanding the actual backend contract.
+
+---
+
+# 55. Verification Standards
+
+Different validation methods provide different levels of confidence.
+
+## Syntax validation
+
+Example:
+
+```bash
+node --check
+```
+
+proves syntax correctness only.
+
+## Frontend build
+
+```bash
+npm run build
+```
+
+proves bundling/build compatibility.
+
+## Lint
+
+```bash
+npm run lint
+```
+
+proves configured static rules pass.
+
+## Mock QA
+
+Mock-server testing validates behavior against the simulated contract.
+
+## Real integration
+
+Only testing against the actual:
+
+* backend
+* database
+* environment
+* network
+
+validates full integration.
+
+Do not describe one form of validation as another.
+
+---
+
+# 56. CLAUDE.md Maintenance Rules
+
+Read this file before substantial work.
+
+Treat it as the project's current operating contract.
+
+## Priority of truth
+
+When determining current behavior, use:
+
+1. current source code
+2. current canonical database schema
+3. current architectural decisions in this file
+4. maintained project documentation
+5. historical documentation
+6. legacy files
+
+If the source code and this document disagree:
+
+* inspect the discrepancy
+* determine whether the code changed intentionally
+* do not blindly modify either side
+* update this file when architectural truth has changed
+
+---
+
+# 57. When to Update CLAUDE.md
+
+Update this file when one of these changes:
+
+* architecture
+* authentication
+* authorization
+* database contract
+* REST contract
+* Socket.IO contract
+* major dependency
+* project-wide UI system
+* design system
+* deployment workflow
+* security constraints
+* major technical debt
+* significant product behavior
+* canonical development workflow
+
+Do not update it for:
+
+* routine bug fixes
+* minor visual tweaks
+* ordinary commits
+* temporary debugging
+* small copy changes
+* isolated component changes
+* day-to-day work-session notes
+
+Git history is the activity log.
+
+CLAUDE.md is the operating contract.
+
+---
+
+# 58. Change History Policy
+
+Do not turn this file into a chronological development diary.
+
+Only record architecture-level changes when they remain useful to future work.
+
+Historical implementation details should live in:
+
+* Git history
+* commit messages
+* dedicated project documentation
+* changelogs
+
+CLAUDE.md should primarily answer:
+
+```text
+What is true now?
+How does the system work now?
+What must Claude preserve?
+What rules govern future changes?
+What technical debt is currently known?
+```
+
+---
+
+# 59. Final Working Principles
+
+When working in this repository:
+
+## Understand before editing
+
+Inspect the actual implementation first.
+
+## Preserve contracts
+
+Do not accidentally break:
+
+* routes
+* database relationships
+* API shapes
+* Socket.IO events
+* authentication
+* authorization
+
+## Prefer clarity
+
+Code should be understandable by the next developer.
+
+## Prefer consistency
+
+Reuse established patterns rather than inventing a new approach for every feature.
+
+## Prefer deliberate design
+
+UI decisions must serve:
+
+* user comprehension
+* usability
+* hierarchy
+* brand
+* interaction
+
+not visual novelty alone.
+
+## Prefer secure defaults
+
+Never trade identity, authorization, privacy, or data integrity for implementation convenience.
+
+## Prefer scoped changes
+
+Solve the actual problem without unnecessary rewrites.
+
+## Verify appropriately
+
+Use the strongest validation available, and state clearly what has and has not been verified.
+
+---
+
+# 60. Core Rule
+
+The objective is not merely to make NanashiCollectibles:
+
+> function.
+
+The objective is to build a platform that is:
+
+* maintainable
+* secure
+* scalable
+* coherent
+* visually intentional
+* extensible across future Nanashi businesses
+* understandable to future developers
+* reliable for users
+
+Every significant implementation decision should move the project toward those qualities.
