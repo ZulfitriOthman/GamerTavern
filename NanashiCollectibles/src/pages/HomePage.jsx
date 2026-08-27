@@ -14,23 +14,57 @@ import {
 
 function Hero() {
   return (
-    <Section className="pt-20 sm:pt-28">
-      <div className="mx-auto flex max-w-3xl flex-col items-center gap-6 text-center">
-        <Badge tone="signal">{site.name}</Badge>
-        <h1 className="font-display text-4xl font-semibold leading-tight text-amber-50 sm:text-6xl">
-          Collect. Create. <span className="text-brand-400">Compete.</span> Build.
-        </h1>
-        <p className="max-w-xl text-base text-amber-50/70 sm:text-lg">{site.description}</p>
-        <div className="flex flex-wrap items-center justify-center gap-3">
-          <Button to="/shop" size="lg">
-            Explore the shop
-          </Button>
-          <Button to="/contact" variant="secondary" size="lg">
-            Talk to us about a project
-          </Button>
+    <section className="relative isolate overflow-hidden border-b border-white/10">
+      <img
+        src="/assets/game-bg/shop-bg.jpg"
+        alt="A star-filled night sky"
+        className="absolute inset-0 -z-20 h-full w-full object-cover"
+      />
+      <div className="absolute inset-0 -z-10 bg-[linear-gradient(90deg,rgba(9,7,20,.98)_0%,rgba(9,7,20,.86)_42%,rgba(9,7,20,.28)_100%)]" />
+      <div className="absolute inset-0 -z-10 bg-gradient-to-t from-ink-950 via-transparent to-black/20" />
+
+      <Section className="py-20 sm:py-28 lg:py-32">
+        <div className="grid items-center gap-12 lg:grid-cols-[1.15fr_.85fr]">
+          <div className="flex max-w-2xl flex-col items-start gap-6">
+            <Badge tone="signal">The collector's tavern</Badge>
+            <h1 className="font-display text-5xl font-semibold leading-[1.05] tracking-tight text-amber-50 sm:text-7xl">
+              Collect. Create. <span className="text-brand-400">Compete.</span> Build.
+            </h1>
+            <p className="max-w-xl text-base leading-7 text-amber-50/75 sm:text-lg">
+              {site.description}
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <Button to="/shop" size="lg">
+                Explore the shop
+              </Button>
+              <Button to="/contact" variant="secondary" size="lg">
+                Talk to us about a project
+              </Button>
+            </div>
+          </div>
+
+          <div className="hidden justify-self-end lg:flex lg:max-w-sm">
+            <div className="rounded-2xl border border-white/15 bg-ink-950/55 p-6 shadow-2xl shadow-black/30 backdrop-blur-md">
+              <div className="mb-8 flex items-center justify-between gap-4">
+                <span className="text-xs font-semibold uppercase tracking-[.22em] text-amber-50/55">
+                  NanashiCollectibles
+                </span>
+                <span className="h-2 w-2 rounded-full bg-brand-400 shadow-[0_0_14px_rgba(242,180,80,.9)]" />
+              </div>
+              <p className="font-display text-2xl font-semibold leading-tight text-amber-50">
+                Find your next favorite pull.
+              </p>
+              <p className="mt-3 text-sm leading-6 text-amber-50/60">
+                TCG singles, hobby essentials, collectibles, and a community built around the games you love.
+              </p>
+              <Link to="/tcg" className="mt-6 inline-flex text-sm font-semibold text-brand-400 transition-colors hover:text-brand-400">
+                Meet the community <span aria-hidden="true" className="ml-2">→</span>
+              </Link>
+            </div>
+          </div>
         </div>
-      </div>
-    </Section>
+      </Section>
+    </section>
   );
 }
 

@@ -8,14 +8,8 @@ export default defineConfig({
     host: true, // allow network access
     port: 5173,
 
-    allowedHosts: [
-      "localhost",
-      "127.0.0.1",
-      "all",
-
-      // ✅ your domain(s)
-      "dev.nanashicollectibles.com",
-      "server.nanashicollectibles.com",
-    ],
+    // The hosted preview uses a dynamic *.e2b.app hostname.
+    // `true` keeps the Vite preview accessible without hard-coding it.
+    allowedHosts: true,
   },
 });
