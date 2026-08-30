@@ -5,13 +5,12 @@ import { SocketContext } from "./SocketContext.js";
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "http://localhost:3002";
 
-// NOTE (confirmed via backend audit, Phase 2): the backend does not currently verify
-// this handshake token — there is no `io.use()` auth middleware in Backend/server.js,
-// and no controller checks a signed token for socket events. Every socket controller
-// that gates writes (tournament/news/decklist admin checks, product/trade ownership)
-// trusts a plain, client-supplied id in the event payload instead. Sending the JWT here
-// is forward-compatible (the day the backend adds real verification, this already works)
-// but provides no actual security today — see CLAUDE.md "Socket.IO authentication".
+// NOTE (confirmed via backend audit, Phase 8): Backend/server.js's io.use() handshake
+// middleware verifies this token server-side (Backend/modules/jwt.module.js) and sets
+// socket.user from the decoded payload — a missing or invalid token connects as a guest
+// (socket.user = null) rather than being rejected, but never grants authenticated
+// privileges. Authorization then reads identity only from socket.user, never from a
+// client-supplied payload field — see CLAUDE.md "Socket.IO authentication".
 export function SocketProvider({ children }) {
   const { token, status: authStatus } = useAuth();
   const [socket, setSocket] = useState(null);

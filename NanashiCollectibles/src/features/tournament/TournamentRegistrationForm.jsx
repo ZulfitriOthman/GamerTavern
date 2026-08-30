@@ -1,11 +1,9 @@
 import { useState } from "react";
 import Button from "../../components/ui/Button.jsx";
+import { TextField } from "../../components/ui/Field.jsx";
 import { useAuth } from "../auth/AuthContext.js";
 import { useSocket } from "../../services/socket/SocketContext.js";
 import { joinTournament, leaveTournament } from "./tournamentService.js";
-
-const fieldClasses =
-  "w-full rounded-lg border border-white/10 bg-ink-900 px-3.5 py-2.5 text-sm text-amber-50 placeholder:text-amber-50/30 focus:border-brand-400 focus:outline-none";
 
 export default function TournamentRegistrationForm({ tournament }) {
   const { status: authStatus, user } = useAuth();
@@ -57,11 +55,11 @@ export default function TournamentRegistrationForm({ tournament }) {
           You're registered{myTeam ? ` as part of "${myTeam.name}"` : ""}.
         </p>
         {error ? (
-          <p role="alert" className="text-sm text-rose-400">
+          <p role="alert" className="text-sm text-danger-400">
             {error}
           </p>
         ) : null}
-        <Button variant="secondary" onClick={handleLeave} disabled={submitting} className="w-fit">
+        <Button variant="secondary" onClick={handleLeave} isLoading={submitting} className="w-fit">
           {submitting ? "Leaving…" : "Leave tournament"}
         </Button>
       </div>
@@ -79,9 +77,25 @@ export default function TournamentRegistrationForm({ tournament }) {
   }
 
   return isTeamMode ? (
-    <TeamJoinForm tournament={tournament} isAuthenticated={isAuthenticated} socket={socket} error={error} setError={setError} submitting={submitting} setSubmitting={setSubmitting} />
+    <TeamJoinForm
+      tournament={tournament}
+      isAuthenticated={isAuthenticated}
+      socket={socket}
+      error={error}
+      setError={setError}
+      submitting={submitting}
+      setSubmitting={setSubmitting}
+    />
   ) : (
-    <IndividualJoinForm tournament={tournament} isAuthenticated={isAuthenticated} socket={socket} error={error} setError={setError} submitting={submitting} setSubmitting={setSubmitting} />
+    <IndividualJoinForm
+      tournament={tournament}
+      isAuthenticated={isAuthenticated}
+      socket={socket}
+      error={error}
+      setError={setError}
+      submitting={submitting}
+      setSubmitting={setSubmitting}
+    />
   );
 }
 
@@ -117,38 +131,31 @@ function IndividualJoinForm({ tournament, isAuthenticated, socket, error, setErr
   return (
     <form className="flex flex-col gap-3" onSubmit={handleJoin} noValidate>
       {!isAuthenticated ? (
-        <label className="flex flex-col gap-1.5 text-sm text-amber-50/70" htmlFor="guest-name">
-          Display name
-          <input
-            id="guest-name"
-            type="text"
-            className={fieldClasses}
-            value={guestName}
-            onChange={(event) => setGuestName(event.target.value)}
-            placeholder="Registering as a guest"
-            required
-          />
-        </label>
+        <TextField
+          id="guest-name"
+          label="Display name"
+          value={guestName}
+          onChange={(event) => setGuestName(event.target.value)}
+          placeholder="Registering as a guest"
+          required
+        />
       ) : null}
 
-      <label className="flex flex-col gap-1.5 text-sm text-amber-50/70" htmlFor="nickname">
-        In-game nickname <span className="text-amber-50/40">(optional)</span>
-        <input
-          id="nickname"
-          type="text"
-          className={fieldClasses}
-          value={nickname}
-          onChange={(event) => setNickname(event.target.value)}
-        />
-      </label>
+      <TextField
+        id="nickname"
+        label="In-game nickname"
+        hint="Optional"
+        value={nickname}
+        onChange={(event) => setNickname(event.target.value)}
+      />
 
       {error ? (
-        <p role="alert" className="text-sm text-rose-400">
+        <p role="alert" className="text-sm text-danger-400">
           {error}
         </p>
       ) : null}
 
-      <Button type="submit" disabled={submitting} className={`w-fit ${submitting ? "opacity-60" : ""}`}>
+      <Button type="submit" isLoading={submitting} className="w-fit">
         {submitting ? "Registering…" : "Register"}
       </Button>
     </form>
@@ -209,84 +216,64 @@ function TeamJoinForm({ tournament, isAuthenticated, socket, error, setError, su
 
   return (
     <form className="flex flex-col gap-3" onSubmit={handleJoin} noValidate>
-      <p className="text-xs text-amber-50/40">Teams of exactly {teamSize} for this tournament.</p>
+      <p className="text-xs text-amber-50/55">Teams of exactly {teamSize} for this tournament.</p>
 
-      <label className="flex flex-col gap-1.5 text-sm text-amber-50/70" htmlFor="team-name">
-        Team name
-        <input
-          id="team-name"
-          type="text"
-          className={fieldClasses}
-          value={teamName}
-          onChange={(event) => setTeamName(event.target.value)}
-          required
-        />
-      </label>
+      <TextField
+        id="team-name"
+        label="Team name"
+        value={teamName}
+        onChange={(event) => setTeamName(event.target.value)}
+        required
+      />
 
-      <div className="rounded-lg border border-white/10 p-3">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-50/40">You</p>
+      <div className="flex flex-col gap-3 rounded-lg border border-white/10 p-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-amber-50/45">You</p>
         {!isAuthenticated ? (
-          <label className="flex flex-col gap-1.5 text-sm text-amber-50/70" htmlFor="captain-guest-name">
-            Display name
-            <input
-              id="captain-guest-name"
-              type="text"
-              className={fieldClasses}
-              value={guestName}
-              onChange={(event) => setGuestName(event.target.value)}
-              placeholder="Registering as a guest"
-              required
-            />
-          </label>
-        ) : null}
-        <label className="mt-2 flex flex-col gap-1.5 text-sm text-amber-50/70" htmlFor="captain-nickname">
-          In-game nickname <span className="text-amber-50/40">(optional)</span>
-          <input
-            id="captain-nickname"
-            type="text"
-            className={fieldClasses}
-            value={nickname}
-            onChange={(event) => setNickname(event.target.value)}
+          <TextField
+            id="captain-guest-name"
+            label="Display name"
+            value={guestName}
+            onChange={(event) => setGuestName(event.target.value)}
+            placeholder="Registering as a guest"
+            required
           />
-        </label>
+        ) : null}
+        <TextField
+          id="captain-nickname"
+          label="In-game nickname"
+          hint="Optional"
+          value={nickname}
+          onChange={(event) => setNickname(event.target.value)}
+        />
       </div>
 
       {teammates.map((m, i) => (
-        <div key={i} className="rounded-lg border border-white/10 p-3">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-50/40">
-            Teammate {i + 1}
-          </p>
-          <label className="flex flex-col gap-1.5 text-sm text-amber-50/70" htmlFor={`teammate-${i}-name`}>
-            Display name
-            <input
-              id={`teammate-${i}-name`}
-              type="text"
-              className={fieldClasses}
-              value={m.guestName}
-              onChange={(event) => updateTeammate(i, "guestName", event.target.value)}
-              required
-            />
-          </label>
-          <label className="mt-2 flex flex-col gap-1.5 text-sm text-amber-50/70" htmlFor={`teammate-${i}-nickname`}>
-            In-game nickname <span className="text-amber-50/40">(optional)</span>
-            <input
-              id={`teammate-${i}-nickname`}
-              type="text"
-              className={fieldClasses}
-              value={m.nickname}
-              onChange={(event) => updateTeammate(i, "nickname", event.target.value)}
-            />
-          </label>
+        <div key={i} className="flex flex-col gap-3 rounded-lg border border-white/10 p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-amber-50/45">Teammate {i + 1}</p>
+          <TextField
+            id={`teammate-${i}-name`}
+            label="Display name"
+            value={m.guestName}
+            onChange={(event) => updateTeammate(i, "guestName", event.target.value)}
+            required
+          />
+          <TextField
+            id={`teammate-${i}-nickname`}
+            label="In-game nickname"
+            hint="Optional"
+            value={m.nickname}
+            onChange={(event) => updateTeammate(i, "nickname", event.target.value)}
+          />
         </div>
       ))}
 
       {error ? (
-        <p role="alert" className="text-sm text-rose-400">
+        <p role="alert" className="text-sm text-danger-400">
           {error}
         </p>
       ) : null}
 
-      <Button type="submit" disabled={submitting} className={`w-fit ${submitting ? "opacity-60" : ""}`}>
+      <Button type="submit" isLoading={submitting} className="w-fit">
         {submitting ? "Registering…" : "Register team"}
       </Button>
     </form>

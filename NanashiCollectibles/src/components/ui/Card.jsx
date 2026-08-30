@@ -1,3 +1,5 @@
+import { forwardRef } from "react";
+
 // Card controls visual treatment only (surface/border/padding/radius/elevation/
 // interaction) — never layout width. Pages/containers own max-width and position.
 const VARIANTS = {
@@ -19,11 +21,15 @@ const PADDING = {
   data: "p-5",
 };
 
-export default function Card({ as, variant = "default", className = "", children, ...props }) {
+const Card = forwardRef(function Card(
+  { as, variant = "default", className = "", children, ...props },
+  ref
+) {
   const Tag = as || "div";
 
   return (
     <Tag
+      ref={ref}
       className={[
         "rounded-xl border transition-colors duration-150",
         variant !== "elevated" ? "backdrop-blur-sm" : "",
@@ -37,4 +43,6 @@ export default function Card({ as, variant = "default", className = "", children
       {children}
     </Tag>
   );
-}
+});
+
+export default Card;

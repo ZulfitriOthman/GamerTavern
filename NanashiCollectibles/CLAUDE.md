@@ -2482,3 +2482,28 @@ The objective is to build a platform that is:
 * reliable for users
 
 Every significant implementation decision should move the project toward those qualities.
+
+---
+
+# 61. Live Integration Testing Safety
+
+A reachable local backend must never be assumed to use a disposable local database.
+
+Before performing any REST or Socket.IO operation that can write data, first determine whether the configured environment is explicitly safe for test writes.
+
+Do not reveal credentials.
+
+If the database target cannot be confidently identified as development/test infrastructure, do not issue the write without explicit owner authorization.
+
+This applies to:
+
+* enquiries
+* user registration
+* tournament registrations
+* products
+* uploads
+* administrative actions
+* payments
+* any other state-changing endpoint/event
+
+Read-only checks, lint, build, mock testing, and frontend rendering are unaffected.

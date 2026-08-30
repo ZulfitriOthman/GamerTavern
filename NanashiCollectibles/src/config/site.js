@@ -151,6 +151,24 @@ export const services = [
   },
 ];
 
+// The real, honest engagement process — used on both the Services landing and
+// each service detail page. Not backend-driven; describes how enquiries
+// currently work (see ContactPage / enquiries:create).
+export const serviceProcess = [
+  {
+    step: "1. Enquire",
+    description: "Tell us what you need through Contact — a project, an event, or an internal system.",
+  },
+  {
+    step: "2. Quotation",
+    description: "We follow up with a scoped quotation based on what you're trying to build.",
+  },
+  {
+    step: "3. Delivery",
+    description: "Work happens as a real project — drone, website, or application — not a shop checkout.",
+  },
+];
+
 export const tcgGames = [
   "Digimon Card Game",
   "Pokémon Trading Card Game",

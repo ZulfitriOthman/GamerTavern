@@ -1,13 +1,12 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Section from "../../components/layout/Section.jsx";
-import SectionHeading from "../../components/ui/SectionHeading.jsx";
 import Card from "../../components/ui/Card.jsx";
+import Badge from "../../components/ui/Badge.jsx";
 import Button from "../../components/ui/Button.jsx";
+import { TextField } from "../../components/ui/Field.jsx";
 import { useAuth } from "./AuthContext.js";
-
-const fieldClasses =
-  "w-full rounded-lg border border-white/10 bg-ink-900 px-3.5 py-2.5 text-sm text-amber-50 placeholder:text-amber-50/30 focus:border-brand-400 focus:outline-none";
+import { site } from "../../config/site.js";
 
 // Fields match Backend/routes/api/auth.routes.js's REGISTER_ALLOWED_FIELDS exactly —
 // name, email, password required; phone optional. Password only needs to be 8+ chars
@@ -49,86 +48,85 @@ export default function RegisterPage() {
   }
 
   return (
-    <Section className="pt-16 sm:pt-24">
-      <SectionHeading
-        eyebrow="Account"
-        title="Create an account"
-        description="Register to join tournaments, trade, and more."
-      />
+    <Section spacing="lg" className="pt-14 sm:pt-20">
+      <div className="grid gap-10 lg:grid-cols-[1fr_1.1fr] lg:items-center">
+        <div className="hidden flex-col gap-4 lg:flex">
+          <Badge tone="signal">{site.name}</Badge>
+          <p className="font-display text-3xl font-semibold text-amber-50">
+            Join tournaments, trade, and more
+          </p>
+          <p className="max-w-sm text-sm text-amber-50/60">
+            One account works across every Nanashi vertical as it comes online — starting with
+            RVS Esports tournament registration.
+          </p>
+        </div>
 
-      <Card className="mt-10 max-w-md">
-        <form className="flex flex-col gap-4" onSubmit={handleSubmit} noValidate>
-          <label className="flex flex-col gap-1.5 text-sm text-amber-50/70" htmlFor="register-name">
-            Name
-            <input
+        <Card variant="form" className="mx-auto w-full max-w-md">
+          <h1 className="font-display text-xl font-semibold text-amber-50 sm:text-2xl">Create an account</h1>
+          <p className="mt-1 text-sm text-amber-50/60">Register to join tournaments, trade, and more.</p>
+
+          <form className="mt-6 flex flex-col gap-4" onSubmit={handleSubmit} noValidate>
+            <TextField
               id="register-name"
+              label="Name"
               type="text"
-              className={fieldClasses}
               value={form.name}
               onChange={updateField("name")}
               autoComplete="name"
               required
             />
-          </label>
 
-          <label className="flex flex-col gap-1.5 text-sm text-amber-50/70" htmlFor="register-email">
-            Email
-            <input
+            <TextField
               id="register-email"
+              label="Email"
               type="email"
-              className={fieldClasses}
               value={form.email}
               onChange={updateField("email")}
               autoComplete="email"
               required
             />
-          </label>
 
-          <label className="flex flex-col gap-1.5 text-sm text-amber-50/70" htmlFor="register-phone">
-            Phone <span className="text-amber-50/40">(optional)</span>
-            <input
+            <TextField
               id="register-phone"
+              label="Phone"
+              hint="Optional"
               type="tel"
-              className={fieldClasses}
               value={form.phone}
               onChange={updateField("phone")}
               autoComplete="tel"
             />
-          </label>
 
-          <label className="flex flex-col gap-1.5 text-sm text-amber-50/70" htmlFor="register-password">
-            Password
-            <input
+            <TextField
               id="register-password"
+              label="Password"
+              hint="At least 8 characters."
               type="password"
-              className={fieldClasses}
               value={form.password}
               onChange={updateField("password")}
               autoComplete="new-password"
               minLength={8}
               required
             />
-            <span className="text-xs text-amber-50/40">At least 8 characters.</span>
-          </label>
 
-          {error ? (
-            <p role="alert" className="text-sm text-rose-400">
-              {error}
+            {error ? (
+              <p role="alert" className="text-sm text-danger-400">
+                {error}
+              </p>
+            ) : null}
+
+            <Button type="submit" isLoading={submitting}>
+              {submitting ? "Creating account…" : "Create account"}
+            </Button>
+
+            <p className="text-sm text-amber-50/50">
+              Already have an account?{" "}
+              <Link to="/login" className="rounded text-brand-400 hover:text-brand-300 focus-ring">
+                Log in
+              </Link>
             </p>
-          ) : null}
-
-          <Button type="submit" disabled={submitting} className={submitting ? "opacity-60" : ""}>
-            {submitting ? "Creating account…" : "Create account"}
-          </Button>
-
-          <p className="text-sm text-amber-50/50">
-            Already have an account?{" "}
-            <Link to="/login" className="text-brand-400 hover:text-brand-300">
-              Log in
-            </Link>
-          </p>
-        </form>
-      </Card>
+          </form>
+        </Card>
+      </div>
     </Section>
   );
 }

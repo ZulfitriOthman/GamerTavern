@@ -1,10 +1,14 @@
-import { Link } from "react-router-dom";
 import Section from "../../components/layout/Section.jsx";
 import SectionHeading from "../../components/ui/SectionHeading.jsx";
 import Card from "../../components/ui/Card.jsx";
 import Button from "../../components/ui/Button.jsx";
+import { SkeletonCard } from "../../components/ui/Skeleton.jsx";
+import EmptyState from "../../components/ui/EmptyState.jsx";
 import TournamentCard from "../../features/tournament/TournamentCard.jsx";
 import { useTournaments } from "../../features/tournament/useTournaments.js";
+
+// Open tournaments first — a presentation-only ordering, no new backend logic.
+const STATUS_ORDER = { open: 0, draft: 1, closed: 2, completed: 3, cancelled: 4 };
 
 export default function TournamentListPage() {
   const { status, tournaments, error, socketStatus, refresh } = useTournaments();
@@ -12,8 +16,12 @@ export default function TournamentListPage() {
   const isConnecting = socketStatus === "connecting" || (socketStatus === "connected" && status === "loading");
   const isConnectionFailure = socketStatus === "error";
 
+  const sorted = [...tournaments].sort(
+    (a, b) => (STATUS_ORDER[a.status] ?? 99) - (STATUS_ORDER[b.status] ?? 99)
+  );
+
   return (
-    <Section className="pt-16 sm:pt-24">
+    <Section spacing="lg" className="pt-14 sm:pt-20">
       <SectionHeading
         eyebrow="RVS Esports"
         title="Tournaments"
@@ -31,7 +39,11 @@ export default function TournamentListPage() {
             </Button>
           </Card>
         ) : isConnecting ? (
-          <Card className="text-sm text-amber-50/60">Loading tournaments…</Card>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <SkeletonCard />
+            <SkeletonCard className="hidden sm:block" />
+            <SkeletonCard className="hidden lg:block" />
+          </div>
         ) : status === "error" ? (
           <Card className="flex flex-col items-start gap-3">
             <p className="text-sm text-amber-50/70">{error}</p>
@@ -40,16 +52,18 @@ export default function TournamentListPage() {
             </Button>
           </Card>
         ) : tournaments.length === 0 ? (
-          <Card className="text-sm text-amber-50/60">
-            No tournaments are open right now. Check back soon, or watch{" "}
-            <Link to="/esports" className="text-brand-400 hover:text-brand-300">
-              RVS Esports
-            </Link>{" "}
-            for announcements.
-          </Card>
+          <EmptyState
+            title="No tournaments are open right now"
+            description="Check back soon, or watch RVS Esports for announcements."
+            action={
+              <Button to="/esports" variant="secondary" size="md">
+                View RVS Esports
+              </Button>
+            }
+          />
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {tournaments.map((tournament) => (
+            {sorted.map((tournament) => (
               <TournamentCard key={tournament.id} tournament={tournament} />
             ))}
           </div>
