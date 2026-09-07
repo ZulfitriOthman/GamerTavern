@@ -1,6 +1,21 @@
 // payment.routes.js
+//
+// LEGACY NOTICE (Phase 1.5): POST /checkout below (mounted at
+// /api/payments/checkout) predates the marketplace and is superseded by
+// POST /api/checkout (Backend/routes/api/checkout.routes.js), which
+// derives the charged amount from a real order in the database and goes
+// through PaymentService/idempotency. This endpoint still trusts a
+// client-submitted `amount` and still accepts a raw PAN — do not build
+// new features against it. It stays mounted only for whatever, if
+// anything, already calls it directly.
+//
+// POST /mock/tokenize (new) exists ONLY to let a mock/dev checkout UI
+// simulate "the card was tokenized in the browser" without a real
+// CyberSource Flex Microform instance. It is gated to PAYMENT_PROVIDER=mock
+// and must never be treated as a stand-in for real tokenization.
 import { Router } from "express";
 import CyberSource from "cybersource-rest-client";
+import { generateMockToken } from "../../services/payment/MockCyberSourceProvider.js";
 
 function readCyberSourceConfig() {
   return {
@@ -87,6 +102,33 @@ function createPaymentAsync(apiClient, requestBody) {
 
 export default function createPaymentRoutes() {
   const router = Router();
+
+  // Dev/mock-only simulated tokenization. Real production checkout must
+  // tokenize the card directly in the browser via CyberSource Flex
+  // Microform (or equivalent), never through this backend.
+  router.post("/mock/tokenize", (req, res) => {
+    const provider = String(process.env.PAYMENT_PROVIDER || "mock").trim().toLowerCase();
+    if (provider !== "mock") {
+      return res.status(400).json({
+        success: false,
+        code: "MOCK_TOKENIZE_DISABLED",
+        message: "Mock tokenization is only available when PAYMENT_PROVIDER=mock.",
+      });
+    }
+
+    const { card = {} } = req.body || {};
+    if (!card.number || !card.expirationMonth || !card.expirationYear || !card.securityCode) {
+      return res.status(400).json({
+        success: false,
+        message: "Card details are required (number, expirationMonth, expirationYear, securityCode).",
+      });
+    }
+
+    const last4 = String(card.number).replace(/\s+/g, "").slice(-4);
+    const declined = ["0002", "0069", "0119"].includes(last4);
+
+    return res.json({ success: true, paymentToken: generateMockToken({ declined }), last4 });
+  });
 
   router.post("/checkout", async (req, res) => {
     try {

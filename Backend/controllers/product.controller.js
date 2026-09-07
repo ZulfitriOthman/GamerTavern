@@ -8,12 +8,19 @@ import fs from "fs";
 import path from "path";
 import crypto from "crypto";
 import { requireAuthenticated } from "../modules/authz.module.js";
+import { writeAuditLog } from "../modules/auditLog.module.js";
 
 const ROLES = {
   USER: "USER",
   VENDOR: "VENDOR",
   ADMIN: "ADMIN",
 };
+
+// App-validated (products.status is plain VARCHAR(20), no DB enum/CHECK — see
+// Database/NanashiCollectibles_v2.sql header policy). 'active'/'archived' predate the
+// marketplace; 'draft'/'out_of_stock' were added additively in
+// Database/Marketplace_Migration.sql SECTION 2.
+const PRODUCT_STATUSES = ["draft", "active", "out_of_stock", "archived"];
 
 const toStr = (v) => (v == null ? "" : String(v)).trim();
 const toInt = (v, d = 0) => {
@@ -52,6 +59,65 @@ async function resolveRoleFromDb(db, userId) {
   }
 }
 
+// Marketplace merchant scoping (additive — see Database/Marketplace_Migration.sql
+// SECTION 1). A vendor with no merchant_users row at all is a legacy/standalone
+// vendor and keeps working exactly as before (merchant_id stays NULL on their
+// products). A vendor who *does* belong to a merchant is gated by that
+// merchant's status — PENDING/SUSPENDED/REJECTED merchants cannot list live
+// products, per "Do NOT allow PENDING/SUSPENDED merchants unrestricted
+// marketplace access." Never trust a client-supplied merchantId; this always
+// resolves it server-side from the authenticated user's own membership.
+async function resolveMerchantContextForVendor(db, userId) {
+  try {
+    const [rows] = await executeWithRetry(
+      db,
+      `SELECT mu.merchant_id, m.status AS merchant_status
+         FROM merchant_users mu
+         JOIN merchants m ON m.id = mu.merchant_id
+        WHERE mu.user_id = ? AND mu.status = 'active'
+        LIMIT 1`,
+      [userId],
+      "merchant:context.lookup"
+    );
+    const row = rows?.[0];
+    if (!row) return { merchantId: null, isMarketplaceMerchant: false, merchantStatus: null };
+    return { merchantId: row.merchant_id, isMarketplaceMerchant: true, merchantStatus: row.merchant_status };
+  } catch (err) {
+    console.error("[product.socket] merchant context lookup failed:", err?.message || err);
+    return { merchantId: null, isMarketplaceMerchant: false, merchantStatus: null };
+  }
+}
+
+// Product ownership (Phase 1.5 fix): the original check only allowed the
+// exact vendor_id that created a product to update/delete/archive/adjust
+// it, which silently locked out any MERCHANT_ADMIN/MERCHANT_EMPLOYEE
+// staff added later via POST /api/merchant/staff — they could see the
+// product (merchant-scoped reads) but never manage it. This lets any
+// ACTIVE staff member of the SAME merchant that owns the product manage
+// it too, matching the merchant permission matrix (item 13): staff
+// manage products/inventory, only settings/bank-details are OWNER-only.
+async function isActiveStaffOfMerchant(db, userId, merchantId) {
+  if (!merchantId) return false;
+  try {
+    const [rows] = await executeWithRetry(
+      db,
+      `SELECT 1 FROM merchant_users WHERE user_id = ? AND merchant_id = ? AND status = 'active' LIMIT 1`,
+      [userId, merchantId],
+      "merchant:staff.check"
+    );
+    return rows.length > 0;
+  } catch (err) {
+    console.error("[product.socket] staff check failed:", err?.message || err);
+    return false;
+  }
+}
+
+async function canManageProduct(db, { role, userId, vendorId, merchantId }) {
+  if (role === ROLES.ADMIN) return true;
+  if (toInt(vendorId) === userId) return true;
+  return isActiveStaffOfMerchant(db, userId, merchantId);
+}
+
 function slugify(name) {
   return toStr(name)
     .toLowerCase()
@@ -88,6 +154,7 @@ function safePublicProductRow(row) {
   return {
     id: row.id,
     vendor_id: row.vendor_id,
+    merchant_id: row.merchant_id ?? null,
     seller_name: row.seller_name ?? null,
     category_id: row.category_id,
     category_name: row.category_name ?? null,
@@ -97,9 +164,15 @@ function safePublicProductRow(row) {
     slug: row.slug,
     code: row.code,
     description: row.description,
+    short_description: row.short_description ?? null,
+    brand: row.brand ?? null,
     condition_label: row.condition_label,
     price: row.price,
     stock_quantity: row.stock_quantity,
+    low_stock_threshold: row.low_stock_threshold ?? null,
+    featured: Boolean(row.featured),
+    weight_grams: row.weight_grams ?? null,
+    tags: row.tags ?? null,
     status: row.status,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -208,11 +281,21 @@ export default function productSocketController({
     const t0 = Date.now();
 
     const vendorId = payload.vendorId != null ? toInt(payload.vendorId) : null;
+    const merchantId = payload.merchantId != null ? toInt(payload.merchantId) : null;
+    // id/ids: added for the merchant "edit product" screen, which has no other way
+    // to fetch a single known product (there was never a product:get event or REST
+    // equivalent — this is the smallest correct addition rather than a new duplicate
+    // endpoint, consistent with product reads staying on Socket.IO).
+    const singleId = payload.id != null ? toInt(payload.id) : null;
+    const ids = Array.isArray(payload.ids) ? payload.ids.map((v) => toInt(v)).filter(Boolean) : null;
     const categoryId = payload.categoryId != null ? toInt(payload.categoryId) : null;
     const tcgGameId = payload.tcgGameId != null ? toInt(payload.tcgGameId) : null;
     const search = toStr(payload.search);
     const status = toStr(payload.status) || "active";
     const sort = toStr(payload.sort || "newest").toLowerCase();
+    const page = Math.max(1, Math.trunc(Number(payload.page)) || 1);
+    const limit = Math.min(50, Math.max(1, Math.trunc(Number(payload.limit)) || 20));
+    const offset = (page - 1) * limit;
 
     try {
       const where = [];
@@ -225,6 +308,18 @@ export default function productSocketController({
       if (vendorId) {
         where.push("p.vendor_id = ?");
         params.push(vendorId);
+      }
+      if (merchantId) {
+        where.push("p.merchant_id = ?");
+        params.push(merchantId);
+      }
+      if (singleId) {
+        where.push("p.id = ?");
+        params.push(singleId);
+      }
+      if (ids && ids.length) {
+        where.push(`p.id IN (${ids.map(() => "?").join(",")})`);
+        params.push(...ids);
       }
       if (categoryId) {
         where.push("p.category_id = ?");
@@ -246,10 +341,20 @@ export default function productSocketController({
       if (sort === "price_asc") orderBy = "p.price ASC, p.id DESC";
       if (sort === "price_desc") orderBy = "p.price DESC, p.id DESC";
 
+      const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+      const [[{ total }]] = await executeWithRetry(
+        db,
+        `SELECT COUNT(*) AS total FROM products p ${whereClause}`,
+        params,
+        "product:list.count"
+      );
+
       const sql = `
         SELECT
-          p.id, p.vendor_id, p.category_id, p.tcg_game_id, p.name, p.slug, p.code,
-          p.description, p.condition_label, p.price, p.stock_quantity, p.status,
+          p.id, p.vendor_id, p.merchant_id, p.category_id, p.tcg_game_id, p.name, p.slug, p.code,
+          p.description, p.short_description, p.brand, p.condition_label, p.price,
+          p.stock_quantity, p.low_stock_threshold, p.featured, p.weight_grams, p.tags, p.status,
           p.created_at, p.updated_at,
           u.name AS seller_name,
           c.name AS category_name,
@@ -258,11 +363,12 @@ export default function productSocketController({
         LEFT JOIN users u ON u.id = p.vendor_id
         LEFT JOIN product_categories c ON c.id = p.category_id
         LEFT JOIN tcg_games g ON g.id = p.tcg_game_id
-        ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+        ${whereClause}
         ORDER BY ${orderBy}
+        LIMIT ? OFFSET ?
       `;
 
-      const [rows] = await executeWithRetry(db, sql, params, "product:list");
+      const [rows] = await executeWithRetry(db, sql, [...params, limit, offset], "product:list");
       const products = (rows || []).map(safePublicProductRow);
       const imagesMap = await fetchImagesByProductIds(db, products.map((p) => p.id));
       for (const p of products) {
@@ -270,7 +376,10 @@ export default function productSocketController({
       }
 
       console.log(`[socket][product:list] ✅ ok in ${Date.now() - t0}ms`);
-      return ack({ success: true, data: products });
+      return ack({
+        success: true,
+        data: { items: products, pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) } },
+      });
     } catch (err) {
       console.error(`[socket][product:list] ❌ error in ${Date.now() - t0}ms`, err);
       return ack({ success: false, message: "Failed to load products." });
@@ -297,14 +406,31 @@ export default function productSocketController({
       });
     }
 
+    const merchantContext = await resolveMerchantContextForVendor(db, userId);
+    if (merchantContext.isMarketplaceMerchant && merchantContext.merchantStatus !== "ACTIVE") {
+      return ack({
+        success: false,
+        code: "MERCHANT_NOT_ACTIVE",
+        message: `Your merchant account is ${merchantContext.merchantStatus} and cannot list products yet.`,
+      });
+    }
+
     const name = toStr(payload.name);
     const code = toStr(payload.code);
     const categoryId = toInt(payload.categoryId ?? payload.category_id);
     const tcgGameId = payload.tcgGameId ?? payload.tcg_game_id;
     const description = payload.description ?? null;
+    const shortDescription = payload.shortDescription ?? payload.short_description ?? null;
+    const brand = toStr(payload.brand) || null;
     const conditionLabel = toStr(payload.conditionLabel ?? payload.condition_label);
     const price = toMoney(payload.price);
     const stockQty = toInt(payload.stockQuantity ?? payload.stock_quantity ?? 0);
+    const lowStockThreshold =
+      payload.lowStockThreshold ?? payload.low_stock_threshold ? toInt(payload.lowStockThreshold ?? payload.low_stock_threshold) : null;
+    const featured = Boolean(payload.featured);
+    const weightGrams = payload.weightGrams ?? payload.weight_grams ? toInt(payload.weightGrams ?? payload.weight_grams) : null;
+    const tags = toStr(payload.tags) || null;
+    const status = toStr(payload.status) || "active";
     const images = payload.images;
 
     if (!name || !code) {
@@ -318,6 +444,9 @@ export default function productSocketController({
     }
     if (stockQty < 0) {
       return ack({ success: false, message: "stockQuantity cannot be negative." });
+    }
+    if (!PRODUCT_STATUSES.includes(status)) {
+      return ack({ success: false, message: `status must be one of: ${PRODUCT_STATUSES.join(", ")}` });
     }
 
     const slugBase = slugify(payload.slug || name) || `product-${Date.now()}`;
@@ -333,10 +462,15 @@ export default function productSocketController({
         try {
           const [res] = await conn.execute(
             `INSERT INTO products
-              (vendor_id, category_id, tcg_game_id, name, slug, code, description,
-               condition_label, price, stock_quantity)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [userId, categoryId, tcgGameId || null, name, slug, code, description, conditionLabel || null, price, stockQty]
+              (vendor_id, merchant_id, category_id, tcg_game_id, name, slug, code, description,
+               short_description, brand, condition_label, price, stock_quantity, low_stock_threshold,
+               featured, weight_grams, tags, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              userId, merchantContext.merchantId, categoryId, tcgGameId || null, name, slug, code, description,
+              shortDescription, brand, conditionLabel || null, price, stockQty, lowStockThreshold,
+              featured ? 1 : 0, weightGrams, tags, status,
+            ]
           );
           productId = res.insertId;
           break;
@@ -361,8 +495,9 @@ export default function productSocketController({
       await conn.commit();
 
       const [rows] = await db.execute(
-        `SELECT p.id, p.vendor_id, p.category_id, p.tcg_game_id, p.name, p.slug, p.code,
-                p.description, p.condition_label, p.price, p.stock_quantity, p.status,
+        `SELECT p.id, p.vendor_id, p.merchant_id, p.category_id, p.tcg_game_id, p.name, p.slug, p.code,
+                p.description, p.short_description, p.brand, p.condition_label, p.price,
+          p.stock_quantity, p.low_stock_threshold, p.featured, p.weight_grams, p.tags, p.status,
                 p.created_at, p.updated_at,
                 u.name AS seller_name, c.name AS category_name, g.name AS tcg_game_name
          FROM products p
@@ -384,6 +519,15 @@ export default function productSocketController({
         type: "product",
         message: `New product created: ${product?.name || "item"} (ID ${productId})`,
         timestamp: new Date().toISOString(),
+      });
+
+      await writeAuditLog(db, {
+        actorUserId: userId,
+        actorMerchantId: merchantContext.merchantId,
+        action: "PRODUCT_CREATED",
+        entityType: "product",
+        entityId: productId,
+        metadata: { name: product?.name, price, stockQty },
       });
 
       console.log(`[socket][product:create] ✅ ok in ${Date.now() - t0}ms`);
@@ -425,7 +569,7 @@ export default function productSocketController({
       await conn.beginTransaction();
 
       const [pRows] = await conn.execute(
-        `SELECT id, vendor_id FROM products WHERE id = ? LIMIT 1`,
+        `SELECT id, vendor_id, merchant_id FROM products WHERE id = ? LIMIT 1`,
         [productId]
       );
       const p = pRows?.[0];
@@ -434,9 +578,8 @@ export default function productSocketController({
         return ack({ success: false, message: "Product not found." });
       }
 
-      const isOwner = toInt(p.vendor_id) === userId;
-      const isAdmin = role === ROLES.ADMIN;
-      if (!isOwner && !isAdmin) {
+      const allowed = await canManageProduct(db, { role, userId, vendorId: p.vendor_id, merchantId: p.merchant_id });
+      if (!allowed) {
         await conn.rollback();
         return ack({ success: false, message: "Forbidden (not owner)." });
       }
@@ -478,8 +621,39 @@ export default function productSocketController({
         params.push(payload.tcgGameId ?? payload.tcg_game_id ?? null);
       }
       if (payload.status != null) {
+        const status = toStr(payload.status);
+        if (!PRODUCT_STATUSES.includes(status)) {
+          await conn.rollback();
+          return ack({ success: false, message: `status must be one of: ${PRODUCT_STATUSES.join(", ")}` });
+        }
         fields.push("status = ?");
-        params.push(toStr(payload.status));
+        params.push(status);
+      }
+      if (payload.shortDescription != null || payload.short_description != null) {
+        fields.push("short_description = ?");
+        params.push(payload.shortDescription ?? payload.short_description);
+      }
+      if (payload.brand != null) {
+        fields.push("brand = ?");
+        params.push(toStr(payload.brand) || null);
+      }
+      if (payload.lowStockThreshold !== undefined || payload.low_stock_threshold !== undefined) {
+        const raw = payload.lowStockThreshold ?? payload.low_stock_threshold;
+        fields.push("low_stock_threshold = ?");
+        params.push(raw == null ? null : toInt(raw));
+      }
+      if (payload.featured != null) {
+        fields.push("featured = ?");
+        params.push(payload.featured ? 1 : 0);
+      }
+      if (payload.weightGrams !== undefined || payload.weight_grams !== undefined) {
+        const raw = payload.weightGrams ?? payload.weight_grams;
+        fields.push("weight_grams = ?");
+        params.push(raw == null ? null : toInt(raw));
+      }
+      if (payload.tags != null) {
+        fields.push("tags = ?");
+        params.push(toStr(payload.tags) || null);
       }
 
       if (fields.length === 0 && payload.images === undefined) {
@@ -506,8 +680,9 @@ export default function productSocketController({
       await conn.commit();
 
       const [rows] = await db.execute(
-        `SELECT p.id, p.vendor_id, p.category_id, p.tcg_game_id, p.name, p.slug, p.code,
-                p.description, p.condition_label, p.price, p.stock_quantity, p.status,
+        `SELECT p.id, p.vendor_id, p.merchant_id, p.category_id, p.tcg_game_id, p.name, p.slug, p.code,
+                p.description, p.short_description, p.brand, p.condition_label, p.price,
+          p.stock_quantity, p.low_stock_threshold, p.featured, p.weight_grams, p.tags, p.status,
                 p.created_at, p.updated_at,
                 u.name AS seller_name, c.name AS category_name, g.name AS tcg_game_name
          FROM products p
@@ -536,6 +711,15 @@ export default function productSocketController({
         type: "product",
         message: `Product updated: ${updated?.name || "item"} (ID ${productId})`,
         timestamp: new Date().toISOString(),
+      });
+
+      await writeAuditLog(db, {
+        actorUserId: userId,
+        actorMerchantId: p.merchant_id,
+        action: "PRODUCT_UPDATED",
+        entityType: "product",
+        entityId: productId,
+        metadata: { fieldsChanged: Object.keys(payload) },
       });
 
       console.log(`[socket][product:update] ✅ ok in ${Date.now() - t0}ms`);
@@ -584,7 +768,7 @@ export default function productSocketController({
 
       const [pRows] = await executeWithRetry(
         conn,
-        `SELECT id, vendor_id, stock_quantity FROM products WHERE id = ? LIMIT 1 FOR UPDATE`,
+        `SELECT id, vendor_id, merchant_id, stock_quantity FROM products WHERE id = ? LIMIT 1 FOR UPDATE`,
         [productId],
         "inventory:adjust.select"
       );
@@ -594,9 +778,8 @@ export default function productSocketController({
         return ack({ success: false, message: "Product not found." });
       }
 
-      const isOwner = toInt(p.vendor_id) === userId;
-      const isAdmin = role === ROLES.ADMIN;
-      if (!isOwner && !isAdmin) {
+      const allowed = await canManageProduct(db, { role, userId, vendorId: p.vendor_id, merchantId: p.merchant_id });
+      if (!allowed) {
         await conn.rollback();
         return ack({ success: false, message: "Forbidden (not owner)." });
       }
@@ -638,6 +821,15 @@ export default function productSocketController({
         timestamp: new Date().toISOString(),
       });
 
+      await writeAuditLog(db, {
+        actorUserId: userId,
+        actorMerchantId: p.merchant_id,
+        action: "STOCK_ADJUSTED",
+        entityType: "product",
+        entityId: productId,
+        metadata: { delta, newQty, reason },
+      });
+
       console.log(`[socket][inventory:adjust] ✅ ok in ${Date.now() - t0}ms`);
       return ack({ success: true, data: { product_id: productId, stock_quantity: newQty } });
     } catch (err) {
@@ -677,7 +869,7 @@ export default function productSocketController({
     try {
       const [pRows] = await executeWithRetry(
         db,
-        `SELECT id, vendor_id, name FROM products WHERE id = ? LIMIT 1`,
+        `SELECT id, vendor_id, merchant_id, name FROM products WHERE id = ? LIMIT 1`,
         [productId],
         "product:delete.select"
       );
@@ -686,9 +878,8 @@ export default function productSocketController({
         return ack({ success: false, message: "Product not found." });
       }
 
-      const isOwner = toInt(p.vendor_id) === userId;
-      const isAdmin = role === ROLES.ADMIN;
-      if (!isOwner && !isAdmin) {
+      const allowed = await canManageProduct(db, { role, userId, vendorId: p.vendor_id, merchantId: p.merchant_id });
+      if (!allowed) {
         return ack({ success: false, message: "Forbidden (not owner)." });
       }
 
@@ -753,18 +944,19 @@ export default function productSocketController({
     if (!productId) return ack({ success: false, message: "Product id is required." });
 
     try {
-      const [pRows] = await db.execute(`SELECT id, vendor_id FROM products WHERE id = ? LIMIT 1`, [productId]);
+      const [pRows] = await db.execute(`SELECT id, vendor_id, merchant_id FROM products WHERE id = ? LIMIT 1`, [productId]);
       const p = pRows?.[0];
       if (!p) return ack({ success: false, message: "Product not found." });
 
-      const isOwner = toInt(p.vendor_id) === userId;
-      const isAdmin = role === ROLES.ADMIN;
-      if (!isOwner && !isAdmin) {
+      const allowed = await canManageProduct(db, { role, userId, vendorId: p.vendor_id, merchantId: p.merchant_id });
+      if (!allowed) {
         return ack({ success: false, message: "Forbidden (not owner)." });
       }
 
       await db.execute(`UPDATE products SET status = 'archived', updated_at = NOW() WHERE id = ?`, [productId]);
       io.emit("product:updated", { id: productId, status: "archived" });
+
+      await writeAuditLog(db, { actorUserId: userId, actorMerchantId: p.merchant_id, action: "PRODUCT_ARCHIVED", entityType: "product", entityId: productId, metadata: null });
 
       return ack({ success: true, data: { id: productId, status: "archived" } });
     } catch (err) {

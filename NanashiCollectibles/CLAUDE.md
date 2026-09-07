@@ -596,6 +596,16 @@ Current v2 domain mapping:
 | News               | `news`, `news_categories`                                                                |
 | Services           | `services`                                                                               |
 | Enquiries          | `enquiries`                                                                              |
+| Merchants          | `merchants`, `merchant_users`, `merchant_addresses`, `merchant_bank_details`             |
+| Product variants   | `product_options`, `product_option_values`, `product_variants`, `product_variant_option_values` |
+| Cart / Wishlist    | `carts`, `cart_items`, `wishlists`, `wishlist_items`                                     |
+| Orders             | `orders`, `merchant_orders`, `order_items`, `order_status_history`, `shipments`, `shipping_methods` |
+| Payments           | `payment_transactions`, `refunds`                                                        |
+| Coupons / Reviews  | `coupons`, `coupon_usage`, `reviews`                                                     |
+| Payouts / Platform | `merchant_payouts`, `merchant_payout_items`, `platform_settings`                         |
+| Ops                | `notifications`, `audit_logs`                                                            |
+
+(Marketplace domains added by `Database/Marketplace_Migration.sql` — see section 62.)
 
 ---
 
@@ -2234,17 +2244,35 @@ Claude can prepare SQL but must not independently run destructive database opera
 
 ## Merchant routes
 
-Merchant routes currently remain intentionally unmounted.
+UPDATED: `Backend/routes/api/merchant.routes.js` is now mounted at
+`/api/merchant` and is a real implementation (business registration,
+staff, dashboard aggregation, order fulfillment, payouts, settings). The
+previous unmounted prototype (plaintext auth, in-memory stores, a
+`products` schema that didn't match `NanashiCollectibles_v2`) was
+replaced, not extended — it was never a working feature. See section 62
+below for the full marketplace layer this belongs to.
 
-Do not mount them merely because the files exist.
+Product CREATE/UPDATE/DELETE/ARCHIVE/INVENTORY still lives on the
+existing Socket.IO `product:*` events in
+`Backend/controllers/product.controller.js` — do not duplicate that as a
+second REST CRUD stack. `GET /api/merchant/products` is read-only, for
+convenience.
 
 ---
 
 ## Payments
 
-Payments are currently outside the active development scope unless explicitly requested.
-
-Do not expand payment architecture opportunistically during unrelated work.
+UPDATED: a `PaymentService` abstraction now exists at
+`Backend/services/payment/` (`MockCyberSourceProvider` default,
+`CyberSourceProvider` wraps the real integration previously inline in
+`Backend/routes/api/payment.routes.js`), selected via `PAYMENT_PROVIDER`.
+`Backend/routes/api/checkout.routes.js` is the canonical checkout entry
+point and is the only code that should call `PaymentService` — it always
+derives the charged amount from the database (order `grand_total`),
+never from the client. The old `/api/payments/checkout` endpoint is
+still mounted but is legacy: it trusts a client-supplied amount and
+accepts raw PAN directly, and is superseded by the new flow — do not
+build new features against it. See section 62.
 
 ---
 
@@ -2507,3 +2535,134 @@ This applies to:
 * any other state-changing endpoint/event
 
 Read-only checks, lint, build, mock testing, and frontend rendering are unaffected.
+
+---
+
+# 62. Marketplace Layer (added — multi-merchant e-commerce)
+
+This section documents the marketplace expansion built on top of
+everything above. It supersedes the now-stale "Merchant routes" /
+"Payments" notes in section 53 (kept there with pointers back here).
+
+## Data model decision
+
+A merchant is a business profile (`merchants`, `merchant_users`,
+`merchant_addresses`, `merchant_bank_details`) layered on top of the
+*existing* `users`/JWT auth system, not a parallel identity system.
+Merchant staff authenticate through the same `/api/auth/login` (or the
+convenience alias `/api/merchant/auth/login`, which additionally
+confirms a `merchant_users` membership). `merchant_users` links a
+`users` row to a `merchants` row with a role
+(`MERCHANT_OWNER`/`MERCHANT_ADMIN`/`MERCHANT_EMPLOYEE`). Every merchant-
+scoped request resolves `merchantId` server-side from `merchant_users`
+for the authenticated user (`Backend/modules/restAuth.module.js`,
+`requireMerchant()`) — it is never accepted from the client.
+
+`products.vendor_id` (existing) is untouched. `products.merchant_id`
+(new, nullable) is resolved the same way in
+`Backend/controllers/product.controller.js`
+(`resolveMerchantContextForVendor`) — a legacy standalone vendor with no
+`merchant_users` row keeps working exactly as before; a vendor who does
+belong to a merchant is blocked from creating products while that
+merchant is not `ACTIVE`.
+
+## Checkout / order lifecycle
+
+`Backend/routes/api/checkout.routes.js` is the only canonical checkout
+path. Two-phase: TXN1 locks product/variant rows (`FOR UPDATE`),
+recomputes every price from the database, splits the cart into
+per-merchant `merchant_orders` with a commission snapshot, deducts
+inventory, and commits as `PENDING_PAYMENT` — then `PaymentService`
+is called outside any open transaction — then TXN2 records the
+`payment_transactions` row and either marks the order `PAID`/
+`PROCESSING`, or `CANCELLED` and restores the inventory TXN1 deducted.
+Known gap: if the process crashes between TXN1 committing and TXN2
+running, the order is left `PENDING_PAYMENT` with inventory already
+deducted and no payment attempted — there is no reconciliation job for
+this yet; treat any long-lived `PENDING_PAYMENT` order as needing manual
+review.
+
+## Payment abstraction
+
+`Backend/services/payment/PaymentService.js` selects a provider via
+`PAYMENT_PROVIDER` (`mock` default, `cybersource` for the real gateway).
+`MockCyberSourceProvider` never calls out to a real network.
+`CyberSourceProvider` wraps the pre-existing real integration that used
+to live directly in `routes/api/payment.routes.js` — that route is
+still mounted for backward compatibility but is legacy (trusts a
+client-supplied amount, accepts raw PAN). It still carries the same PCI
+exposure the original implementation had: replace raw-PAN handling with
+CyberSource Flex Microform tokenization before processing real cards in
+production.
+
+## What stayed on Socket.IO vs. what is REST
+
+Product CREATE/UPDATE/DELETE/ARCHIVE/INVENTORY remained on the existing
+`product:*` Socket.IO events (extended for `merchant_id`), rather than
+being duplicated as REST — that implementation already existed, was
+secure, and worked. Everything with no prior implementation (merchant
+business layer, cart, checkout, orders, payments, wishlist, reviews,
+shipping) is REST under `/api/merchant`, `/api/cart`, `/api/checkout`,
+`/api/orders`, `/api/wishlist`, `/api/reviews`, `/api/shipping` —
+consistent with how auth and payments were already REST, and because
+checkout needs strong transactional guarantees a request/ack socket
+event doesn't naturally provide.
+
+## Hardening pass (Phase 1.5)
+
+Applied on top of everything above, before any frontend was built:
+
+* **Idempotency**: `POST /api/checkout` requires an `Idempotency-Key`
+  (header or body). Backed by `checkout_idempotency`
+  (UNIQUE on `user_id, idempotency_key`) — a reused key with the same
+  payload replays the original result; a different payload gets `409`.
+* **State machines**: `Backend/modules/orderStateMachine.module.js` is
+  now the only place order/merchant-order/payment status transitions are
+  defined — `checkout.routes.js` and `merchant.routes.js` both import
+  from it rather than hand-rolling their own transition tables.
+* **PCI boundary**: `PaymentService.charge()` now takes a `paymentToken`,
+  never raw card fields. `POST /api/payments/mock/tokenize` exists only
+  to let a mock/dev checkout UI simulate client-side tokenization; it's
+  disabled whenever `PAYMENT_PROVIDER != mock`. `CyberSourceProvider`
+  deliberately fails closed (does not process real payments) until real
+  Flex Microform token exchange is implemented — it does not fall back to
+  raw-card handling.
+* **Reconciliation**: `Backend/services/payment/PaymentReconciliationService.js`
+  + `/api/admin/reconciliation/*` recovers orders left `PENDING_PAYMENT`
+  by a crash between the reserve and settle transactions.
+* **Bank details**: `merchant_bank_details.account_number` is deprecated;
+  new rows must go through `Backend/modules/encryption.module.js`
+  (AES-256-GCM, `MARKETPLACE_DATA_ENCRYPTION_KEY`) via
+  `POST /api/merchant/settings/bank-details` (OWNER-only). API responses
+  only ever return a masked `****last4`.
+* **Product ownership fix**: `product.controller.js`'s update/delete/
+  archive/inventory-adjust ownership check previously only allowed the
+  exact creating `vendor_id` — a `MERCHANT_ADMIN`/`MERCHANT_EMPLOYEE`
+  added later via staff management could not manage products created by
+  the owner. Fixed via `canManageProduct()` — any active staff member of
+  the same `merchant_id` can now manage it too.
+* **Pagination**: `{ items, pagination: { page, limit, total, pages } }`
+  is now the standard shape for `GET /api/merchant/products`,
+  `/api/merchant/orders`, `GET /api/orders`, `GET /api/reviews`, and the
+  Socket.IO `product:list` event.
+
+## Known limitations (marketplace layer)
+
+* No frontend has been built against these APIs yet (merchant dashboard,
+  storefront cart/checkout/account pages) — backend/DB only so far.
+* No automated payout transfer — `merchant_payouts` is a ledger an admin
+  fills in manually, per spec.
+* `CyberSourceProvider.refund()` is not implemented — process real
+  refunds manually via the CyberSource dashboard for now.
+* Guest checkout is not supported — `orders.user_id` is `NOT NULL`;
+  guest carts exist, but checkout requires login.
+* Reconciliation (`/api/admin/reconciliation/*`) is manually/Postman-
+  callable, not on a schedule — no cron/queue infrastructure exists yet
+  to call it automatically.
+* `MARKETPLACE_DATA_ENCRYPTION_KEY` has no rotation/re-encryption
+  tooling — rotating it makes existing encrypted bank_details rows
+  undecryptable.
+* Reconciliation's "no payment record = safe to cancel" logic is only
+  correct because `MockCyberSourceProvider` has no real external side
+  effect. It must NOT be run as-is once `PAYMENT_PROVIDER=cybersource`
+  is real — see the header note in `PaymentReconciliationService.js`.

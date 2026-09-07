@@ -80,9 +80,24 @@ export function AuthProvider({ children }) {
     setStatus("unauthenticated");
   }, []);
 
+  // Hydrates this same shared session from a token/user pair obtained through a
+  // DIFFERENT login call than authService.login/register — e.g. the merchant portal's
+  // POST /api/merchant/auth/login or /api/merchant/register, which return the same
+  // JWT shape but aren't issued through authService. Everything that depends on this
+  // context (the customer storefront session AND SocketProvider's handshake auth)
+  // then sees the merchant as logged in too — a merchant IS a user, so this is one
+  // shared identity, not two. Added so merchant auth can reuse this instead of
+  // duplicating token storage/session wiring.
+  const setSession = useCallback((nextToken, nextUser) => {
+    writeStoredToken(nextToken);
+    setToken(nextToken);
+    setUser(nextUser);
+    setStatus(nextToken ? "authenticated" : "unauthenticated");
+  }, []);
+
   const value = useMemo(
-    () => ({ status, user, token, login, register, logout }),
-    [status, user, token, login, register, logout]
+    () => ({ status, user, token, login, register, logout, setSession }),
+    [status, user, token, login, register, logout, setSession]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

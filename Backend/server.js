@@ -17,6 +17,14 @@ import createHealthRoutes from "./routes/api/health.routes.js";
 import createAuthRoutes from "./routes/api/auth.routes.js";
 import createClientPortfolioRoutes from "./routes/api/clientPortfolio.routes.js";
 import createPaymentRoutes from "./routes/api/payment.routes.js";
+import createMerchantRoutes from "./routes/api/merchant.routes.js";
+import createCartRoutes from "./routes/api/cart.routes.js";
+import createCheckoutRoutes from "./routes/api/checkout.routes.js";
+import createOrdersRoutes from "./routes/api/orders.routes.js";
+import createWishlistRoutes from "./routes/api/wishlist.routes.js";
+import createReviewsRoutes from "./routes/api/reviews.routes.js";
+import createShippingRoutes from "./routes/api/shipping.routes.js";
+import createAdminRoutes from "./routes/api/admin.routes.js";
 
 // sockets
 import accountSocketController from "./controllers/account.controller.js";
@@ -297,7 +305,17 @@ app.use(
 
 app.use("/api/auth", createAuthRoutes({ db, io }));
 app.use("/api/client-portfolio", createClientPortfolioRoutes());
-app.use("/api/payments", createPaymentRoutes());
+app.use("/api/payments", createPaymentRoutes()); // legacy direct-CyberSource endpoint — superseded by /api/checkout + PaymentService, see Backend/services/payment/
+
+// Marketplace (see Database/Marketplace_Migration.sql + NanashiCollectibles/CLAUDE.md)
+app.use("/api/merchant", createMerchantRoutes({ db }));
+app.use("/api/cart", createCartRoutes({ db }));
+app.use("/api/checkout", createCheckoutRoutes({ db }));
+app.use("/api/orders", createOrdersRoutes({ db }));
+app.use("/api/wishlist", createWishlistRoutes({ db }));
+app.use("/api/reviews", createReviewsRoutes({ db }));
+app.use("/api/shipping", createShippingRoutes({ db }));
+app.use("/api/admin", createAdminRoutes({ db }));
 
 /* ------------------------------ Socket Wiring ------------------------------ */
 io.on("connection", (socket) => {
@@ -324,21 +342,24 @@ io.on("connection", (socket) => {
 });
 
 /* ------------------------------ Error handler ------------------------------ */
+// Standardized failure envelope ({ success: false, code, message }) —
+// never forwards err.stack, SQL error text, or any internal detail for an
+// error that wasn't already given a safe, specific message above.
 app.use((err, _req, res, _next) => {
   const msg = String(err?.message || "");
 
   if (msg.startsWith("CORS blocked:")) {
-    return res.status(403).json({ message: err.message });
+    return res.status(403).json({ success: false, code: "CORS_BLOCKED", message: err.message });
   }
   if (msg.startsWith("Not allowed by CORS (socket.io):")) {
-    return res.status(403).json({ message: err.message });
+    return res.status(403).json({ success: false, code: "CORS_BLOCKED", message: err.message });
   }
   if (msg.includes("Only image files are allowed")) {
-    return res.status(400).json({ success: false, message: err.message });
+    return res.status(400).json({ success: false, code: "INVALID_FILE_TYPE", message: err.message });
   }
 
   console.error("[SERVER ERROR]", err);
-  return res.status(500).json({ message: "Internal Server Error" });
+  return res.status(500).json({ success: false, code: "INTERNAL_ERROR", message: "Internal Server Error" });
 });
 
 /* ------------------------------ Start ------------------------------ */
