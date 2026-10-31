@@ -20,12 +20,12 @@ export default function createReviewsRoutes({ db }) {
 
       const { page, limit, offset } = parsePagination(req);
 
-      const [[{ total }]] = await db.query(`SELECT COUNT(*) AS total FROM reviews WHERE product_id = ? AND status = 'published'`, [productId]);
+      const [[{ total }]] = await db.query(`SELECT COUNT(*) AS total FROM REVIEWS WHERE product_id = ? AND status = 'published'`, [productId]);
       const [rows] = await db.query(
         `SELECT r.id, r.rating, r.title, r.body, r.created_at, u.name AS reviewer_name,
                 (r.order_item_id IS NOT NULL) AS verified_purchase
-           FROM reviews r
-           JOIN users u ON u.id = r.user_id
+           FROM REVIEWS r
+           JOIN USERS u ON u.id = r.user_id
           WHERE r.product_id = ? AND r.status = 'published'
           ORDER BY r.created_at DESC
           LIMIT ? OFFSET ?`,
@@ -33,7 +33,7 @@ export default function createReviewsRoutes({ db }) {
       );
       const [[summary]] = await db.query(
         `SELECT COUNT(*) AS count, COALESCE(AVG(rating), 0) AS average
-           FROM reviews WHERE product_id = ? AND status = 'published'`,
+           FROM REVIEWS WHERE product_id = ? AND status = 'published'`,
         [productId]
       );
 
@@ -57,12 +57,12 @@ export default function createReviewsRoutes({ db }) {
         return res.status(400).json({ success: false, message: "productId and an integer rating from 1 to 5 are required." });
       }
 
-      const [productRows] = await db.query(`SELECT id FROM products WHERE id = ? LIMIT 1`, [productId]);
+      const [productRows] = await db.query(`SELECT id FROM PRODUCTS WHERE id = ? LIMIT 1`, [productId]);
       if (!productRows[0]) return res.status(404).json({ success: false, message: "Product not found." });
 
       const [purchaseRows] = await db.query(
-        `SELECT oi.id FROM order_items oi
-           JOIN orders o ON o.id = oi.order_id
+        `SELECT oi.id FROM ORDER_ITEMS oi
+           JOIN ORDERS o ON o.id = oi.order_id
           WHERE oi.product_id = ? AND o.user_id = ? AND o.payment_status = 'PAID'
           LIMIT 1`,
         [productId, req.user.sub]
@@ -70,7 +70,7 @@ export default function createReviewsRoutes({ db }) {
       const orderItemId = purchaseRows[0]?.id || null;
 
       await db.execute(
-        `INSERT INTO reviews (product_id, user_id, order_item_id, rating, title, body)
+        `INSERT INTO REVIEWS (product_id, user_id, order_item_id, rating, title, body)
          VALUES (?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE rating = VALUES(rating), title = VALUES(title), body = VALUES(body),
            order_item_id = VALUES(order_item_id), updated_at = NOW()`,

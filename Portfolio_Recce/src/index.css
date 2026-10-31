@@ -31,3 +31,70 @@ body {
   opacity: 1;
   transform: translateY(0);
 }
+
+.hero-grid {
+  background-image:
+    linear-gradient(rgba(235, 242, 248, 0.6) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(235, 242, 248, 0.6) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(circle at 30% 20%, black, transparent 70%);
+  animation: gridDrift 40s linear infinite;
+}
+
+@keyframes gridDrift {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 128px 128px;
+  }
+}
+
+.reveal-blur {
+  opacity: 0;
+  filter: blur(14px);
+  transform: translateY(18px);
+  transition: opacity 0.9s ease, filter 0.9s ease, transform 0.9s ease;
+  transition-delay: var(--delay, 0ms);
+}
+
+.reveal-blur.show {
+  opacity: 1;
+  filter: blur(0);
+  transform: translateY(0);
+}
+
+.hero-spotlight {
+  background: radial-gradient(
+    480px circle at var(--spot-x, 30%) var(--spot-y, 35%),
+    rgba(39, 210, 255, 0.16),
+    transparent 65%
+  );
+  transition: background-position 0.2s ease;
+}
+
+.drone-tilt-surface {
+  transform-style: preserve-3d;
+  transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+  transition: transform 200ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    transition: none;
+  }
+
+  .reveal-blur {
+    transition: none;
+    filter: none;
+  }
+
+  .hero-grid {
+    animation: none;
+  }
+
+  .drone-tilt-surface {
+    transition: none;
+    transform: none !important;
+  }
+}

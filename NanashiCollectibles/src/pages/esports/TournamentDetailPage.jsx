@@ -3,6 +3,8 @@ import Section from "../../components/layout/Section.jsx";
 import Card from "../../components/ui/Card.jsx";
 import Badge from "../../components/ui/Badge.jsx";
 import Button from "../../components/ui/Button.jsx";
+import ErrorState from "../../components/ui/ErrorState.jsx";
+import { SkeletonText } from "../../components/ui/Skeleton.jsx";
 import TournamentRegistrationForm from "../../features/tournament/TournamentRegistrationForm.jsx";
 import { useTournaments } from "../../features/tournament/useTournaments.js";
 import { formatDateTime, formatEntryFee } from "../../features/tournament/format.js";
@@ -27,12 +29,16 @@ export default function TournamentDetailPage() {
   if (socketStatus === "error") {
     return (
       <Section spacing="lg" className="pt-14 sm:pt-20">
-        <Card className="flex flex-col items-start gap-3">
-          <p className="text-sm text-amber-50/70">Couldn't connect to the tournament server.</p>
-          <Button variant="secondary" onClick={() => window.location.reload()}>
-            Retry
-          </Button>
-        </Card>
+        <ErrorState
+          icon="sparkle"
+          title="Couldn't load this tournament"
+          description="Couldn't connect to the tournament server."
+          action={
+            <Button variant="secondary" onClick={() => window.location.reload()}>
+              Retry
+            </Button>
+          }
+        />
       </Section>
     );
   }
@@ -40,7 +46,9 @@ export default function TournamentDetailPage() {
   if (isLoading) {
     return (
       <Section spacing="lg" className="pt-14 sm:pt-20">
-        <Card className="text-sm text-amber-50/60">Loading tournament…</Card>
+        <Card>
+          <SkeletonText lines={5} />
+        </Card>
       </Section>
     );
   }
@@ -48,12 +56,16 @@ export default function TournamentDetailPage() {
   if (status === "error") {
     return (
       <Section spacing="lg" className="pt-14 sm:pt-20">
-        <Card className="flex flex-col items-start gap-3">
-          <p className="text-sm text-amber-50/70">{error}</p>
-          <Button variant="secondary" onClick={refresh}>
-            Try again
-          </Button>
-        </Card>
+        <ErrorState
+          icon="sparkle"
+          title="Couldn't load this tournament"
+          description={error}
+          action={
+            <Button variant="secondary" onClick={refresh}>
+              Try again
+            </Button>
+          }
+        />
       </Section>
     );
   }
@@ -61,12 +73,16 @@ export default function TournamentDetailPage() {
   if (!tournament) {
     return (
       <Section spacing="lg" className="pt-14 sm:pt-20">
-        <Card className="flex flex-col items-start gap-3">
-          <p className="text-sm text-amber-50/70">This tournament couldn't be found.</p>
-          <Button to="/esports/tournaments" variant="secondary">
-            Back to tournaments
-          </Button>
-        </Card>
+        <ErrorState
+          icon="trophy"
+          title="Tournament not found"
+          description="This tournament couldn't be found — it may have been removed."
+          action={
+            <Button to="/esports/tournaments" variant="secondary">
+              Back to tournaments
+            </Button>
+          }
+        />
       </Section>
     );
   }

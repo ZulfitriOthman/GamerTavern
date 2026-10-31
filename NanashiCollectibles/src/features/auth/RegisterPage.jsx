@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import Section from "../../components/layout/Section.jsx";
 import Card from "../../components/ui/Card.jsx";
 import Badge from "../../components/ui/Badge.jsx";
 import Button from "../../components/ui/Button.jsx";
 import { TextField } from "../../components/ui/Field.jsx";
 import { useAuth } from "./AuthContext.js";
+import { safeRedirect } from "./safeRedirect.js";
 import { site } from "../../config/site.js";
 
 // Fields match Backend/routes/api/auth.routes.js's REGISTER_ALLOWED_FIELDS exactly —
@@ -14,6 +15,7 @@ import { site } from "../../config/site.js";
 export default function RegisterPage() {
   const { register } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [form, setForm] = useState({ name: "", email: "", phone: "", password: "" });
   const [submitting, setSubmitting] = useState(false);
@@ -39,7 +41,7 @@ export default function RegisterPage() {
     setSubmitting(true);
     try {
       await register(form);
-      navigate("/", { replace: true });
+      navigate(safeRedirect(location.state?.from), { replace: true });
     } catch (err) {
       setError(err.message);
     } finally {

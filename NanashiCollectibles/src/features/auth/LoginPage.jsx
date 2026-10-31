@@ -6,6 +6,7 @@ import Badge from "../../components/ui/Badge.jsx";
 import Button from "../../components/ui/Button.jsx";
 import { TextField } from "../../components/ui/Field.jsx";
 import { useAuth } from "./AuthContext.js";
+import { safeRedirect } from "./safeRedirect.js";
 import { site } from "../../config/site.js";
 
 export default function LoginPage() {
@@ -30,8 +31,7 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       await login({ email, password });
-      const redirectTo = location.state?.from ?? "/";
-      navigate(redirectTo, { replace: true });
+      navigate(safeRedirect(location.state?.from), { replace: true });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -77,6 +77,13 @@ export default function LoginPage() {
               autoComplete="current-password"
               required
             />
+
+            <Link
+              to="/forgot-password"
+              className="-mt-2 self-end rounded text-xs text-amber-50/50 hover:text-brand-300 focus-ring"
+            >
+              Forgot password?
+            </Link>
 
             {error ? (
               <p role="alert" className="text-sm text-danger-400">

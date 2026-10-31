@@ -1,0 +1,7 @@
+# Minimal Supabase CLI configuration. Run `supabase init` / `supabase link`
+# to generate the full file if you use the local development stack.
+project_id = "wedding"
+
+[functions.guest-upload]
+# Guests are anonymous; the function does its own validation and rate limiting.
+verify_jwt = false

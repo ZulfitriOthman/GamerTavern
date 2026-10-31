@@ -88,6 +88,7 @@ function StaffList() {
         rows={data?.data || []}
         emptyTitle="No staff added yet"
         emptyDescription="Add teammates so they can help manage this store."
+        onRetry={refresh}
         columns={[
           { key: "name", header: "Name", render: (r) => r.name },
           { key: "email", header: "Email", render: (r) => r.email },

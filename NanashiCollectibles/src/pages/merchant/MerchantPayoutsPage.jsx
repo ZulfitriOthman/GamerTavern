@@ -10,7 +10,7 @@ import { formatMoney, formatDate } from "../../features/merchant/format.js";
 
 function PayoutsList() {
   const { token, activeMerchant } = useMerchantAuth();
-  const { status, data, error } = useApiResource(
+  const { status, data, error, refresh } = useApiResource(
     () => merchantApi.getPayouts(token, { merchantId: activeMerchant?.merchantId }),
     [token, activeMerchant?.merchantId]
   );
@@ -32,6 +32,7 @@ function PayoutsList() {
         rows={data?.data || []}
         emptyTitle="No payouts recorded yet"
         emptyDescription="Payouts are created by NanashiCollectibles admin once orders in a period are eligible."
+        onRetry={refresh}
         columns={[
           { key: "period", header: "Period", render: (r) => `${formatDate(r.period_start)} – ${formatDate(r.period_end)}` },
           { key: "gross_amount", header: "Gross", render: (r) => formatMoney(r.gross_amount) },

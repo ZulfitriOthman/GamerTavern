@@ -26,7 +26,7 @@ export default function MerchantOrdersListPage() {
   const page = Number(searchParams.get("page")) || 1;
   const status = searchParams.get("status") || "";
 
-  const { status: loadStatus, data, error } = useApiResource(
+  const { status: loadStatus, data, error, refresh } = useApiResource(
     () => merchantApi.getOrders(token, { page, limit: 20, status, merchantId: activeMerchant?.merchantId }),
     [token, page, status, activeMerchant?.merchantId]
   );
@@ -60,6 +60,7 @@ export default function MerchantOrdersListPage() {
         emptyTitle="No orders yet"
         emptyDescription="Orders will appear here once customers check out."
         onRowClick={(row) => navigate(`/merchant/orders/${row.id}`)}
+        onRetry={refresh}
         columns={[
           { key: "merchant_order_number", header: "Order", render: (r) => r.merchant_order_number },
           { key: "order_number", header: "Customer order", render: (r) => r.order_number, mobileHidden: true },

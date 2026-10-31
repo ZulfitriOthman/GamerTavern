@@ -1,0 +1,165 @@
+@import 'tailwindcss';
+
+/* The archived API version and the SQL folder are not part of this site. */
+@source not '../archive';
+@source not '../database';
+
+/* ---------------------------------------------------------------------------
+   Design tokens — white textured paper, soft grey, burgundy and dusty mauve,
+   with a little antique bronze.
+
+   The first group is the palette itself; everything else is built from it.
+   Mauve (#a66d83) and bronze (#9b7865) are below 4.5:1 on ivory, so they are
+   used for ornaments, lines and large text only; small text uses burgundy,
+   bronze-deep or muted.
+   --------------------------------------------------------------------------- */
+@theme {
+  --color-primary: #581c30; /* burgundy */
+  --color-floral: #a66d83; /* dusty mauve */
+  --color-background: #faf9f7;
+  --color-surface: #ffffff;
+  --color-grey: #e6e5e3;
+  --color-bronze: #9b7865;
+  --color-text: #341f29;
+  --color-muted: #756c70;
+
+  /* Names used by the components. */
+  --color-ivory: var(--color-background); /* page background (paper) */
+  --color-mist: #f4f3f1; /* alternate section background */
+  --color-frost: #efeeec; /* deepest grey tint, arch depth */
+  --color-line: var(--color-grey); /* hairlines and light borders */
+  --color-haze: #d4d1cd; /* stronger grey borders and arch edges */
+  --color-blush: #f5edf0; /* soft mauve fills */
+  --color-primary-deep: #431423; /* button hover */
+  --color-bronze-deep: #765746; /* small bronze text (AA on ivory) */
+  --color-pewter: #8f878a; /* soft grey accents */
+  --color-leaf: #a18b7c; /* muted brown foliage */
+  --color-leaf-soft: #ece6e1;
+  --color-leaf-deep: #6f5a4d;
+  --color-ink: var(--color-text);
+  --color-night: #2a1a21; /* photo viewer backdrop only */
+  --color-rose: #a3354d; /* error messages */
+
+  --font-display: 'Cinzel', 'Cormorant Garamond', 'Times New Roman', serif;
+  --font-serif: 'Cormorant Garamond', 'Times New Roman', serif;
+  --font-body: 'Libre Baskerville', Georgia, 'Times New Roman', serif;
+  --font-arabic: 'Amiri', 'Traditional Arabic', serif;
+
+  --shadow-soft: 0 1px 2px rgb(52 31 41 / 0.04), 0 10px 28px -16px rgb(52 31 41 / 0.14);
+  --shadow-lift: 0 2px 6px rgb(52 31 41 / 0.04), 0 26px 50px -30px rgb(52 31 41 / 0.24);
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+    scroll-padding-top: 5rem; /* anchor targets clear the fixed navbar */
+  }
+  body {
+    @apply bg-paper font-body text-ink antialiased;
+  }
+  h1, h2, h3, h4 {
+    @apply font-display font-normal text-ink;
+    letter-spacing: 0.04em;
+  }
+  ::selection {
+    background: rgb(166 109 131 / 0.25);
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-floral);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+/* Component classes. They live in the components layer so any utility class
+   (e.g. `btn-outline px-4`) reliably overrides them. They only @apply built-in
+   utilities — Tailwind v4 cannot @apply custom classes. */
+@layer components {
+  .eyebrow {
+    @apply font-display text-[0.7rem] font-medium tracking-[0.32em] text-bronze-deep uppercase;
+  }
+  .card {
+    @apply rounded-sm border border-line bg-white/85 shadow-soft;
+  }
+  .btn,
+  .btn-primary,
+  .btn-accent,
+  .btn-outline,
+  .btn-ghost,
+  .btn-danger,
+  .btn-light {
+    @apply inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-[2px] px-7 py-2.5 font-display text-[0.74rem] font-medium tracking-[0.22em] uppercase transition duration-300 select-none disabled:cursor-not-allowed disabled:opacity-55;
+  }
+  .btn-primary {
+    @apply bg-primary text-ivory shadow-soft hover:bg-primary-deep active:bg-primary-deep;
+  }
+  .btn-accent {
+    @apply bg-blush text-primary hover:bg-floral/20;
+  }
+  .btn-outline {
+    @apply border border-primary/35 bg-white/70 text-primary hover:border-primary hover:bg-blush;
+  }
+  .btn-light {
+    @apply border border-white/60 bg-white/10 text-white backdrop-blur-sm hover:bg-white hover:text-night;
+  }
+  .btn-ghost {
+    @apply px-4 font-body tracking-[0.08em] text-muted normal-case hover:bg-mist hover:text-ink;
+  }
+  .btn-danger {
+    @apply bg-rose text-white hover:bg-rose/90;
+  }
+  .field-label {
+    @apply mb-1.5 block font-display text-[0.7rem] font-medium tracking-[0.18em] text-muted uppercase;
+  }
+  .input {
+    @apply block w-full rounded-sm border border-line bg-white px-4 py-3 text-base text-ink transition placeholder:text-muted/60 focus:border-floral focus:ring-4 focus:ring-floral/15 focus:outline-none disabled:bg-mist/60 sm:text-[0.95rem];
+  }
+  .input[aria-invalid='true'] {
+    @apply border-rose/70 focus:ring-rose/15;
+  }
+}
+
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar { display: none; }
+}
+
+/* White textured paper: a faint fractal-noise grain over ivory (inline SVG, no request). */
+@utility bg-paper {
+  background-color: var(--color-ivory);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .32 0 0 0 0 .22 0 0 0 0 .26 0 0 0 .055 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Very light grey Islamic geometric lattice (8-point stars linked by crosses)
+   on paper grain. Inline SVG, no request. */
+@utility bg-geometric {
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='72' height='72' viewBox='0 0 72 72'%3E%3Cg fill='none' stroke='%23a59e99' stroke-opacity='.3' stroke-width='.7'%3E%3Crect x='25' y='25' width='22' height='22'/%3E%3Crect x='25' y='25' width='22' height='22' transform='rotate(45 36 36)'/%3E%3Ccircle cx='36' cy='36' r='6'/%3E%3Cpath d='M36 0v20.5M36 51.5V72M0 36h20.5M51.5 36H72'/%3E%3Cpath d='M0 0l20.4 20.4M72 0L51.6 20.4M0 72l20.4-20.4M72 72L51.6 51.6'/%3E%3Cpath d='M0 9l9-9M63 0l9 9M0 63l9 9M72 63l-9 9'/%3E%3C/g%3E%3C/svg%3E"),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .32 0 0 0 0 .22 0 0 0 0 .26 0 0 0 .055 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Round-topped arch used for the countdown tiles and gallery frames. */
+.arch {
+  border-radius: 999px 999px 2px 2px;
+}
+
+/* Shimmer for loading placeholders. */
+.skeleton {
+  @apply rounded-sm bg-line;
+  background-image: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.55), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s infinite linear;
+}
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}

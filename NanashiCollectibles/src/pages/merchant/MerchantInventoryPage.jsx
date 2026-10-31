@@ -67,6 +67,7 @@ export default function MerchantInventoryPage() {
         error={error}
         rows={items}
         emptyTitle={filter ? "No products match this filter" : "No products yet"}
+        onRetry={refresh}
         columns={[
           { key: "name", header: "Product", render: (r) => r.name },
           { key: "code", header: "SKU", render: (r) => r.code || "—" },

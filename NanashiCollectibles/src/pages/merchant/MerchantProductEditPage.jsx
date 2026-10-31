@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import SectionHeading from "../../components/ui/SectionHeading.jsx";
+import Button from "../../components/ui/Button.jsx";
 import EmptyState from "../../components/ui/EmptyState.jsx";
 import { SkeletonText } from "../../components/ui/Skeleton.jsx";
 import ProductForm from "../../components/merchant/ProductForm.jsx";
@@ -11,7 +12,7 @@ import { updateProduct } from "../../features/merchant/merchantProductSocketServ
 
 export default function MerchantProductEditPage() {
   const { id } = useParams();
-  const { status, product, error } = useMerchantProduct(id);
+  const { status, product, error, refresh } = useMerchantProduct(id);
   const { socket } = useSocket();
   const { push } = useToast();
   const navigate = useNavigate();
@@ -37,7 +38,15 @@ export default function MerchantProductEditPage() {
       ) : status === "not_found" ? (
         <EmptyState title="Product not found" description="It may have been deleted, or you don't have access to it." />
       ) : status === "error" ? (
-        <EmptyState title="Couldn't load this product" description={error} />
+        <EmptyState
+          title="Couldn't load this product"
+          description={error}
+          action={
+            <Button variant="secondary" size="sm" onClick={refresh}>
+              Try again
+            </Button>
+          }
+        />
       ) : (
         <ProductForm product={product} onSubmit={handleSubmit} submitting={submitting} submitLabel={submitting ? "Saving…" : "Save changes"} />
       )}

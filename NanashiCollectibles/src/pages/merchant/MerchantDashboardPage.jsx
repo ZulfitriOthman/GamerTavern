@@ -1,7 +1,9 @@
+import { Link } from "react-router-dom";
 import SectionHeading from "../../components/ui/SectionHeading.jsx";
 import Card from "../../components/ui/Card.jsx";
 import StatusBadge from "../../components/ui/StatusBadge.jsx";
 import EmptyState from "../../components/ui/EmptyState.jsx";
+import Button from "../../components/ui/Button.jsx";
 import { SkeletonText } from "../../components/ui/Skeleton.jsx";
 import KpiCard from "../../components/merchant/KpiCard.jsx";
 import RevenueTrendChart from "../../components/merchant/RevenueTrendChart.jsx";
@@ -37,7 +39,15 @@ export default function MerchantDashboardPage() {
           ))}
         </div>
       ) : status === "error" ? (
-        <EmptyState title="Couldn't load your dashboard" description={error} action={<button onClick={refresh} className="text-sm text-brand-400 hover:text-brand-300">Try again</button>} />
+        <EmptyState
+          title="Couldn't load your dashboard"
+          description={error}
+          action={
+            <Button variant="secondary" size="sm" onClick={refresh}>
+              Try again
+            </Button>
+          }
+        />
       ) : (
         <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -79,9 +89,9 @@ export default function MerchantDashboardPage() {
           <Card variant="data">
             <div className="flex items-center justify-between">
               <h2 className="font-display text-base font-semibold text-amber-50">Recent orders</h2>
-              <a href="/merchant/orders" className="text-sm text-brand-400 hover:text-brand-300">
+              <Link to="/merchant/orders" className="rounded text-sm text-brand-400 hover:text-brand-300 focus-ring">
                 View all
-              </a>
+              </Link>
             </div>
             {dashboard.recentOrders?.length ? (
               <div className="mt-4 flex flex-col gap-2">

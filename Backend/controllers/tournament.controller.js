@@ -63,8 +63,8 @@ const SELECT_TOURNAMENT_SQL = `
          t.description, t.start_date, t.end_date, t.location, t.entry_fee, t.organizer,
          t.rules, t.registration_deadline, t.registration_type, t.team_size,
          t.max_entries, t.status, t.created_at, t.updated_at
-  FROM tournaments t
-  LEFT JOIN esports_games g ON g.id = t.esports_game_id
+  FROM TOURNAMENTS t
+  LEFT JOIN ESPORTS_GAMES g ON g.id = t.esports_game_id
 `;
 
 function safeRegistrationRow(row) {
@@ -89,8 +89,8 @@ async function fetchRegistrationsByTournamentIds(db, ids) {
   const [rows] = await db.execute(
     `SELECT r.id, r.tournament_id, r.user_id, r.guest_name, r.nickname, r.status,
             r.registered_at, u.name AS user_name, u.role AS user_role
-     FROM tournament_registrations r
-     LEFT JOIN users u ON u.id = r.user_id
+     FROM TOURNAMENT_REGISTRATIONS r
+     LEFT JOIN USERS u ON u.id = r.user_id
      WHERE r.tournament_id IN (${placeholders})
      ORDER BY r.registered_at ASC, r.id ASC`,
     ids
@@ -110,7 +110,7 @@ async function fetchTeamsByTournamentIds(db, ids) {
 
   const [teamRows] = await db.execute(
     `SELECT id, tournament_id, name, captain_registration_id, status, created_at
-     FROM tournament_teams
+     FROM TOURNAMENT_TEAMS
      WHERE tournament_id IN (${placeholders})
      ORDER BY created_at ASC, id ASC`,
     ids
@@ -123,9 +123,9 @@ async function fetchTeamsByTournamentIds(db, ids) {
     const [memberRows] = await db.execute(
       `SELECT m.team_id, r.id, r.tournament_id, r.user_id, r.guest_name, r.nickname,
               r.status, r.registered_at, u.name AS user_name, u.role AS user_role
-       FROM tournament_team_members m
-       JOIN tournament_registrations r ON r.id = m.registration_id
-       LEFT JOIN users u ON u.id = r.user_id
+       FROM TOURNAMENT_TEAM_MEMBERS m
+       JOIN TOURNAMENT_REGISTRATIONS r ON r.id = m.registration_id
+       LEFT JOIN USERS u ON u.id = r.user_id
        WHERE m.team_id IN (${teamPlaceholders})
        ORDER BY m.joined_at ASC, m.id ASC`,
       teamIds
@@ -259,8 +259,9 @@ export default function tournamentSocketController({ socket, io, db }) {
       entryFee = Math.round(n * 100) / 100;
     }
 
-    // BACKEND-ENFORCED (deliberately not a DB CHECK constraint — see Database/NanashiCollectibles_v2.sql
-    // header): team_size is required for team tournaments, and not meaningful for individual ones.
+    // BACKEND-ENFORCED (deliberately not a DB CHECK constraint — see
+    // Database/schema/007_content_community.sql header): team_size is required
+    // for team tournaments, and not meaningful for individual ones.
     let teamSize = null;
     if (registrationType === "team") {
       teamSize = toInt(teamSizeRaw, 0);
@@ -286,7 +287,7 @@ export default function tournamentSocketController({ socket, io, db }) {
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
           const [result] = await db.execute(
-            `INSERT INTO tournaments
+            `INSERT INTO TOURNAMENTS
               (esports_game_id, name, slug, description, start_date, end_date, location,
                entry_fee, organizer, rules, registration_deadline, registration_type,
                team_size, max_entries, status)
@@ -318,7 +319,7 @@ export default function tournamentSocketController({ socket, io, db }) {
       (async () => {
         try {
           const [userRows] = await db.execute(
-            "SELECT email FROM users WHERE email IS NOT NULL AND email <> ''",
+            "SELECT email FROM USERS WHERE email IS NOT NULL AND email <> ''",
           );
           const recipients = userRows.map((r) => r.email);
           if (!recipients.length) return;
@@ -407,7 +408,7 @@ export default function tournamentSocketController({ socket, io, db }) {
     const id = toInt(payload.id, 0);
     if (!id) return ack({ success: false, message: "Tournament id is required." });
 
-    const [curRows] = await db.execute(`SELECT status FROM tournaments WHERE id = ? LIMIT 1`, [id]);
+    const [curRows] = await db.execute(`SELECT status FROM TOURNAMENTS WHERE id = ? LIMIT 1`, [id]);
     const current = curRows?.[0];
     if (!current) return ack({ success: false, message: "Tournament not found." });
 
@@ -515,7 +516,7 @@ export default function tournamentSocketController({ socket, io, db }) {
     params.push(id);
 
     try {
-      const [result] = await db.execute(`UPDATE tournaments SET ${sets.join(", ")} WHERE id = ?`, params);
+      const [result] = await db.execute(`UPDATE TOURNAMENTS SET ${sets.join(", ")} WHERE id = ?`, params);
       if (result.affectedRows === 0) {
         return ack({ success: false, message: "Tournament not found." });
       }
@@ -551,7 +552,7 @@ export default function tournamentSocketController({ socket, io, db }) {
     if (!id) return ack({ success: false, message: "Tournament id is required." });
 
     try {
-      const [result] = await db.execute("DELETE FROM tournaments WHERE id = ?", [id]);
+      const [result] = await db.execute("DELETE FROM TOURNAMENTS WHERE id = ?", [id]);
       if (result.affectedRows === 0) {
         return ack({ success: false, message: "Tournament not found." });
       }
@@ -584,7 +585,7 @@ export default function tournamentSocketController({ socket, io, db }) {
     try {
       const [tRows] = await db.execute(
         `SELECT id, registration_type, team_size, max_entries, status
-         FROM tournaments WHERE id = ? LIMIT 1`,
+         FROM TOURNAMENTS WHERE id = ? LIMIT 1`,
         [tournamentId]
       );
       const tournament = tRows?.[0];
@@ -594,7 +595,7 @@ export default function tournamentSocketController({ socket, io, db }) {
       }
 
       if (isAuthenticated) {
-        const [userRows] = await db.execute("SELECT id FROM users WHERE id = ? LIMIT 1", [selfUserId]);
+        const [userRows] = await db.execute("SELECT id FROM USERS WHERE id = ? LIMIT 1", [selfUserId]);
         if (!userRows?.[0]) return ack({ success: false, message: "Account not found." });
       } else if (!selfGuestName) {
         return ack({ success: false, message: "Please enter a display name to join as a guest." });
@@ -616,7 +617,7 @@ export default function tournamentSocketController({ socket, io, db }) {
     // Capacity: excludes withdrawn registrations.
     if (tournament.max_entries != null && tournament.max_entries > 0) {
       const [cnt] = await db.execute(
-        "SELECT COUNT(*) AS c FROM tournament_registrations WHERE tournament_id = ? AND status <> 'withdrawn'",
+        "SELECT COUNT(*) AS c FROM TOURNAMENT_REGISTRATIONS WHERE tournament_id = ? AND status <> 'withdrawn'",
         [tournamentId]
       );
       if ((cnt?.[0]?.c ?? 0) >= tournament.max_entries) {
@@ -626,7 +627,7 @@ export default function tournamentSocketController({ socket, io, db }) {
 
     if (isAuthenticated) {
       const [existing] = await db.execute(
-        "SELECT id FROM tournament_registrations WHERE tournament_id = ? AND user_id = ? LIMIT 1",
+        "SELECT id FROM TOURNAMENT_REGISTRATIONS WHERE tournament_id = ? AND user_id = ? LIMIT 1",
         [tournamentId, selfUserId]
       );
       if (existing?.[0]) {
@@ -635,7 +636,7 @@ export default function tournamentSocketController({ socket, io, db }) {
     }
 
     await db.execute(
-      `INSERT INTO tournament_registrations (tournament_id, user_id, guest_name, nickname)
+      `INSERT INTO TOURNAMENT_REGISTRATIONS (tournament_id, user_id, guest_name, nickname)
        VALUES (?, ?, ?, ?)`,
       [tournamentId, isAuthenticated ? selfUserId : null, isAuthenticated ? null : selfGuestName, selfNickname || null]
     );
@@ -674,7 +675,7 @@ export default function tournamentSocketController({ socket, io, db }) {
     // Capacity: counts TEAMS, not players, excluding withdrawn teams.
     if (tournament.max_entries != null && tournament.max_entries > 0) {
       const [cnt] = await db.execute(
-        "SELECT COUNT(*) AS c FROM tournament_teams WHERE tournament_id = ? AND status <> 'withdrawn'",
+        "SELECT COUNT(*) AS c FROM TOURNAMENT_TEAMS WHERE tournament_id = ? AND status <> 'withdrawn'",
         [tournamentId]
       );
       if ((cnt?.[0]?.c ?? 0) >= tournament.max_entries) {
@@ -684,7 +685,7 @@ export default function tournamentSocketController({ socket, io, db }) {
 
     if (isAuthenticated) {
       const [existing] = await db.execute(
-        "SELECT id FROM tournament_registrations WHERE tournament_id = ? AND user_id = ? LIMIT 1",
+        "SELECT id FROM TOURNAMENT_REGISTRATIONS WHERE tournament_id = ? AND user_id = ? LIMIT 1",
         [tournamentId, selfUserId]
       );
       if (existing?.[0]) {
@@ -697,7 +698,7 @@ export default function tournamentSocketController({ socket, io, db }) {
       await conn.beginTransaction();
 
       const [teamResult] = await conn.execute(
-        `INSERT INTO tournament_teams (tournament_id, name) VALUES (?, ?)`,
+        `INSERT INTO TOURNAMENT_TEAMS (tournament_id, name) VALUES (?, ?)`,
         [tournamentId, teamName]
       );
       const teamId = teamResult.insertId;
@@ -711,13 +712,13 @@ export default function tournamentSocketController({ socket, io, db }) {
       for (let i = 0; i < members.length; i++) {
         const m = members[i];
         const [regResult] = await conn.execute(
-          `INSERT INTO tournament_registrations (tournament_id, user_id, guest_name, nickname)
+          `INSERT INTO TOURNAMENT_REGISTRATIONS (tournament_id, user_id, guest_name, nickname)
            VALUES (?, ?, ?, ?)`,
           [tournamentId, m.userId, m.guestName, m.nickname]
         );
         const registrationId = regResult.insertId;
         await conn.execute(
-          `INSERT INTO tournament_team_members (tournament_id, team_id, registration_id)
+          `INSERT INTO TOURNAMENT_TEAM_MEMBERS (tournament_id, team_id, registration_id)
            VALUES (?, ?, ?)`,
           [tournamentId, teamId, registrationId]
         );
@@ -727,7 +728,7 @@ export default function tournamentSocketController({ socket, io, db }) {
       // Safe by construction: captainRegistrationId was just created in this same
       // transaction as a member of this exact team, so both required invariants
       // (same tournament, actual team member) hold without extra validation.
-      await conn.execute(`UPDATE tournament_teams SET captain_registration_id = ? WHERE id = ?`, [
+      await conn.execute(`UPDATE TOURNAMENT_TEAMS SET captain_registration_id = ? WHERE id = ?`, [
         captainRegistrationId,
         teamId,
       ]);
@@ -771,8 +772,8 @@ export default function tournamentSocketController({ socket, io, db }) {
       if (teamId) {
         const [teamRows] = await db.execute(
           `SELECT t.id, t.captain_registration_id, r.user_id AS captain_user_id
-           FROM tournament_teams t
-           LEFT JOIN tournament_registrations r ON r.id = t.captain_registration_id
+           FROM TOURNAMENT_TEAMS t
+           LEFT JOIN TOURNAMENT_REGISTRATIONS r ON r.id = t.captain_registration_id
            WHERE t.id = ? AND t.tournament_id = ? LIMIT 1`,
           [teamId, tournamentId]
         );
@@ -788,11 +789,11 @@ export default function tournamentSocketController({ socket, io, db }) {
         try {
           await conn.beginTransaction();
           await conn.execute(
-            `DELETE FROM tournament_registrations
-             WHERE id IN (SELECT registration_id FROM tournament_team_members WHERE team_id = ?)`,
+            `DELETE FROM TOURNAMENT_REGISTRATIONS
+             WHERE id IN (SELECT registration_id FROM TOURNAMENT_TEAM_MEMBERS WHERE team_id = ?)`,
             [teamId]
           );
-          await conn.execute(`DELETE FROM tournament_teams WHERE id = ?`, [teamId]);
+          await conn.execute(`DELETE FROM TOURNAMENT_TEAMS WHERE id = ?`, [teamId]);
           await conn.commit();
         } catch (err) {
           await conn.rollback();
@@ -802,7 +803,7 @@ export default function tournamentSocketController({ socket, io, db }) {
         }
       } else if (participantId) {
         const [rows] = await db.execute(
-          "SELECT id, user_id FROM tournament_registrations WHERE id = ? AND tournament_id = ? LIMIT 1",
+          "SELECT id, user_id FROM TOURNAMENT_REGISTRATIONS WHERE id = ? AND tournament_id = ? LIMIT 1",
           [participantId, tournamentId]
         );
         const row = rows?.[0];
@@ -812,14 +813,14 @@ export default function tournamentSocketController({ socket, io, db }) {
         if (!isOwner && !isAdmin) {
           return ack({ success: false, message: "Not allowed." });
         }
-        const [result] = await db.execute("DELETE FROM tournament_registrations WHERE id = ?", [participantId]);
+        const [result] = await db.execute("DELETE FROM TOURNAMENT_REGISTRATIONS WHERE id = ?", [participantId]);
         if (result.affectedRows === 0) {
           return ack({ success: false, message: "You haven't joined this tournament." });
         }
       } else {
         if (!userId) return ack({ success: false, message: "Authentication required." });
         const [result] = await db.execute(
-          "DELETE FROM tournament_registrations WHERE tournament_id = ? AND user_id = ?",
+          "DELETE FROM TOURNAMENT_REGISTRATIONS WHERE tournament_id = ? AND user_id = ?",
           [tournamentId, userId]
         );
         if (result.affectedRows === 0) {

@@ -1,0 +1,48 @@
+// The few structural labels shown around the couple's own content, in the
+// site's language (content.locale). Everything else comes from the database.
+const LABELS = {
+  ms: {
+    programme: 'Atur Acara Majlis',
+    venue: 'Tempat',
+    date: 'Tarikh',
+    time: 'Masa',
+    directions: 'Arah ke lokasi',
+    openMap: 'Buka peta',
+    addToCalendar: 'Simpan ke kalendar',
+    dressCode: 'Pakaian',
+    families: 'Keluarga',
+    rsvp: 'Sahkan Kehadiran',
+    details: 'Butiran majlis',
+    countdownKicker: 'Menghitung hari',
+    storyKicker: 'Kisah kami',
+    coupleKicker: 'Pengantin',
+    eventsKicker: 'Majlis',
+    venueKicker: 'Lokasi',
+    galleryKicker: 'Kenangan',
+    rsvpKicker: 'Kehadiran',
+    wishesKicker: 'Ucapan',
+  },
+  en: {
+    programme: 'Programme',
+    venue: 'Venue',
+    date: 'Date',
+    time: 'Time',
+    directions: 'Directions',
+    openMap: 'Open map',
+    addToCalendar: 'Add to calendar',
+    dressCode: 'Dress code',
+    families: 'Families',
+    rsvp: 'RSVP',
+    details: 'Wedding details',
+    countdownKicker: 'Counting the days',
+    storyKicker: 'Our story',
+    coupleKicker: 'The couple',
+    eventsKicker: 'Celebrations',
+    venueKicker: 'Where',
+    galleryKicker: 'Moments',
+    rsvpKicker: 'Kindly reply',
+    wishesKicker: 'Wishes',
+  },
+}
+
+export const labels = (locale) => (/^ms\b/i.test(locale || '') ? LABELS.ms : LABELS.en)

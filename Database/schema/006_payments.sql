@@ -1,0 +1,48 @@
+-- ================================================================
+-- 006 — PAYMENTS
+-- ================================================================
+
+CREATE TABLE PAYMENT_TRANSACTIONS (
+  ID                      INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  ORDER_ID                INT UNSIGNED NOT NULL,
+  PROVIDER                VARCHAR(30) NOT NULL,          -- 'mock_cybersource' | 'cybersource' — matches PaymentService PROVIDER ids
+  PROVIDER_TRANSACTION_ID VARCHAR(100) NULL,
+  AMOUNT                  DECIMAL(10,2) NOT NULL,
+  CURRENCY                CHAR(3) NOT NULL DEFAULT 'BND',
+  STATUS                  VARCHAR(20) NOT NULL DEFAULT 'PENDING', -- PENDING | AUTHORIZED | PAID | FAILED | CANCELLED | REFUNDED | PARTIALLY_REFUNDED
+  RAW_RESPONSE            LONGTEXT NULL,                  -- sanitized JSON only — never store raw PAN/CVV here or anywhere
+  CREATED_AT              TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UPDATED_AT              TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT FK_PAYMENT_TRANSACTIONS_ORDER
+    FOREIGN KEY (ORDER_ID) REFERENCES ORDERS(ID) ON DELETE RESTRICT,
+  INDEX IDX_PAYMENT_TRANSACTIONS_ORDER (ORDER_ID),
+  INDEX IDX_PAYMENT_TRANSACTIONS_STATUS (STATUS),
+  INDEX IDX_PAYMENT_TRANSACTIONS_CREATED_AT (CREATED_AT)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- Each attempt (including retries) is its own row — doubles as the
+-- payment-attempt log, so no separate payment_attempts table exists.
+
+-- STATUS: DORMANT / RESERVED FOR PLANNED FEATURE — schema-complete,
+-- zero backend query references as of this audit (2026-09-14).
+-- Backend/services/payment/CyberSourceProvider.js explicitly documents
+-- that automated REFUNDS are "not implemented yet" and tells admins to
+-- "record via the REFUNDS table" manually. Keep; remove only if refund
+-- automation is formally abandoned.
+CREATE TABLE REFUNDS (
+  ID                      INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  ORDER_ID                INT UNSIGNED NOT NULL,
+  PAYMENT_TRANSACTION_ID  INT UNSIGNED NOT NULL,
+  AMOUNT                  DECIMAL(10,2) NOT NULL,
+  REASON                  VARCHAR(255) NULL,
+  STATUS                  VARCHAR(20) NOT NULL DEFAULT 'PENDING', -- PENDING | PROCESSED | FAILED
+  PROCESSED_BY_USER_ID    INT UNSIGNED NULL,
+  CREATED_AT              TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UPDATED_AT              TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT FK_REFUNDS_ORDER
+    FOREIGN KEY (ORDER_ID) REFERENCES ORDERS(ID) ON DELETE RESTRICT,
+  CONSTRAINT FK_REFUNDS_PAYMENT_TRANSACTION
+    FOREIGN KEY (PAYMENT_TRANSACTION_ID) REFERENCES PAYMENT_TRANSACTIONS(ID) ON DELETE RESTRICT,
+  CONSTRAINT FK_REFUNDS_PROCESSED_BY
+    FOREIGN KEY (PROCESSED_BY_USER_ID) REFERENCES USERS(ID) ON DELETE SET NULL,
+  INDEX IDX_REFUNDS_ORDER (ORDER_ID)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
-import LightboxModal from "./components/LightboxModal";
 import SiteFooter from "./components/SiteFooter";
 import SiteHeader from "./components/SiteHeader";
 import ContactPage from "./page/ContactPage";
@@ -9,16 +8,15 @@ import HomePage from "./page/HomePage";
 import NotFoundPage from "./page/NotFoundPage";
 import ServicesPage from "./page/ServicesPage";
 import WorkPage from "./page/WorkPage";
-import { fleet, galleryItems, highlights, services } from "./page/pageData";
+import { featuredFilm, fleet, highlights, services } from "./page/pageData";
 
 function App() {
   const [menuOpen, setMenuOpen] = useState(false);
-  const [lightboxImage, setLightboxImage] = useState(null);
   const year = useMemo(() => new Date().getFullYear(), []);
   const location = useLocation();
 
   useEffect(() => {
-    const revealItems = document.querySelectorAll(".reveal");
+    const revealItems = document.querySelectorAll(".reveal, .reveal-blur");
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -43,20 +41,8 @@ function App() {
 
   useEffect(() => {
     setMenuOpen(false);
-    setLightboxImage(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, [location.pathname]);
-
-  useEffect(() => {
-    const onEscape = (event) => {
-      if (event.key === "Escape") {
-        setLightboxImage(null);
-      }
-    };
-
-    window.addEventListener("keydown", onEscape);
-    return () => window.removeEventListener("keydown", onEscape);
-  }, []);
 
   return (
     <div className="min-h-screen text-slate-100 font-body">
@@ -66,10 +52,7 @@ function App() {
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/home" element={<Navigate to="/" replace />} />
-          <Route
-            path="/work"
-            element={<WorkPage galleryItems={galleryItems} highlights={highlights} onImageOpen={setLightboxImage} />}
-          />
+          <Route path="/work" element={<WorkPage featuredFilm={featuredFilm} highlights={highlights} />} />
           <Route path="/fleet" element={<FleetPage fleet={fleet} />} />
           <Route path="/services" element={<ServicesPage services={services} />} />
           <Route path="/contact" element={<ContactPage />} />
@@ -78,7 +61,6 @@ function App() {
       </main>
 
       <SiteFooter year={year} />
-      <LightboxModal image={lightboxImage} onClose={() => setLightboxImage(null)} />
     </div>
   );
 }

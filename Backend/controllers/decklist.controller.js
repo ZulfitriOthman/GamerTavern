@@ -36,8 +36,8 @@ const SELECT_DECKLIST_SQL = `
   SELECT d.id, d.name, d.tcg_game_id, g.name AS tcg_game_name, d.archetype, d.format,
          d.pilot, d.description, d.key_cards, d.win_rate, d.popularity, d.avg_cost,
          d.featured, d.created_by, d.created_at, d.updated_at
-  FROM deck_lists d
-  LEFT JOIN tcg_games g ON g.id = d.tcg_game_id
+  FROM DECK_LISTS d
+  LEFT JOIN TCG_GAMES g ON g.id = d.tcg_game_id
 `;
 
 export default function decklistSocketController({ socket, io, db }) {
@@ -111,7 +111,7 @@ export default function decklistSocketController({ socket, io, db }) {
 
     try {
       const sql = `
-        INSERT INTO deck_lists
+        INSERT INTO DECK_LISTS
           (name, tcg_game_id, archetype, format, pilot, description, key_cards,
            win_rate, popularity, avg_cost, featured, created_by)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -224,7 +224,7 @@ export default function decklistSocketController({ socket, io, db }) {
 
     try {
       const [result] = await db.execute(
-        `UPDATE deck_lists SET ${sets.join(", ")} WHERE id = ?`,
+        `UPDATE DECK_LISTS SET ${sets.join(", ")} WHERE id = ?`,
         params,
       );
       if (result.affectedRows === 0) {
@@ -256,7 +256,7 @@ export default function decklistSocketController({ socket, io, db }) {
     if (!id) return ack({ success: false, message: "Decklist id is required." });
 
     try {
-      const [result] = await db.execute("DELETE FROM deck_lists WHERE id = ?", [id]);
+      const [result] = await db.execute("DELETE FROM DECK_LISTS WHERE id = ?", [id]);
       if (result.affectedRows === 0) {
         return ack({ success: false, message: "Decklist not found." });
       }

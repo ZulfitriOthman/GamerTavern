@@ -23,7 +23,7 @@ export default function servicesSocketController({ socket, db }) {
     try {
       const [rows] = await db.query(
         `SELECT id, name, slug, category, summary, description
-         FROM services
+         FROM SERVICES
          WHERE status = 'active'
          ORDER BY name`
       );
@@ -68,7 +68,7 @@ export default function servicesSocketController({ socket, db }) {
 
     try {
       const [result] = await db.execute(
-        `INSERT INTO enquiries (service_id, topic, name, email, phone, message)
+        `INSERT INTO ENQUIRIES (service_id, topic, name, email, phone, message)
          VALUES (?, ?, ?, ?, ?, ?)`,
         [serviceId, topic, name, email, phone, message]
       );

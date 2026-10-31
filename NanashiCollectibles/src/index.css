@@ -48,6 +48,38 @@ body {
   animation: mobile-nav-in 150ms ease-out;
 }
 
+/* Primary-nav dropdown panels (NavDropdown.jsx) — centered under their
+   trigger, so the entrance keeps the existing -50% horizontal translate
+   throughout instead of fighting it. */
+@keyframes dropdown-panel-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 2px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+.dropdown-panel-enter {
+  animation: dropdown-panel-in 120ms ease-out;
+}
+
+/* Right-aligned dropdown panels (AccountMenu.jsx) — no horizontal offset. */
+@keyframes dropdown-panel-in-right {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.dropdown-panel-enter-right {
+  animation: dropdown-panel-in-right 120ms ease-out;
+}
+
 /* Merchant portal: dialog entrance (Modal.jsx) and drawer slide-in (MerchantMobileDrawer.jsx). */
 @keyframes modal-in {
   from {

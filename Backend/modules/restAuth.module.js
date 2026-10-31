@@ -52,8 +52,8 @@ export async function getMerchantMemberships(db, userId) {
   const [rows] = await db.query(
     `SELECT mu.merchant_id, mu.role, mu.status AS membership_status,
             m.business_name, m.display_name, m.slug, m.status AS merchant_status
-       FROM merchant_users mu
-       JOIN merchants m ON m.id = mu.merchant_id
+       FROM MERCHANT_USERS mu
+       JOIN MERCHANTS m ON m.id = mu.merchant_id
       WHERE mu.user_id = ?`,
     [userId]
   );
@@ -65,7 +65,15 @@ export async function getMerchantMemberships(db, userId) {
 // which merchant via `?merchantId=` (or a matching route param) ONLY as a
 // selector among memberships this user actually holds — it is never
 // trusted as authority on its own. Sets req.merchantContext = { merchantId, role }.
-export function requireMerchant(minRole = "MERCHANT_EMPLOYEE") {
+//
+// `allowReadOnlyWhenSuspended`: a SUSPENDED merchant (unlike BANNED/PENDING/
+// REJECTED) is under investigation, not permanently gone — per the admin
+// spec, read-only access to its own records should remain available rather
+// than hiding everything. Pass this on GET-only routes (dashboard, product/
+// order reads, settings/staff reads); every mutating route (order status,
+// settings, bank details, staff writes) must NOT pass it, so a suspended
+// merchant can view but never act.
+export function requireMerchant(minRole = "MERCHANT_EMPLOYEE", { allowReadOnlyWhenSuspended = false } = {}) {
   return async function (req, res, next) {
     if (!req.user) {
       return res.status(401).json({ success: false, code: "AUTH_REQUIRED", message: "Authentication required." });
@@ -94,11 +102,15 @@ export function requireMerchant(minRole = "MERCHANT_EMPLOYEE") {
         return res.status(403).json({ success: false, code: "MEMBERSHIP_SUSPENDED", message: "Your access to this merchant has been suspended." });
       }
       if (membership.merchant_status !== "ACTIVE") {
-        return res.status(403).json({
-          success: false,
-          code: "MERCHANT_NOT_ACTIVE",
-          message: `This merchant account is ${membership.merchant_status}.`,
-        });
+        const readOnlyAllowed =
+          allowReadOnlyWhenSuspended && membership.merchant_status === "SUSPENDED" && req.method === "GET";
+        if (!readOnlyAllowed) {
+          return res.status(403).json({
+            success: false,
+            code: "MERCHANT_NOT_ACTIVE",
+            message: `This merchant account is ${membership.merchant_status}.`,
+          });
+        }
       }
       if ((MERCHANT_ROLE_RANK[membership.role] || 0) < (MERCHANT_ROLE_RANK[minRole] || 0)) {
         return res.status(403).json({ success: false, code: "INSUFFICIENT_ROLE", message: `Requires ${minRole} or higher.` });
@@ -108,6 +120,7 @@ export function requireMerchant(minRole = "MERCHANT_EMPLOYEE") {
         merchantId: Number(membership.merchant_id),
         role: membership.role,
         businessName: membership.business_name,
+        merchantStatus: membership.merchant_status,
       };
       return next();
     } catch (err) {

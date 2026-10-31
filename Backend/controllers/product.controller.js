@@ -17,10 +17,21 @@ const ROLES = {
 };
 
 // App-validated (products.status is plain VARCHAR(20), no DB enum/CHECK — see
-// Database/NanashiCollectibles_v2.sql header policy). 'active'/'archived' predate the
-// marketplace; 'draft'/'out_of_stock' were added additively in
-// Database/Marketplace_Migration.sql SECTION 2.
+// Database/schema/003_catalog.sql header policy). 'active'/'archived' predate the
+// marketplace; 'draft'/'out_of_stock' were added additively (now baked directly
+// into Database/schema/003_catalog.sql's products definition).
 const PRODUCT_STATUSES = ["draft", "active", "out_of_stock", "archived"];
+
+// Only these two PRODUCT_CATEGORIES.slug values may ever carry a
+// products.tcg_game_id — matched by SLUG (stable) rather than NAME (a
+// merchant-facing label that could theoretically be renamed). A card in
+// "Trading Card Games" belongs to exactly one game, so it's required; a
+// "TCG Accessories" item (sleeves, deck boxes) may optionally be
+// game-branded. Every other category must never carry one — see
+// resolveTcgGameRequirement() below, the single place this is decided so
+// create and update can never diverge.
+const TCG_GAME_REQUIRED_SLUG = "trading-card-games";
+const TCG_GAME_OPTIONAL_SLUG = "tcg-accessories";
 
 const toStr = (v) => (v == null ? "" : String(v)).trim();
 const toInt = (v, d = 0) => {
@@ -47,7 +58,7 @@ async function resolveRoleFromDb(db, userId) {
   try {
     const [rows] = await executeWithRetry(
       db,
-      `SELECT role FROM users WHERE id = ? LIMIT 1`,
+      `SELECT role FROM USERS WHERE id = ? LIMIT 1`,
       [userId],
       "auth:role.lookup"
     );
@@ -59,8 +70,8 @@ async function resolveRoleFromDb(db, userId) {
   }
 }
 
-// Marketplace merchant scoping (additive — see Database/Marketplace_Migration.sql
-// SECTION 1). A vendor with no merchant_users row at all is a legacy/standalone
+// Marketplace merchant scoping (additive — see Database/schema/004_merchants.sql).
+// A vendor with no merchant_users row at all is a legacy/standalone
 // vendor and keeps working exactly as before (merchant_id stays NULL on their
 // products). A vendor who *does* belong to a merchant is gated by that
 // merchant's status — PENDING/SUSPENDED/REJECTED merchants cannot list live
@@ -72,8 +83,8 @@ async function resolveMerchantContextForVendor(db, userId) {
     const [rows] = await executeWithRetry(
       db,
       `SELECT mu.merchant_id, m.status AS merchant_status
-         FROM merchant_users mu
-         JOIN merchants m ON m.id = mu.merchant_id
+         FROM MERCHANT_USERS mu
+         JOIN MERCHANTS m ON m.id = mu.merchant_id
         WHERE mu.user_id = ? AND mu.status = 'active'
         LIMIT 1`,
       [userId],
@@ -101,7 +112,7 @@ async function isActiveStaffOfMerchant(db, userId, merchantId) {
   try {
     const [rows] = await executeWithRetry(
       db,
-      `SELECT 1 FROM merchant_users WHERE user_id = ? AND merchant_id = ? AND status = 'active' LIMIT 1`,
+      `SELECT 1 FROM MERCHANT_USERS WHERE user_id = ? AND merchant_id = ? AND status = 'active' LIMIT 1`,
       [userId, merchantId],
       "merchant:staff.check"
     );
@@ -112,8 +123,63 @@ async function isActiveStaffOfMerchant(db, userId, merchantId) {
   }
 }
 
+// Resolves whether a category requires, optionally allows, or must never
+// carry a tcg_game_id — by SLUG, not a hardcoded category ID (seed data
+// order/IDs aren't guaranteed across environments). Returns "none" for an
+// unknown/deleted categoryId so a bad ID fails closed (no game) rather than
+// throwing.
+async function resolveTcgGameRequirement(db, categoryId) {
+  const [rows] = await executeWithRetry(db, `SELECT slug FROM PRODUCT_CATEGORIES WHERE id = ? LIMIT 1`, [categoryId], "product:tcgRequirement");
+  const slug = rows?.[0]?.slug;
+  if (slug === TCG_GAME_REQUIRED_SLUG) return "required";
+  if (slug === TCG_GAME_OPTIONAL_SLUG) return "optional";
+  return "none";
+}
+
+// Product Type (Single Card, Booster Box, ...) requirement, generalized
+// rather than hardcoded to one category slug: a category requires one iff
+// PRODUCT_TYPES actually has active rows configured for it. Today only
+// Trading Card Games has any seeded — Gunpla/Computer Parts automatically
+// start requiring one the moment rows exist for them, with zero code
+// change. Mirrors resolveTcgGameRequirement()'s "single source of truth"
+// role but reads the requirement from data, not a literal.
+async function resolveProductTypeRequirement(db, categoryId) {
+  try {
+    const [rows] = await executeWithRetry(
+      db,
+      `SELECT id FROM PRODUCT_TYPES WHERE category_id = ? AND status = 'active' LIMIT 1`,
+      [categoryId],
+      "product:productTypeRequirement"
+    );
+    return rows?.length ? "required" : "none";
+  } catch (err) {
+    // Fails open to "none" (never required, never blocks create/update) if
+    // PRODUCT_TYPES doesn't exist yet on this database — migrations/0008
+    // may not have been applied yet wherever this code is deployed. Once
+    // applied, this starts requiring/gating normally with no code change.
+    console.error("[product.socket] resolveProductTypeRequirement failed (PRODUCT_TYPES may not exist yet):", err?.message || err);
+    return "none";
+  }
+}
+
+// Merchant-status gate (closes a bypass): previously a merchant-linked
+// product's own creating vendor could still update/archive/adjust it purely
+// via `vendorId === userId`, without ever checking merchant status — so a
+// SUSPENDED/BANNED merchant's owner account kept editing rights the create
+// path already denies. Legacy standalone vendors (merchantId null) are
+// unaffected — there's no merchant status to gate on for them.
 async function canManageProduct(db, { role, userId, vendorId, merchantId }) {
   if (role === ROLES.ADMIN) return true;
+  if (!merchantId) return toInt(vendorId) === userId;
+
+  const [rows] = await executeWithRetry(
+    db,
+    `SELECT status FROM MERCHANTS WHERE id = ? LIMIT 1`,
+    [merchantId],
+    "merchant:status.check"
+  );
+  if (rows?.[0]?.status !== "ACTIVE") return false;
+
   if (toInt(vendorId) === userId) return true;
   return isActiveStaffOfMerchant(db, userId, merchantId);
 }
@@ -156,10 +222,22 @@ function safePublicProductRow(row) {
     vendor_id: row.vendor_id,
     merchant_id: row.merchant_id ?? null,
     seller_name: row.seller_name ?? null,
+    // The merchant's storefront name (merchants.display_name) — falls back to null for
+    // legacy standalone vendors with no merchant_id; the frontend falls back to
+    // seller_name in that case rather than the backend duplicating that choice.
+    merchant_name: row.merchant_name ?? null,
     category_id: row.category_id,
     category_name: row.category_name ?? null,
+    // category_slug/product_type_slug: the stable identifiers the storefront
+    // matches on (e.g. "trading-card-games", "single-card") — display NAMEs
+    // are presentation text a merchant/admin could rename; never match UI
+    // behavior against them (see ProductCard.jsx).
+    category_slug: row.category_slug ?? null,
     tcg_game_id: row.tcg_game_id ?? null,
     tcg_game_name: row.tcg_game_name ?? null,
+    product_type_id: row.product_type_id ?? null,
+    product_type_name: row.product_type_name ?? null,
+    product_type_slug: row.product_type_slug ?? null,
     name: row.name,
     slug: row.slug,
     code: row.code,
@@ -213,7 +291,7 @@ async function fetchImagesByProductIds(db, ids) {
   const placeholders = ids.map(() => "?").join(",");
   const [rows] = await db.execute(
     `SELECT id, product_id, image_url, sort_order, is_primary
-     FROM product_images
+     FROM PRODUCT_IMAGES
      WHERE product_id IN (${placeholders})
      ORDER BY is_primary DESC, sort_order ASC, id ASC`,
     ids
@@ -235,13 +313,13 @@ async function fetchImagesByProductIds(db, ids) {
 // Simple "replace the whole set" strategy — avoids diffing individual images,
 // which the current single-image frontend doesn't need anyway.
 async function replaceProductImages(conn, productId, images) {
-  await conn.execute(`DELETE FROM product_images WHERE product_id = ?`, [productId]);
+  await conn.execute(`DELETE FROM PRODUCT_IMAGES WHERE product_id = ?`, [productId]);
 
   const list = Array.isArray(images) ? images.filter((img) => img && img.url) : [];
   for (let i = 0; i < list.length; i++) {
     const img = list[i];
     await conn.execute(
-      `INSERT INTO product_images (product_id, image_url, sort_order, is_primary)
+      `INSERT INTO PRODUCT_IMAGES (product_id, image_url, sort_order, is_primary)
        VALUES (?, ?, ?, ?)`,
       [productId, toStr(img.url), toInt(img.sortOrder, i), img.isPrimary || i === 0 ? 1 : 0]
     );
@@ -264,12 +342,34 @@ export default function productSocketController({
     const ack = typeof cb === "function" ? cb : () => {};
     try {
       const [rows] = await db.query(
-        `SELECT id, name, slug, description FROM product_categories ORDER BY name`
+        `SELECT id, name, slug, description FROM PRODUCT_CATEGORIES ORDER BY name`
       );
       return ack({ success: true, data: rows || [] });
     } catch (err) {
       console.error("[socket][product_categories:list] error", err);
       return ack({ success: false, message: "Failed to load product categories." });
+    }
+  });
+
+  /* =========================================================
+     LIST PRODUCT TYPES (public) — e.g. Single Card, Booster Box under
+     Trading Card Games. Scoped per category (PRODUCT_TYPES.category_id) so
+     this naturally extends to future categories (Gunpla grades, Computer
+     Parts component types, ...) without any schema change — just seed
+     rows. Fetches the full active list, same pattern as
+     product_categories:list / tcgcategories:list; callers filter by
+     category_id client-side.
+     ========================================================= */
+  socket.on("product_types:list", async (_payload, cb) => {
+    const ack = typeof cb === "function" ? cb : () => {};
+    try {
+      const [rows] = await db.query(
+        `SELECT id, category_id, name, slug, sort_order FROM PRODUCT_TYPES WHERE status = 'active' ORDER BY category_id, sort_order, name`
+      );
+      return ack({ success: true, data: rows || [] });
+    } catch (err) {
+      console.error("[socket][product_types:list] error", err);
+      return ack({ success: false, message: "Failed to load product types." });
     }
   });
 
@@ -288,14 +388,25 @@ export default function productSocketController({
     // endpoint, consistent with product reads staying on Socket.IO).
     const singleId = payload.id != null ? toInt(payload.id) : null;
     const ids = Array.isArray(payload.ids) ? payload.ids.map((v) => toInt(v)).filter(Boolean) : null;
+    // slug: added for the public product-detail page (Shop revamp) — same
+    // rationale as id/ids above, the smallest correct addition to this one
+    // existing public read rather than a new endpoint.
+    const slug = toStr(payload.slug);
     const categoryId = payload.categoryId != null ? toInt(payload.categoryId) : null;
     const tcgGameId = payload.tcgGameId != null ? toInt(payload.tcgGameId) : null;
+    const productTypeId = payload.productTypeId != null ? toInt(payload.productTypeId) : null;
     const search = toStr(payload.search);
     const status = toStr(payload.status) || "active";
     const sort = toStr(payload.sort || "newest").toLowerCase();
     const page = Math.max(1, Math.trunc(Number(payload.page)) || 1);
     const limit = Math.min(50, Math.max(1, Math.trunc(Number(payload.limit)) || 20));
     const offset = (page - 1) * limit;
+    // Added for the public marketplace grid (Shop page) — all four read from
+    // columns that already existed (price, stock_quantity, featured), no schema change.
+    const minPrice = payload.minPrice != null && payload.minPrice !== "" ? toMoney(payload.minPrice) : null;
+    const maxPrice = payload.maxPrice != null && payload.maxPrice !== "" ? toMoney(payload.maxPrice) : null;
+    const inStock = payload.inStock === true || payload.inStock === "true";
+    const featuredOnly = payload.featured === true || payload.featured === "true";
 
     try {
       const where = [];
@@ -312,6 +423,15 @@ export default function productSocketController({
       if (merchantId) {
         where.push("p.merchant_id = ?");
         params.push(merchantId);
+      } else {
+        // No explicit merchant scope requested — this is the public marketplace
+        // browse path (Shop page, homepage, etc.), so hide any product belonging
+        // to a merchant that isn't ACTIVE (SUSPENDED/BANNED/PENDING/REJECTED).
+        // A request that DOES pass merchantId is assumed to be that merchant's
+        // own dashboard viewing its own catalog (see requireMerchant's
+        // allowReadOnlyWhenSuspended) and is deliberately exempt — read-only
+        // self-access to a suspended merchant's own products should still work.
+        where.push("(p.merchant_id IS NULL OR m.status = 'ACTIVE')");
       }
       if (singleId) {
         where.push("p.id = ?");
@@ -321,6 +441,10 @@ export default function productSocketController({
         where.push(`p.id IN (${ids.map(() => "?").join(",")})`);
         params.push(...ids);
       }
+      if (slug) {
+        where.push("p.slug = ?");
+        params.push(slug);
+      }
       if (categoryId) {
         where.push("p.category_id = ?");
         params.push(categoryId);
@@ -329,9 +453,30 @@ export default function productSocketController({
         where.push("p.tcg_game_id = ?");
         params.push(tcgGameId);
       }
+      if (productTypeId) {
+        where.push("p.product_type_id = ?");
+        params.push(productTypeId);
+      }
       if (search) {
-        where.push("(p.name LIKE ? OR p.code LIKE ?)");
-        params.push(`%${search}%`, `%${search}%`);
+        // Tags/brand/short_description are free-text discovery aids (point 7 of
+        // the TCG-game fix) — search may still match them; only the structured
+        // tcgGameId filter above determines which game a product belongs to.
+        where.push("(p.name LIKE ? OR p.code LIKE ? OR p.tags LIKE ? OR p.brand LIKE ? OR p.short_description LIKE ?)");
+        params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+      }
+      if (minPrice != null) {
+        where.push("p.price >= ?");
+        params.push(minPrice);
+      }
+      if (maxPrice != null) {
+        where.push("p.price <= ?");
+        params.push(maxPrice);
+      }
+      if (inStock) {
+        where.push("p.stock_quantity > 0");
+      }
+      if (featuredOnly) {
+        where.push("p.featured = 1");
       }
 
       let orderBy = "p.id DESC";
@@ -340,29 +485,38 @@ export default function productSocketController({
       if (sort === "za") orderBy = "p.name DESC";
       if (sort === "price_asc") orderBy = "p.price ASC, p.id DESC";
       if (sort === "price_desc") orderBy = "p.price DESC, p.id DESC";
+      // "featured" sort is used by the public Shop grid's default view — falls back to
+      // newest-first for everything else, same as p.id DESC already does above.
+      if (sort === "featured") orderBy = "p.featured DESC, p.id DESC";
 
       const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
       const [[{ total }]] = await executeWithRetry(
         db,
-        `SELECT COUNT(*) AS total FROM products p ${whereClause}`,
+        `SELECT COUNT(*) AS total FROM PRODUCTS p LEFT JOIN MERCHANTS m ON m.id = p.merchant_id ${whereClause}`,
         params,
         "product:list.count"
       );
 
       const sql = `
         SELECT
-          p.id, p.vendor_id, p.merchant_id, p.category_id, p.tcg_game_id, p.name, p.slug, p.code,
+          p.id, p.vendor_id, p.merchant_id, p.category_id, p.tcg_game_id, p.product_type_id, p.name, p.slug, p.code,
           p.description, p.short_description, p.brand, p.condition_label, p.price,
           p.stock_quantity, p.low_stock_threshold, p.featured, p.weight_grams, p.tags, p.status,
           p.created_at, p.updated_at,
           u.name AS seller_name,
+          m.display_name AS merchant_name,
           c.name AS category_name,
-          g.name AS tcg_game_name
-        FROM products p
-        LEFT JOIN users u ON u.id = p.vendor_id
-        LEFT JOIN product_categories c ON c.id = p.category_id
-        LEFT JOIN tcg_games g ON g.id = p.tcg_game_id
+          c.slug AS category_slug,
+          g.name AS tcg_game_name,
+          pt.name AS product_type_name,
+          pt.slug AS product_type_slug
+        FROM PRODUCTS p
+        LEFT JOIN USERS u ON u.id = p.vendor_id
+        LEFT JOIN MERCHANTS m ON m.id = p.merchant_id
+        LEFT JOIN PRODUCT_CATEGORIES c ON c.id = p.category_id
+        LEFT JOIN TCG_GAMES g ON g.id = p.tcg_game_id
+        LEFT JOIN PRODUCT_TYPES pt ON pt.id = p.product_type_id
         ${whereClause}
         ORDER BY ${orderBy}
         LIMIT ? OFFSET ?
@@ -419,6 +573,7 @@ export default function productSocketController({
     const code = toStr(payload.code);
     const categoryId = toInt(payload.categoryId ?? payload.category_id);
     const tcgGameId = payload.tcgGameId ?? payload.tcg_game_id;
+    const productTypeId = payload.productTypeId ?? payload.product_type_id;
     const description = payload.description ?? null;
     const shortDescription = payload.shortDescription ?? payload.short_description ?? null;
     const brand = toStr(payload.brand) || null;
@@ -449,6 +604,37 @@ export default function productSocketController({
       return ack({ success: false, message: `status must be one of: ${PRODUCT_STATUSES.join(", ")}` });
     }
 
+    // TCG Game gating (never trust the frontend alone): required for
+    // Trading Card Games, optional for TCG Accessories, forced to null for
+    // every other category regardless of what was submitted.
+    const tcgRequirement = await resolveTcgGameRequirement(db, categoryId);
+    if (tcgRequirement === "required" && !tcgGameId) {
+      return ack({ success: false, code: "TCG_GAME_REQUIRED", message: "TCG Game is required for products in the Trading Card Games category." });
+    }
+    let effectiveTcgGameId = tcgRequirement === "none" ? null : tcgGameId || null;
+    if (effectiveTcgGameId) {
+      const [gameRows] = await executeWithRetry(db, `SELECT id FROM TCG_GAMES WHERE id = ? LIMIT 1`, [effectiveTcgGameId], "product:tcgGame.lookup");
+      if (!gameRows?.[0]) {
+        return ack({ success: false, message: "Selected TCG Game does not exist." });
+      }
+    }
+
+    // Product Type gating — same "required only if the category has any
+    // configured, forced null otherwise" rule as TCG Game above, plus a
+    // scoping check: a selected type must actually belong to the category
+    // being saved (never trust the client to only ever send a matching one).
+    const productTypeRequirement = await resolveProductTypeRequirement(db, categoryId);
+    if (productTypeRequirement === "required" && !productTypeId) {
+      return ack({ success: false, code: "PRODUCT_TYPE_REQUIRED", message: "Product Type is required for products in this category." });
+    }
+    let effectiveProductTypeId = productTypeRequirement === "none" ? null : productTypeId || null;
+    if (effectiveProductTypeId) {
+      const [typeRows] = await executeWithRetry(db, `SELECT id FROM PRODUCT_TYPES WHERE id = ? AND category_id = ? LIMIT 1`, [effectiveProductTypeId, categoryId], "product:productType.lookup");
+      if (!typeRows?.[0]) {
+        return ack({ success: false, message: "Selected Product Type does not belong to this category." });
+      }
+    }
+
     const slugBase = slugify(payload.slug || name) || `product-${Date.now()}`;
 
     let conn;
@@ -461,13 +647,13 @@ export default function productSocketController({
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
           const [res] = await conn.execute(
-            `INSERT INTO products
-              (vendor_id, merchant_id, category_id, tcg_game_id, name, slug, code, description,
+            `INSERT INTO PRODUCTS
+              (vendor_id, merchant_id, category_id, tcg_game_id, product_type_id, name, slug, code, description,
                short_description, brand, condition_label, price, stock_quantity, low_stock_threshold,
                featured, weight_grams, tags, status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
-              userId, merchantContext.merchantId, categoryId, tcgGameId || null, name, slug, code, description,
+              userId, merchantContext.merchantId, categoryId, effectiveTcgGameId, effectiveProductTypeId, name, slug, code, description,
               shortDescription, brand, conditionLabel || null, price, stockQty, lowStockThreshold,
               featured ? 1 : 0, weightGrams, tags, status,
             ]
@@ -485,7 +671,7 @@ export default function productSocketController({
 
       if (stockQty > 0) {
         await conn.execute(
-          `INSERT INTO inventory_movements (product_id, delta, reason) VALUES (?, ?, ?)`,
+          `INSERT INTO INVENTORY_MOVEMENTS (product_id, delta, reason) VALUES (?, ?, ?)`,
           [productId, stockQty, "initial_stock"]
         );
       }
@@ -495,15 +681,17 @@ export default function productSocketController({
       await conn.commit();
 
       const [rows] = await db.execute(
-        `SELECT p.id, p.vendor_id, p.merchant_id, p.category_id, p.tcg_game_id, p.name, p.slug, p.code,
+        `SELECT p.id, p.vendor_id, p.merchant_id, p.category_id, p.tcg_game_id, p.product_type_id, p.name, p.slug, p.code,
                 p.description, p.short_description, p.brand, p.condition_label, p.price,
           p.stock_quantity, p.low_stock_threshold, p.featured, p.weight_grams, p.tags, p.status,
                 p.created_at, p.updated_at,
-                u.name AS seller_name, c.name AS category_name, g.name AS tcg_game_name
-         FROM products p
-         LEFT JOIN users u ON u.id = p.vendor_id
-         LEFT JOIN product_categories c ON c.id = p.category_id
-         LEFT JOIN tcg_games g ON g.id = p.tcg_game_id
+                u.name AS seller_name, m.display_name AS merchant_name, c.name AS category_name, c.slug AS category_slug, g.name AS tcg_game_name, pt.name AS product_type_name, pt.slug AS product_type_slug
+         FROM PRODUCTS p
+         LEFT JOIN USERS u ON u.id = p.vendor_id
+         LEFT JOIN MERCHANTS m ON m.id = p.merchant_id
+         LEFT JOIN PRODUCT_CATEGORIES c ON c.id = p.category_id
+         LEFT JOIN TCG_GAMES g ON g.id = p.tcg_game_id
+         LEFT JOIN PRODUCT_TYPES pt ON pt.id = p.product_type_id
          WHERE p.id = ?`,
         [productId]
       );
@@ -559,7 +747,7 @@ export default function productSocketController({
     const productId = toInt(payload.id);
 
     if (!canSell(role)) {
-      return ack({ success: false, message: "Only vendors/admin can update products." });
+      return ack({ success: false, message: "Only vendors/admin can update PRODUCTS." });
     }
     if (!productId) return ack({ success: false, message: "Product id is required." });
 
@@ -569,7 +757,7 @@ export default function productSocketController({
       await conn.beginTransaction();
 
       const [pRows] = await conn.execute(
-        `SELECT id, vendor_id, merchant_id FROM products WHERE id = ? LIMIT 1`,
+        `SELECT id, vendor_id, merchant_id, category_id, tcg_game_id, product_type_id FROM PRODUCTS WHERE id = ? LIMIT 1`,
         [productId]
       );
       const p = pRows?.[0];
@@ -612,14 +800,80 @@ export default function productSocketController({
         fields.push("price = ?");
         params.push(price);
       }
-      if (payload.categoryId != null || payload.category_id != null) {
+      const categoryChanged = payload.categoryId != null || payload.category_id != null;
+      const effectiveCategoryId = categoryChanged ? toInt(payload.categoryId ?? payload.category_id) : p.category_id;
+      if (categoryChanged) {
         fields.push("category_id = ?");
-        params.push(toInt(payload.categoryId ?? payload.category_id));
+        params.push(effectiveCategoryId);
       }
-      if (payload.tcgGameId !== undefined || payload.tcg_game_id !== undefined) {
+
+      // TCG Game gating (same rule as create, never trust the frontend
+      // alone): required for Trading Card Games, optional for TCG
+      // Accessories, forced to null for every other category — so a
+      // category changed AWAY from a TCG-related one can never leave a
+      // stale tcg_game_id behind, even if the client didn't send one.
+      const tcgGameIdSubmitted = payload.tcgGameId !== undefined || payload.tcg_game_id !== undefined;
+      const submittedTcgGameId = payload.tcgGameId ?? payload.tcg_game_id ?? null;
+      const tcgRequirement = await resolveTcgGameRequirement(db, effectiveCategoryId);
+
+      if (tcgRequirement === "required") {
+        const finalTcgGameId = tcgGameIdSubmitted ? submittedTcgGameId : p.tcg_game_id;
+        if (!finalTcgGameId) {
+          await conn.rollback();
+          return ack({ success: false, code: "TCG_GAME_REQUIRED", message: "TCG Game is required for products in the Trading Card Games category." });
+        }
+      }
+
+      if (tcgRequirement === "none") {
+        if (p.tcg_game_id != null) {
+          fields.push("tcg_game_id = ?");
+          params.push(null);
+        }
+      } else if (tcgGameIdSubmitted) {
+        if (submittedTcgGameId) {
+          const [gameRows] = await conn.query(`SELECT id FROM TCG_GAMES WHERE id = ? LIMIT 1`, [submittedTcgGameId]);
+          if (!gameRows?.[0]) {
+            await conn.rollback();
+            return ack({ success: false, message: "Selected TCG Game does not exist." });
+          }
+        }
         fields.push("tcg_game_id = ?");
-        params.push(payload.tcgGameId ?? payload.tcg_game_id ?? null);
+        params.push(submittedTcgGameId);
       }
+
+      // Product Type gating — same rule as TCG Game above, generalized: a
+      // category requires one iff PRODUCT_TYPES has active rows for it
+      // (see resolveProductTypeRequirement), and a category changed away
+      // from a configured one never leaves a stale product_type_id behind.
+      const productTypeIdSubmitted = payload.productTypeId !== undefined || payload.product_type_id !== undefined;
+      const submittedProductTypeId = payload.productTypeId ?? payload.product_type_id ?? null;
+      const productTypeRequirement = await resolveProductTypeRequirement(db, effectiveCategoryId);
+
+      if (productTypeRequirement === "required") {
+        const finalProductTypeId = productTypeIdSubmitted ? submittedProductTypeId : p.product_type_id;
+        if (!finalProductTypeId) {
+          await conn.rollback();
+          return ack({ success: false, code: "PRODUCT_TYPE_REQUIRED", message: "Product Type is required for products in this category." });
+        }
+      }
+
+      if (productTypeRequirement === "none") {
+        if (p.product_type_id != null) {
+          fields.push("product_type_id = ?");
+          params.push(null);
+        }
+      } else if (productTypeIdSubmitted) {
+        if (submittedProductTypeId) {
+          const [typeRows] = await conn.query(`SELECT id FROM PRODUCT_TYPES WHERE id = ? AND category_id = ? LIMIT 1`, [submittedProductTypeId, effectiveCategoryId]);
+          if (!typeRows?.[0]) {
+            await conn.rollback();
+            return ack({ success: false, message: "Selected Product Type does not belong to this category." });
+          }
+        }
+        fields.push("product_type_id = ?");
+        params.push(submittedProductTypeId);
+      }
+
       if (payload.status != null) {
         const status = toStr(payload.status);
         if (!PRODUCT_STATUSES.includes(status)) {
@@ -664,13 +918,13 @@ export default function productSocketController({
       if (fields.length > 0) {
         fields.push("updated_at = NOW()");
         params.push(productId);
-        await conn.execute(`UPDATE products SET ${fields.join(", ")} WHERE id = ?`, params);
+        await conn.execute(`UPDATE PRODUCTS SET ${fields.join(", ")} WHERE id = ?`, params);
       }
 
       let removedImageUrls = [];
       if (payload.images !== undefined) {
         const [oldImages] = await conn.execute(
-          `SELECT image_url FROM product_images WHERE product_id = ?`,
+          `SELECT image_url FROM PRODUCT_IMAGES WHERE product_id = ?`,
           [productId]
         );
         removedImageUrls = (oldImages || []).map((r) => r.image_url);
@@ -680,15 +934,17 @@ export default function productSocketController({
       await conn.commit();
 
       const [rows] = await db.execute(
-        `SELECT p.id, p.vendor_id, p.merchant_id, p.category_id, p.tcg_game_id, p.name, p.slug, p.code,
+        `SELECT p.id, p.vendor_id, p.merchant_id, p.category_id, p.tcg_game_id, p.product_type_id, p.name, p.slug, p.code,
                 p.description, p.short_description, p.brand, p.condition_label, p.price,
           p.stock_quantity, p.low_stock_threshold, p.featured, p.weight_grams, p.tags, p.status,
                 p.created_at, p.updated_at,
-                u.name AS seller_name, c.name AS category_name, g.name AS tcg_game_name
-         FROM products p
-         LEFT JOIN users u ON u.id = p.vendor_id
-         LEFT JOIN product_categories c ON c.id = p.category_id
-         LEFT JOIN tcg_games g ON g.id = p.tcg_game_id
+                u.name AS seller_name, m.display_name AS merchant_name, c.name AS category_name, c.slug AS category_slug, g.name AS tcg_game_name, pt.name AS product_type_name, pt.slug AS product_type_slug
+         FROM PRODUCTS p
+         LEFT JOIN USERS u ON u.id = p.vendor_id
+         LEFT JOIN MERCHANTS m ON m.id = p.merchant_id
+         LEFT JOIN PRODUCT_CATEGORIES c ON c.id = p.category_id
+         LEFT JOIN TCG_GAMES g ON g.id = p.tcg_game_id
+         LEFT JOIN PRODUCT_TYPES pt ON pt.id = p.product_type_id
          WHERE p.id = ?`,
         [productId]
       );
@@ -750,16 +1006,40 @@ export default function productSocketController({
     const role = await resolveRoleFromDb(db, userId);
 
     const productId = toInt(payload.product_id ?? payload.productId);
-    const delta = toInt(payload.delta);
+    const type = toStr(payload.type).toLowerCase();
+    const rawQuantity = payload.quantity;
     const reason = toStr(payload.reason) || null;
 
     if (!canSell(role)) {
       return ack({ success: false, message: "Only vendors/admin can adjust inventory." });
     }
     if (!productId) return ack({ success: false, message: "product_id is required." });
-    if (!Number.isFinite(delta) || delta === 0) {
-      return ack({ success: false, message: "delta must be a non-zero number." });
+
+    // The client is trusted for DIRECTION + MAGNITUDE only, never for a
+    // pre-signed delta — this endpoint is the single source of truth for
+    // turning ("stock_in"|"stock_out", quantity) into the signed delta
+    // actually applied. Reject bad input outright rather than coercing it
+    // (e.g. a negative quantity is a user mistake, not silently `Math.abs`'d
+    // away) so the merchant sees a real validation error instead of a
+    // silently "fixed" — and possibly wrong-direction — adjustment.
+    if (type !== "stock_in" && type !== "stock_out") {
+      return ack({ success: false, message: 'type must be "stock_in" or "stock_out".' });
     }
+    const quantity = Number(rawQuantity);
+    if (!Number.isFinite(quantity)) {
+      return ack({ success: false, message: "quantity must be a number." });
+    }
+    if (quantity <= 0) {
+      return ack({ success: false, message: "quantity must be greater than zero." });
+    }
+    if (!Number.isInteger(quantity)) {
+      return ack({ success: false, message: "quantity must be a whole number (stock is tracked as whole units)." });
+    }
+    if (quantity > 1_000_000) {
+      return ack({ success: false, message: "quantity is too large for a single adjustment." });
+    }
+
+    const delta = type === "stock_in" ? quantity : -quantity;
 
     let conn;
     try {
@@ -768,7 +1048,7 @@ export default function productSocketController({
 
       const [pRows] = await executeWithRetry(
         conn,
-        `SELECT id, vendor_id, merchant_id, stock_quantity FROM products WHERE id = ? LIMIT 1 FOR UPDATE`,
+        `SELECT id, vendor_id, merchant_id, stock_quantity FROM PRODUCTS WHERE id = ? LIMIT 1 FOR UPDATE`,
         [productId],
         "inventory:adjust.select"
       );
@@ -789,20 +1069,20 @@ export default function productSocketController({
         await conn.rollback();
         return ack({
           success: false,
-          message: `That adjustment would make stock negative (current: ${p.stock_quantity}, requested change: ${delta}).`,
+          message: `Cannot remove ${quantity} unit${quantity === 1 ? "" : "s"}. Only ${p.stock_quantity} unit${p.stock_quantity === 1 ? "" : "s"} currently available.`,
         });
       }
 
       await executeWithRetry(
         conn,
-        `UPDATE products SET stock_quantity = ?, updated_at = NOW() WHERE id = ?`,
+        `UPDATE PRODUCTS SET stock_quantity = ?, updated_at = NOW() WHERE id = ?`,
         [newQty, productId],
         "inventory:adjust.update"
       );
 
       await executeWithRetry(
         conn,
-        `INSERT INTO inventory_movements (product_id, delta, reason) VALUES (?, ?, ?)`,
+        `INSERT INTO INVENTORY_MOVEMENTS (product_id, delta, reason) VALUES (?, ?, ?)`,
         [productId, delta, reason],
         "inventory:adjust.insert"
       );
@@ -869,7 +1149,7 @@ export default function productSocketController({
     try {
       const [pRows] = await executeWithRetry(
         db,
-        `SELECT id, vendor_id, merchant_id, name FROM products WHERE id = ? LIMIT 1`,
+        `SELECT id, vendor_id, merchant_id, name FROM PRODUCTS WHERE id = ? LIMIT 1`,
         [productId],
         "product:delete.select"
       );
@@ -884,12 +1164,12 @@ export default function productSocketController({
       }
 
       const [imgRows] = await db.execute(
-        `SELECT image_url FROM product_images WHERE product_id = ?`,
+        `SELECT image_url FROM PRODUCT_IMAGES WHERE product_id = ?`,
         [productId]
       );
 
       try {
-        await executeWithRetry(db, `DELETE FROM products WHERE id = ?`, [productId], "product:delete.product");
+        await executeWithRetry(db, `DELETE FROM PRODUCTS WHERE id = ?`, [productId], "product:delete.product");
       } catch (err) {
         // inventory_movements.product_id is ON DELETE RESTRICT by design — a product
         // with real stock history can't be hard-deleted. Archive it instead.
@@ -944,7 +1224,7 @@ export default function productSocketController({
     if (!productId) return ack({ success: false, message: "Product id is required." });
 
     try {
-      const [pRows] = await db.execute(`SELECT id, vendor_id, merchant_id FROM products WHERE id = ? LIMIT 1`, [productId]);
+      const [pRows] = await db.execute(`SELECT id, vendor_id, merchant_id FROM PRODUCTS WHERE id = ? LIMIT 1`, [productId]);
       const p = pRows?.[0];
       if (!p) return ack({ success: false, message: "Product not found." });
 
@@ -953,7 +1233,7 @@ export default function productSocketController({
         return ack({ success: false, message: "Forbidden (not owner)." });
       }
 
-      await db.execute(`UPDATE products SET status = 'archived', updated_at = NOW() WHERE id = ?`, [productId]);
+      await db.execute(`UPDATE PRODUCTS SET status = 'archived', updated_at = NOW() WHERE id = ?`, [productId]);
       io.emit("product:updated", { id: productId, status: "archived" });
 
       await writeAuditLog(db, { actorUserId: userId, actorMerchantId: p.merchant_id, action: "PRODUCT_ARCHIVED", entityType: "product", entityId: productId, metadata: null });
@@ -966,7 +1246,7 @@ export default function productSocketController({
   });
 
   /* =========================================================
-     UPLOAD IMAGE (unchanged — writes to disk, unrelated to schema)
+     UPLOAD IMAGE (writes to disk, unrelated to schema)
      ========================================================= */
   socket.on("image:upload", async (payload = {}, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
@@ -1027,7 +1307,13 @@ export default function productSocketController({
       console.log(`  Size: ${(buffer.length / 1024).toFixed(2)}KB`);
       console.log(`  URL: ${imageUrl}`);
 
-      return ack({ success: true, imageUrl });
+      // Every other ack in this file replies { success, data } — emitWithAck.js
+      // (the shared frontend helper) always resolves with response.data, never
+      // top-level fields. This handler used to reply { success, imageUrl }
+      // (flat), which meant emitWithAck() resolved to undefined on every
+      // successful upload — the frontend consumer's `const { imageUrl } =
+      // await uploadProductImage(...)` was crashing on the SUCCESS path.
+      return ack({ success: true, data: { imageUrl } });
     } catch (err) {
       console.error(
         `[socket][image:upload] ❌ error in ${Date.now() - t0}ms`,

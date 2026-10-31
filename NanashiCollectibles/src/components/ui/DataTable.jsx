@@ -1,5 +1,6 @@
 import { SkeletonText } from "./Skeleton.jsx";
 import EmptyState from "./EmptyState.jsx";
+import Button from "./Button.jsx";
 
 // Renders a real <table> at sm: and above, and a stacked card list below it — never a
 // tiny-column table squeezed onto a phone screen. `columns`: [{ key, header, render(row),
@@ -15,6 +16,7 @@ export default function DataTable({
   emptyDescription,
   renderMobileCard,
   onRowClick,
+  onRetry,
 }) {
   if (status === "loading") {
     return (
@@ -33,6 +35,13 @@ export default function DataTable({
       <EmptyState
         title="Couldn't load this list"
         description={error || "Something went wrong talking to the server."}
+        action={
+          onRetry ? (
+            <Button variant="secondary" size="sm" onClick={onRetry}>
+              Try again
+            </Button>
+          ) : null
+        }
       />
     );
   }

@@ -93,6 +93,28 @@ export async function sendBulkEmail({ recipients, subject, html, text }) {
   return { sent, total: clean.length };
 }
 
+/**
+ * Send a single transactional email to one recipient (e.g. password reset) —
+ * distinct from sendBulkEmail, which BCCs a batch and isn't appropriate for a
+ * message addressed to one person. Never throws: callers that must not block
+ * or fail their response on email delivery (e.g. forgot-password, to avoid
+ * leaking account existence via response timing) can fire-and-forget this and
+ * still get a result object back to log.
+ */
+export async function sendMail({ to, subject, html, text }) {
+  const t = getTransporter();
+  if (!t) return { sent: false, skipped: true, reason: "SMTP not configured" };
+
+  const from = process.env.SMTP_FROM || `"Gamer Tavern" <${process.env.SMTP_USER}>`;
+
+  try {
+    await t.sendMail({ from, to, subject, text, html });
+    return { sent: true };
+  } catch (err) {
+    return { sent: false, skipped: false, reason: err.message };
+  }
+}
+
 export function isMailerVerified() {
   return verified;
 }

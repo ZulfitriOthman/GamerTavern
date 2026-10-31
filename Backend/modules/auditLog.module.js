@@ -7,7 +7,7 @@
 export async function writeAuditLog(db, { actorUserId = null, actorMerchantId = null, action, entityType, entityId, metadata = null }) {
   try {
     await db.execute(
-      `INSERT INTO audit_logs (actor_user_id, actor_merchant_id, action, entity_type, entity_id, metadata)
+      `INSERT INTO AUDIT_LOGS (actor_user_id, actor_merchant_id, action, entity_type, entity_id, metadata)
        VALUES (?, ?, ?, ?, ?, ?)`,
       [actorUserId, actorMerchantId, action, entityType, String(entityId), metadata ? JSON.stringify(metadata) : null]
     );

@@ -1,0 +1,180 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-ivory: #fbf8f1;
+  --color-cream: #f5efe3;
+  --color-champagne: #ecdfc6;
+  --color-sand: #d9c7a7;
+  --color-gold: #b8955a;
+  /* Text colours are deepened for older guests: gold-deep 6.1:1, muted 7.2:1,
+     rose 5.6:1 on ivory (WCAG AA). Plain `gold` is for icons and ornaments only. */
+  --color-gold-deep: #77592a;
+  --color-sage: #a3b59b;
+  --color-sage-soft: #dfe7da;
+  --color-sage-deep: #56694d;
+  --color-ink: #2a2622;
+  --color-olive: #4a4430;
+  --color-muted: #5a5248;
+  --color-rose: #8f534c;
+
+  /* Slightly larger small sizes so secondary text stays readable (xs 13px, sm 15px, base 17px). */
+  --text-xs: 0.8125rem;
+  --text-xs--line-height: 1.5;
+  --text-sm: 0.9375rem;
+  --text-sm--line-height: 1.6;
+  --text-base: 1.0625rem;
+  --text-base--line-height: 1.65;
+  --text-lg: 1.1875rem;
+  --text-lg--line-height: 1.6;
+
+  --font-serif: 'Cormorant Garamond', ui-serif, Georgia, serif;
+  --font-script: 'Pinyon Script', 'Cormorant Garamond', cursive;
+  --font-sans: 'Jost', ui-sans-serif, system-ui, sans-serif;
+  --font-arabic: 'Amiri', 'Traditional Arabic', serif;
+
+  --shadow-soft: 0 10px 40px -18px rgb(84 66 32 / 0.28);
+  --shadow-lift: 0 22px 50px -24px rgb(84 66 32 / 0.4);
+}
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+    scroll-behavior: smooth;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  body {
+    @apply bg-ivory font-sans text-base text-ink antialiased;
+    /* Jost is loaded at 400/500/600; 350 rendered as a thin, faint 300-ish weight. */
+    font-weight: 400;
+    text-rendering: optimizeLegibility;
+    background-image:
+      radial-gradient(circle at 12% 8%, rgb(236 223 198 / 0.45), transparent 38%),
+      radial-gradient(circle at 92% 30%, rgb(223 231 218 / 0.5), transparent 32%);
+    background-attachment: fixed;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-serif text-ink;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+  }
+
+  ::selection {
+    @apply bg-champagne text-ink;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-gold);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+}
+
+@utility btn {
+  @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-full px-6 py-2.5 font-sans text-sm font-semibold tracking-[0.1em] uppercase transition duration-300 disabled:cursor-not-allowed disabled:opacity-55;
+}
+
+@layer components {
+  .container-narrow {
+    @apply mx-auto w-full max-w-3xl px-5 sm:px-8;
+  }
+  .container-wide {
+    @apply mx-auto w-full max-w-6xl px-5 sm:px-8;
+  }
+
+  .eyebrow {
+    @apply font-sans text-[0.8125rem] font-semibold tracking-[0.2em] text-gold-deep uppercase sm:text-sm;
+  }
+
+  .btn-primary {
+    @apply btn bg-ink text-ivory shadow-soft hover:-translate-y-0.5 hover:bg-gold-deep hover:shadow-lift disabled:hover:translate-y-0;
+  }
+  /* White on plain gold was 2.8:1; the deeper gold keeps the look at 6.5:1. */
+  .btn-gold {
+    @apply btn bg-gold-deep text-white shadow-soft hover:-translate-y-0.5 hover:bg-olive disabled:hover:translate-y-0;
+  }
+  .btn-outline {
+    @apply btn border border-gold/60 bg-ivory/60 text-ink backdrop-blur hover:border-gold hover:bg-champagne/50;
+  }
+  .btn-ghost {
+    @apply btn px-4 text-muted hover:bg-cream hover:text-ink;
+  }
+  .btn-sm {
+    @apply min-h-10 px-4 py-1.5 text-[0.8125rem] tracking-[0.08em];
+  }
+
+  .card {
+    @apply rounded-[1.75rem] border border-champagne/80 bg-white/70 shadow-soft backdrop-blur-sm;
+  }
+
+  .field-label {
+    @apply mb-1.5 block font-sans text-[0.8125rem] font-semibold tracking-[0.12em] text-olive uppercase;
+  }
+  .field-input {
+    @apply block w-full rounded-2xl border border-sand/80 bg-white/80 px-4 py-3 font-sans text-base text-ink placeholder:text-muted/75 transition focus:border-gold focus:ring-4 focus:ring-champagne/60 focus:outline-none disabled:opacity-60;
+  }
+  .field-hint {
+    @apply mt-1.5 text-sm text-muted;
+  }
+  .field-error {
+    @apply mt-1.5 text-sm font-medium text-rose;
+  }
+
+  .chip {
+    @apply inline-flex min-h-10 items-center rounded-full border border-sand/70 px-4 text-[0.8125rem] font-medium tracking-[0.1em] text-muted uppercase transition hover:border-gold hover:text-ink;
+  }
+  .chip-active {
+    @apply border-ink bg-ink text-ivory hover:text-ivory;
+  }
+
+  .prose-wedding p {
+    @apply leading-[1.7] text-muted;
+  }
+  .prose-wedding p + p {
+    @apply mt-4;
+  }
+}
+
+/* Paper-like hero wash used when no hero photo is configured. */
+.hero-wash {
+  background:
+    radial-gradient(ellipse at 50% 0%, rgb(255 255 255 / 0.9), transparent 60%),
+    radial-gradient(circle at 15% 85%, rgb(223 231 218 / 0.9), transparent 45%),
+    radial-gradient(circle at 85% 20%, rgb(236 223 198 / 0.95), transparent 45%),
+    linear-gradient(180deg, #fbf8f1, #f5efe3);
+}
+
+.masonry {
+  column-gap: 1rem;
+  columns: 2;
+}
+@media (min-width: 768px) {
+  .masonry {
+    columns: 3;
+  }
+}
+@media (min-width: 1200px) {
+  .masonry {
+    columns: 4;
+  }
+}
+.masonry > * {
+  break-inside: avoid;
+  margin-bottom: 1rem;
+}

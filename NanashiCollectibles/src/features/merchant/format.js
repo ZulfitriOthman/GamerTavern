@@ -1,6 +1,6 @@
 // Shared formatting for the merchant portal. Currency is always BND — see
-// Database/Marketplace_Migration.sql (orders.currency default) — never assumed from
-// user locale.
+// Database/schema/005_orders_checkout.sql (orders.currency default) — never
+// assumed from user locale.
 export function formatMoney(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return "—";

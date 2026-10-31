@@ -7,7 +7,7 @@ export default function createShippingRoutes({ db }) {
   router.get("/methods", async (_req, res) => {
     try {
       const [rows] = await db.query(
-        `SELECT id, name, code, description, base_fee FROM shipping_methods WHERE status = 'active' ORDER BY base_fee ASC`
+        `SELECT id, name, code, description, base_fee FROM SHIPPING_METHODS WHERE status = 'active' ORDER BY base_fee ASC`
       );
       return res.json({ success: true, data: rows });
     } catch (err) {

@@ -8,7 +8,7 @@ import { useMerchantAuth } from "../../features/merchant/MerchantAuthContext.js"
 const MESSAGES = {
   PENDING: {
     tone: "gold",
-    title: "Your store is pending approval",
+    title: "Your merchant application is still under review",
     body: "Thanks for registering. An administrator needs to review and activate your store before you can list products or receive orders. This usually doesn't take long — check back soon.",
   },
   SUSPENDED: {
@@ -18,7 +18,7 @@ const MESSAGES = {
   },
   REJECTED: {
     tone: "danger",
-    title: "Your store registration was not approved",
+    title: "Your merchant application was not approved",
     body: "This store registration was rejected. Contact NanashiCollectibles support for details.",
   },
   MEMBERSHIP_SUSPENDED: {

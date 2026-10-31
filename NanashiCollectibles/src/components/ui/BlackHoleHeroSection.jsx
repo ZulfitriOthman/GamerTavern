@@ -497,6 +497,111 @@ function hexToLinear(hex) {
 }
 
 /* -------------------------------------------------------------------------- */
+/*  Performance modes                                                        */
+/*                                                                            */
+/*  One centralized decision, made once when the renderer starts up — never  */
+/*  re-derived per frame, never scattered across resize()/render()/tick() as */
+/*  ad-hoc "if narrow" checks. Everything downstream (ray-march steps, scene */
+/*  resolution, DPR, bloom size/intensity, FPS cap, whether the RAF loop      */
+/*  runs at all) reads from the single `cfg` object resolved below.          */
+/*                                                                            */
+/*  "full" never changes what a capable desktop already gets: every cap is   */
+/*  Infinity, so Math.min(prop, cap) always yields the prop unchanged — the  */
+/*  same numbers Hero.jsx has always passed for desktop.                     */
+/* -------------------------------------------------------------------------- */
+
+/** Matches the breakpoint Hero.jsx's own useNarrowViewport() already uses. */
+const NARROW_MAX_WIDTH = 767;
+/** navigator.hardwareConcurrency at or below this reads as a low-power CPU. */
+const LOW_CORES_MAX = 4;
+/** navigator.deviceMemory (GiB, Chrome-only) at or below this reads as low-RAM. */
+const LOW_MEMORY_MAX_GB = 4;
+
+const MODE_CONFIG = {
+  // Desktop / capable laptops — every cap is a no-op against the props
+  // Hero.jsx already passes, so this is pixel-for-pixel what shipped before
+  // performance modes existed.
+  full: {
+    stepsCap: Infinity,
+    resolutionCap: 1,
+    maxDprCap: Infinity,
+    glowScale: 1,
+    starScale: 1,
+    targetFps: 0, // 0 = uncapped, render every RAF callback
+    settlePasses: 1,
+    bloomDivisor: 4,
+    maxBackingLongEdge: Infinity,
+  },
+  // Normal phones/tablets: still a live, continuously-animating render, just
+  // a substantially cheaper one — see the report for why these particular
+  // numbers (steps/resolution land inside the ranges profiled against the
+  // existing MAX_STEPS 460 shader).
+  balanced: {
+    stepsCap: 120,
+    resolutionCap: 0.42,
+    maxDprCap: 1,
+    glowScale: 0.78,
+    starScale: 0.6,
+    targetFps: 30,
+    settlePasses: 1,
+    bloomDivisor: 6,
+    maxBackingLongEdge: 1200,
+  },
+  // Low-end phones and prefers-reduced-motion: render a handful of settling
+  // passes once, the same way a resize-while-paused already does (see
+  // settle() below), then never start the RAF loop. Zero continuous GPU
+  // work, but it is the same WebGL still — not a swapped-in poster image.
+  static: {
+    stepsCap: 140,
+    resolutionCap: 0.48,
+    maxDprCap: 1,
+    glowScale: 0.78,
+    starScale: 0.6,
+    targetFps: 0, // irrelevant — the RAF loop never starts in this mode
+    settlePasses: 14,
+    bloomDivisor: 6,
+    maxBackingLongEdge: 1100,
+  },
+};
+
+/**
+ * "auto" resolution — capability heuristics, never a user-agent/device-name
+ * sniff. Every signal is read defensively: `navigator.deviceMemory` doesn't
+ * exist on Firefox/Safari, `hardwareConcurrency` is occasionally absent in
+ * embedded webviews, and matchMedia itself is guarded for non-browser
+ * environments. Missing data never escalates toward "static" — an unknown-
+ * capability mobile browser lands on "balanced" (still a large saving over
+ * "full"), not a frozen render it might not have needed.
+ *
+ *   prefers-reduced-motion               -> static
+ *   not touch/small-viewport (desktop)   -> full
+ *   touch/small-viewport + low cores/RAM -> static
+ *   touch/small-viewport, otherwise      -> balanced
+ */
+function detectPerformanceMode() {
+  if (typeof window === "undefined") return "full";
+  const mm = (q) => (typeof window.matchMedia === "function" ? window.matchMedia(q).matches : false);
+
+  if (mm("(prefers-reduced-motion: reduce)")) return "static";
+
+  const coarsePointer = mm("(pointer: coarse)");
+  const smallViewport = (window.innerWidth || 0) <= NARROW_MAX_WIDTH;
+  if (!coarsePointer && !smallViewport) return "full";
+
+  const cores = typeof navigator !== "undefined" ? navigator.hardwareConcurrency : undefined;
+  const memoryGB = typeof navigator !== "undefined" ? navigator.deviceMemory : undefined;
+  const lowCores = typeof cores === "number" && cores > 0 && cores <= LOW_CORES_MAX;
+  const lowMemory = typeof memoryGB === "number" && memoryGB > 0 && memoryGB <= LOW_MEMORY_MAX_GB;
+
+  return lowCores || lowMemory ? "static" : "balanced";
+}
+
+function resolvePerformanceMode(requested) {
+  if (requested && requested !== "auto" && MODE_CONFIG[requested]) return requested;
+  return detectPerformanceMode();
+}
+
+/* -------------------------------------------------------------------------- */
 /*  Component                                                                 */
 /* -------------------------------------------------------------------------- */
 
@@ -588,6 +693,16 @@ export function BlackHoleHeroSection({
   scrimStrength = 0.9,
   /** Freeze on the current frame. */
   paused = false,
+  /**
+   * "auto" | "full" | "balanced" | "static". Resolved once, when the
+   * renderer starts up — see resolvePerformanceMode()/detectPerformanceMode()
+   * above for what "auto" chooses and why. `steps`/`resolution`/`maxDpr`
+   * above are still read as the FULL-quality ceiling; a lower mode only ever
+   * caps them down, never raises them, so passing "full" (or landing on it
+   * via auto-detection on a capable desktop) reproduces the exact numbers a
+   * caller passed in, unchanged.
+   */
+  performanceMode = "auto",
   className = "",
   children,
   ...rest
@@ -599,7 +714,7 @@ export function BlackHoleHeroSection({
     distance, elevation, azimuth, orbitSpeed, roll, fov, diskInner, diskOuter,
     diskThickness, diskDensity, brightness, spinSpeed, grain, doppler, hotColor,
     midColor, coolColor, starBrightness, glow, exposure, vignette, steps,
-    resolution, maxDpr, focus, scrim, scrimStrength, paused,
+    resolution, maxDpr, focus, scrim, scrimStrength, paused, performanceMode,
   });
 
   // Keeping this ref fresh belongs in an effect, not the render body itself —
@@ -611,7 +726,7 @@ export function BlackHoleHeroSection({
       distance, elevation, azimuth, orbitSpeed, roll, fov, diskInner, diskOuter,
       diskThickness, diskDensity, brightness, spinSpeed, grain, doppler, hotColor,
       midColor, coolColor, starBrightness, glow, exposure, vignette, steps,
-      resolution, maxDpr, focus, scrim, scrimStrength, paused,
+      resolution, maxDpr, focus, scrim, scrimStrength, paused, performanceMode,
     };
   });
 
@@ -623,6 +738,25 @@ export function BlackHoleHeroSection({
     const reduced =
       typeof window.matchMedia === "function" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    // Resolved once, here, at startup — never re-derived per frame or per
+    // resize. `freeze` folds prefers-reduced-motion and the "static" tier
+    // into one condition: both mean "settle a still and never start the RAF
+    // loop," so every place that used to branch on `reduced` alone now
+    // branches on `freeze` instead (reduced remains its own thing only for
+    // the couple of call sites that specifically care about the media query,
+    // none of which remain below — kept as a separate variable anyway since
+    // it already existed and reads clearer than re-deriving it from mode).
+    // Read via the ref, not the destructured prop directly — this effect is
+    // mount-only ([] deps, the WebGL setup below must not tear down and
+    // rebuild every time a prop changes), and `props.current` is already the
+    // file's established way to reach a prop's current value from inside it
+    // without pulling that prop into the dependency array.
+    const mode = resolvePerformanceMode(props.current.performanceMode);
+    const cfg = MODE_CONFIG[mode];
+    const freeze = reduced || mode === "static";
+
+    if (import.meta.env.DEV) host.dataset.performanceMode = mode;
 
     const opts = {
       alpha: false,
@@ -812,12 +946,31 @@ export function BlackHoleHeroSection({
 
     function resize() {
       const rect = host.getBoundingClientRect();
-      const dpr = software ? 1 : Math.min(window.devicePixelRatio || 1, Math.max(1, props.current.maxDpr));
+      // The mode's maxDprCap/resolutionCap only ever pull the prop DOWN
+      // (Math.min) — "full" caps at Infinity, so a desktop caller's own
+      // numbers pass through untouched.
+      const effMaxDpr = Math.max(1, Math.min(props.current.maxDpr, cfg.maxDprCap));
+      const dpr = software ? 1 : Math.min(window.devicePixelRatio || 1, effMaxDpr);
       const cssW = Math.max(1, Math.round(rect.width));
       const cssH = Math.max(1, Math.round(rect.height));
-      const scale = software ? 0.34 : Math.min(1, Math.max(0.4, props.current.resolution));
-      const w = Math.max(2, Math.round(cssW * dpr));
-      const h = Math.max(2, Math.round(cssH * dpr));
+      const effResolution = Math.min(props.current.resolution, cfg.resolutionCap);
+      const scale = software ? 0.34 : Math.min(1, Math.max(0.4, effResolution));
+      let w = Math.max(2, Math.round(cssW * dpr));
+      let h = Math.max(2, Math.round(cssH * dpr));
+      // Cap the OUTPUT canvas's own backing size on mobile — independent of
+      // the scene's internal render resolution above. The composite pass
+      // still runs at the full backing size (it is cheap per pixel, but not
+      // free), and without this a large-viewport phone at dpr>1 could still
+      // hand it a multi-megapixel framebuffer even with maxDpr capped to 1.
+      // CSS size (canvas.style.width/height below) is never touched — only
+      // the internal buffer shrinks, and the browser upscales it to fill the
+      // same box, same as the scene/bloom targets already do.
+      const longEdge = Math.max(w, h);
+      if (longEdge > cfg.maxBackingLongEdge) {
+        const shrink = cfg.maxBackingLongEdge / longEdge;
+        w = Math.max(2, Math.round(w * shrink));
+        h = Math.max(2, Math.round(h * shrink));
+      }
       const sw = Math.max(2, Math.round(w * scale));
       const sh = Math.max(2, Math.round(h * scale));
       if (w === width && h === height && sw === sceneW && sh === sceneH) return;
@@ -833,8 +986,8 @@ export function BlackHoleHeroSection({
       scene = makeTarget(sw, sh);
       histA = makeTarget(sw, sh);
       histB = makeTarget(sw, sh);
-      const bw = Math.max(2, sw >> 2);
-      const bh = Math.max(2, sh >> 2);
+      const bw = Math.max(2, Math.round(sw / cfg.bloomDivisor));
+      const bh = Math.max(2, Math.round(sh / cfg.bloomDivisor));
       bloomA = makeTarget(bw, bh);
       bloomB = makeTarget(bw, bh);
     }
@@ -842,7 +995,7 @@ export function BlackHoleHeroSection({
     /* --- draw ------------------------------------------------------------- */
 
     /** Simulation clock, in seconds. Advances only while the thing is running. */
-    let clock = reduced ? 6 : 0;
+    let clock = freeze ? 6 : 0;
     let lastFrame = 0;
     let running = true;
     let visible = true;
@@ -919,7 +1072,7 @@ export function BlackHoleHeroSection({
       gl.uniform1f(u.uTanHalf, Math.tan(Math.max(8, Math.min(110, C.fov)) * 0.5 * RAD));
       // gl_FragCoord counts up from the bottom; the prop reads from the top.
       gl.uniform2f(u.uFocus, C.focus[0], 1 - C.focus[1]);
-      gl.uniform1f(u.uSteps, software ? 130 : Math.max(60, Math.min(460, Math.round(C.steps))));
+      gl.uniform1f(u.uSteps, software ? 130 : Math.max(60, Math.min(460, Math.round(Math.min(C.steps, cfg.stepsCap)))));
       gl.uniform1f(u.uSkyR, Math.max(dist * 1.35, outer * 2.4));
       gl.uniform1f(u.uDiskIn, Math.max(1.05, C.diskInner));
       gl.uniform1f(u.uDiskOut, outer);
@@ -932,7 +1085,7 @@ export function BlackHoleHeroSection({
       gl.uniform3f(u.uHot, hot[0], hot[1], hot[2]);
       gl.uniform3f(u.uMid, mid[0], mid[1], mid[2]);
       gl.uniform3f(u.uCool, cool[0], cool[1], cool[2]);
-      gl.uniform1f(u.uStars, Math.max(0, C.starBrightness));
+      gl.uniform1f(u.uStars, Math.max(0, C.starBrightness) * cfg.starScale);
       gl.uniform1f(u.uEncode, hdr ? 0 : 1);
       const h = HALTON[settled % HALTON.length];
       gl.uniform2f(u.uJitter, h[0] - 0.5, h[1] - 0.5);
@@ -989,7 +1142,7 @@ export function BlackHoleHeroSection({
       gl.uniform2f(compProg.u.uRes, width, height);
       gl.uniform1f(compProg.u.uDecode, hdr ? 0 : 1);
       gl.uniform1f(compProg.u.uPack, pack);
-      gl.uniform1f(compProg.u.uGlow, Math.max(0, C.glow) * 0.26);
+      gl.uniform1f(compProg.u.uGlow, Math.max(0, C.glow) * 0.26 * cfg.glowScale);
       gl.uniform1f(compProg.u.uExposure, Math.max(0.05, C.exposure));
       gl.uniform1f(compProg.u.uVignette, Math.max(0, Math.min(1, C.vignette)));
       gl.uniform1f(
@@ -1014,6 +1167,14 @@ export function BlackHoleHeroSection({
 
     /* --- loop ------------------------------------------------------------- */
 
+    // BALANCED's FPS cap (0 = uncapped, i.e. "full"/"static" never throttle
+    // here — static never reaches tick() at all once it has settled). RAF
+    // scheduling stays exactly as before; this only skips the expensive
+    // render/uniform work on callbacks that land too soon, so a capable
+    // phone's 90/120Hz display does not buy the shader more frames than the
+    // chosen tier asked for.
+    const minFrameMs = cfg.targetFps > 0 ? 1000 / cfg.targetFps : 0;
+
     function tick(now) {
       if (!running) return;
       raf = requestAnimationFrame(tick);
@@ -1021,9 +1182,11 @@ export function BlackHoleHeroSection({
         lastFrame = now;
         return;
       }
-      const dt = lastFrame ? Math.min(0.05, (now - lastFrame) / 1000) : 0;
+      const elapsed = lastFrame ? now - lastFrame : Infinity;
+      if (minFrameMs > 0 && elapsed < minFrameMs) return;
+      const dt = lastFrame ? Math.min(0.05, elapsed / 1000) : 0;
       lastFrame = now;
-      if (!props.current.paused && !reduced) clock += dt;
+      if (!props.current.paused && !freeze) clock += dt;
       render(clock);
     }
 
@@ -1032,14 +1195,18 @@ export function BlackHoleHeroSection({
       return;
     }
     resize();
-    settle(reduced ? 16 : 1);
-    if (!reduced) raf = requestAnimationFrame(tick);
+    settle(freeze ? cfg.settlePasses : 1);
+    if (!freeze) raf = requestAnimationFrame(tick);
 
     /* --- the world ------------------------------------------------------- */
 
     const ro = new ResizeObserver(() => {
       resize();
-      if (reduced || props.current.paused) settle(16);
+      // freeze (reduced-motion or the "static" tier) resettles at the mode's
+      // own pass count; an explicitly `paused`-but-otherwise-live hero keeps
+      // the original fixed 16 — unrelated to which performance tier this is.
+      if (freeze) settle(cfg.settlePasses);
+      else if (props.current.paused) settle(16);
     });
     ro.observe(host);
 
@@ -1074,8 +1241,8 @@ export function BlackHoleHeroSection({
       resize();
       running = true;
       lastFrame = 0;
-      settle(reduced ? 16 : 1);
-      if (!reduced) raf = requestAnimationFrame(tick);
+      settle(freeze ? cfg.settlePasses : 1);
+      if (!freeze) raf = requestAnimationFrame(tick);
     };
 
     document.addEventListener("visibilitychange", onVisibility);

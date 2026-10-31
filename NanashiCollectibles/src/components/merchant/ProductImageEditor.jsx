@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { useSocket } from "../../services/socket/SocketContext.js";
 import { uploadProductImage } from "../../features/merchant/merchantProductSocketService.js";
+import { resolveProductImageUrl } from "../../features/shop/productImage.js";
 
 const MAX_BYTES = 5 * 1024 * 1024;
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
@@ -77,7 +78,7 @@ export default function ProductImageEditor({ images, onChange }) {
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {images.map((img, index) => (
           <div key={img.url} className="group relative overflow-hidden rounded-lg border border-white/10 bg-ink-900">
-            <img src={img.url} alt="" className="aspect-square w-full object-cover" />
+            <img src={resolveProductImageUrl(img.url)} alt="" className="aspect-square w-full object-cover" />
             {img.isPrimary ? (
               <span className="absolute left-1.5 top-1.5 rounded-full bg-brand-500 px-2 py-0.5 text-[10px] font-semibold text-white">Primary</span>
             ) : null}

@@ -5,12 +5,14 @@ import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
 import fs from "fs";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 import { Server } from "socket.io";
 import multer from "multer";
 import { initDB, dbPing } from "./modules/db.module.js";
 import { verifyMailer } from "./modules/mailer.module.js";
 import { verifyToken } from "./modules/jwt.module.js";
+import { validateEncryptionKey } from "./modules/encryption.module.js";
+import { getWhatsAppProviderId } from "./services/notifications/whatsapp/WhatsAppService.js";
 
 // routes (optional)
 import createHealthRoutes from "./routes/api/health.routes.js";
@@ -21,10 +23,14 @@ import createMerchantRoutes from "./routes/api/merchant.routes.js";
 import createCartRoutes from "./routes/api/cart.routes.js";
 import createCheckoutRoutes from "./routes/api/checkout.routes.js";
 import createOrdersRoutes from "./routes/api/orders.routes.js";
+import createAddressesRoutes from "./routes/api/addresses.routes.js";
 import createWishlistRoutes from "./routes/api/wishlist.routes.js";
 import createReviewsRoutes from "./routes/api/reviews.routes.js";
 import createShippingRoutes from "./routes/api/shipping.routes.js";
 import createAdminRoutes from "./routes/api/admin.routes.js";
+import createTicketingRoutes from "./routes/api/ticketing.routes.js";
+import { expireStaleHolds } from "./services/ticketing/ticketHoldService.js";
+import { requireAuth } from "./modules/restAuth.module.js";
 
 // sockets
 import accountSocketController from "./controllers/account.controller.js";
@@ -68,6 +74,11 @@ fs.mkdirSync(productUploadsDir, { recursive: true });
 // Store avatar images in: Backend/public/uploads/avatars
 const avatarUploadsDir = path.join(publicPath, "uploads", "avatars");
 fs.mkdirSync(avatarUploadsDir, { recursive: true });
+
+// Store delivery reference photos in: Backend/public/uploads/delivery-references
+// (customer checkout — "where to leave it", never a product photo)
+const deliveryReferenceUploadsDir = path.join(publicPath, "uploads", "delivery-references");
+fs.mkdirSync(deliveryReferenceUploadsDir, { recursive: true });
 
 /* ------------------------------ Multer config ------------------------------ */
 const storage = multer.diskStorage({
@@ -119,6 +130,27 @@ const avatarUpload = multer({
   limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
 });
 
+// Delivery reference photo uploader (same fileFilter — JPG/PNG/WebP/GIF by
+// MIME-or-extension, never trusting either alone — separate destination).
+// GIF is accepted by the shared fileFilter but not advertised to the
+// customer-facing picker (image/jpeg, image/png, image/webp only per the
+// product spec) — the filter is reused as-is rather than forked, so this is
+// slightly more permissive than the UI's own <input accept> hints, exactly
+// like the existing product/avatar uploaders already are.
+const deliveryReferenceStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, deliveryReferenceUploadsDir),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname || "").toLowerCase() || ".png";
+    const safe = Date.now() + "-" + Math.random().toString(16).slice(2);
+    cb(null, safe + ext);
+  },
+});
+const deliveryReferenceUpload = multer({
+  storage: deliveryReferenceStorage,
+  fileFilter,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+});
+
 /* ------------------------------ App / Server ------------------------------ */
 const app = express();
 app.set("trust proxy", 1);
@@ -140,14 +172,39 @@ const DEFAULT_ORIGINS = [
   "http://localhost:5175",
   "https://nanashicollectibles.com",
   "https://www.nanashicollectibles.com",
+  // Dev/staging frontend — same backend/DB as production, no separate dev API exists.
+  "https://dev.nanashicollectibles.com",
 ];
 
 const allowlist = Array.from(new Set([...DEFAULT_ORIGINS, ...EXTRA_ORIGINS]));
 
+// Microsoft Dev Tunnel hostnames (e.g. https://82nd8339-5173.asse.devtunnels.ms) are
+// per-session and can never live in a static allowlist. This backend has no separate
+// "dev" deployment to gate a broader rule behind — dev.nanashicollectibles.com, this
+// tunnel, and production all hit this same process — so instead of a NODE_ENV check
+// (which would be true here regardless), the pattern itself is the scope: it can only
+// ever match Microsoft's own devtunnels.ms infrastructure forwarding an individual
+// developer's local dev server, never a spoofable production-looking domain. Never
+// widen this to match arbitrary hosts.
+const DEV_TUNNEL_ORIGIN_PATTERN = /^https:\/\/[a-z0-9.-]+\.devtunnels\.ms$/i;
+
+function isAllowedOrigin(origin) {
+  if (allowlist.includes(origin)) return true;
+  if (DEV_TUNNEL_ORIGIN_PATTERN.test(origin)) {
+    console.warn(`[cors] allowing Dev Tunnel origin: ${origin}`);
+    return true;
+  }
+  return false;
+}
+
 /* ------------------------------ Socket.IO ------------------------------ */
 const io = new Server(httpServer, {
   cors: {
-    origin: allowlist,
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true);
+      if (isAllowedOrigin(origin)) return cb(null, true);
+      return cb(new Error(`Not allowed by CORS (socket.io): ${origin}`));
+    },
     methods: ["GET", "POST"],
     credentials: true,
   },
@@ -209,12 +266,13 @@ app.use(express.urlencoded({ extended: true, limit: "5mb" }));
 const corsOptions = {
   origin: (origin, cb) => {
     if (!origin) return cb(null, true); // allow curl/postman or same-origin
-    if (allowlist.includes(origin)) return cb(null, true);
+    if (isAllowedOrigin(origin)) return cb(null, true);
     return cb(new Error(`CORS blocked: ${origin}`));
   },
   credentials: true,
   methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  // X-CSRF-Token: required by the wedding admin API (/api/wedding/admin/*).
+  allowedHeaders: ["Content-Type", "Authorization", "x-guest-cart-token", "Idempotency-Key", "X-CSRF-Token"],
 };
 
 app.use(cors(corsOptions));
@@ -256,6 +314,36 @@ const db = initDB();
 // Verify SMTP transporter (non-fatal)
 verifyMailer().catch(() => {});
 
+// Marketplace data encryption (merchant bank details / payment-account
+// credentials — see modules/encryption.module.js). Never logs the key
+// itself, only whether it is configured and valid. Mirrors jwt.module.js's
+// existing production-vs-dev posture: a missing/malformed security secret
+// fails startup in production (so it's caught at deploy time, not the
+// first time a merchant tries to save bank details) but only warns in
+// development, where working on unrelated features shouldn't require it.
+{
+  const encryptionCheck = validateEncryptionKey();
+  if (encryptionCheck.valid) {
+    console.log("[security] Marketplace data encryption: configured");
+  } else {
+    console.warn(`[security] Marketplace data encryption: NOT configured (${encryptionCheck.error})`);
+    if (process.env.NODE_ENV === "production") {
+      console.error(
+        "[security] Refusing to start in production without a valid MARKETPLACE_DATA_ENCRYPTION_KEY. " +
+          "Set it (see Backend/env.example) and restart."
+      );
+      process.exit(1);
+    }
+  }
+}
+
+// WhatsApp merchant notifications (see services/notifications/) — never a
+// startup-fatal concern (unlike the encryption key above): the default
+// "mock" provider is always safe, and a misconfigured "cloud" provider
+// only ever means notifications fail individually per order, never that
+// checkout itself fails. Informational only.
+console.log(`[whatsapp] provider: ${getWhatsAppProviderId()}`);
+
 app.get("/api/db-test", async (_req, res) => {
   try {
     const [rows] = await db.query("SELECT NOW() AS now");
@@ -294,6 +382,18 @@ app.post("/api/upload/avatar", avatarUpload.single("image"), (req, res) => {
   return res.json({ success: true, imageUrl });
 });
 
+// Requires auth (unlike the two uploaders above) — this attaches to a
+// specific customer's own order at checkout, not a merchant's public
+// product listing or a user's own public-ish avatar.
+app.post("/api/upload/delivery-reference", requireAuth, deliveryReferenceUpload.single("image"), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ success: false, message: "No file uploaded" });
+  }
+  const imageUrl = `/public/uploads/delivery-references/${req.file.filename}`;
+  console.log("[upload][delivery-reference] ✅", imageUrl);
+  return res.json({ success: true, imageUrl, fileType: req.file.mimetype });
+});
+
 /* ------------------------------ Routes ------------------------------ */
 app.use(
   "/api",
@@ -307,15 +407,36 @@ app.use("/api/auth", createAuthRoutes({ db, io }));
 app.use("/api/client-portfolio", createClientPortfolioRoutes());
 app.use("/api/payments", createPaymentRoutes()); // legacy direct-CyberSource endpoint — superseded by /api/checkout + PaymentService, see Backend/services/payment/
 
-// Marketplace (see Database/Marketplace_Migration.sql + NanashiCollectibles/CLAUDE.md)
+// Marketplace (see Database/README.md + Database/schema/004_merchants.sql through 008_platform_ops.sql + NanashiCollectibles/CLAUDE.md)
 app.use("/api/merchant", createMerchantRoutes({ db }));
 app.use("/api/cart", createCartRoutes({ db }));
 app.use("/api/checkout", createCheckoutRoutes({ db }));
 app.use("/api/orders", createOrdersRoutes({ db }));
+app.use("/api/addresses", createAddressesRoutes({ db }));
 app.use("/api/wishlist", createWishlistRoutes({ db }));
 app.use("/api/reviews", createReviewsRoutes({ db }));
 app.use("/api/shipping", createShippingRoutes({ db }));
 app.use("/api/admin", createAdminRoutes({ db }));
+
+// Ticketing (see Database/schema/009_ticketing.sql + Database/README.md "Ticketing")
+app.use("/api/ticketing", createTicketingRoutes({ db, io }));
+
+// Wedding website API (Wedding/server, see Wedding/README.md) → /api/wedding/*
+// Self-contained: its own config (Wedding/server/.env), MySQL pool, cookies,
+// uploads and error handling. Loading is guarded so a problem there can never
+// stop the marketplace backend. Disable with WEDDING_MODULE=off.
+if (process.env.WEDDING_MODULE !== "off") {
+  try {
+    const weddingModulePath = process.env.WEDDING_MODULE_PATH
+      ? path.resolve(process.env.WEDDING_MODULE_PATH)
+      : fileURLToPath(new URL("../Wedding/server/src/embed.js", import.meta.url));
+    const { createWeddingModule } = await import(pathToFileURL(weddingModulePath).href);
+    const wedding = await createWeddingModule();
+    app.use(wedding.prefix, wedding.router);
+  } catch (error) {
+    console.error("[wedding] module not loaded — /api/wedding disabled:", error.message);
+  }
+}
 
 /* ------------------------------ Socket Wiring ------------------------------ */
 io.on("connection", (socket) => {
@@ -384,6 +505,23 @@ async function start() {
       console.log("🖼️  Product uploads:", productUploadsDir);
       console.log("=".repeat(60) + "\n");
     });
+
+    // Best-effort periodic sweep for TICKET_HOLD_SESSIONS past EXPIRES_AT —
+    // the DB is authoritative for expiry, this just converts stale rows to
+    // EXPIRED and releases their seats/GA counters promptly. A missed tick
+    // (e.g. restart) never corrupts inventory: the next tick, or any read
+    // path, still sees an ACTIVE-but-expired session as unavailable to hold
+    // again until it's actually released. See services/ticketing/ticketHoldService.js.
+    setInterval(async () => {
+      try {
+        const result = await expireStaleHolds(db, io, { batchSize: 50 });
+        if (result.expiredCount > 0) {
+          console.log(`[ticketing] expiry sweep: released ${result.expiredCount}/${result.checked} stale hold session(s)`);
+        }
+      } catch (err) {
+        console.error("[ticketing] expiry sweep failed:", err.message);
+      }
+    }, 30_000);
   } catch (e) {
     console.error("Failed to start server:", e);
     process.exit(1);

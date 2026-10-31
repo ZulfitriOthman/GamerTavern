@@ -12,10 +12,11 @@ import { useToast } from "../../components/ui/ToastContext.js";
 import { useMerchantProduct } from "../../features/merchant/useMerchantProduct.js";
 import { archiveProduct } from "../../features/merchant/merchantProductSocketService.js";
 import { formatMoney, formatDateTime } from "../../features/merchant/format.js";
+import { resolveProductImageUrl } from "../../features/shop/productImage.js";
 
 export default function MerchantProductDetailPage() {
   const { id } = useParams();
-  const { status, product, error } = useMerchantProduct(id);
+  const { status, product, error, refresh } = useMerchantProduct(id);
   const { socket } = useSocket();
   const { push } = useToast();
   const navigate = useNavigate();
@@ -47,7 +48,17 @@ export default function MerchantProductDetailPage() {
     return <EmptyState title="Product not found" description="It may have been deleted, or you don't have access to it." />;
   }
   if (status === "error") {
-    return <EmptyState title="Couldn't load this product" description={error} />;
+    return (
+      <EmptyState
+        title="Couldn't load this product"
+        description={error}
+        action={
+          <Button variant="secondary" size="sm" onClick={refresh}>
+            Try again
+          </Button>
+        }
+      />
+    );
   }
 
   const primaryImage = product.images?.find((img) => img.is_primary) || product.images?.[0];
@@ -72,7 +83,7 @@ export default function MerchantProductDetailPage() {
         <div className="flex flex-col gap-6 sm:flex-row">
           <div className="aspect-square w-full shrink-0 overflow-hidden rounded-lg border border-white/10 bg-ink-900 sm:w-40">
             {primaryImage ? (
-              <img src={primaryImage.image_url} alt="" className="h-full w-full object-cover" />
+              <img src={resolveProductImageUrl(primaryImage.image_url)} alt="" className="h-full w-full object-cover" />
             ) : (
               <div className="flex h-full items-center justify-center text-xs text-amber-50/30">No image</div>
             )}

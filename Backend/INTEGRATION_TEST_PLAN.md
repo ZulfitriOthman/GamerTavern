@@ -5,11 +5,13 @@ No safe development MySQL database was available in this session (per `NanashiCo
 ## 0. Setup
 
 1. Confirm the target MySQL instance is a disposable dev/test database — **do not run this against `.env.dev` if it points anywhere you're not certain is a throwaway.**
-2. Run in order:
-   - `Database/NanashiCollectibles_v2.sql`
-   - `Database/Marketplace_Migration.sql`
-   - `Database/Marketplace_Migration_2_Hardening.sql`
-   - Optionally `Database/NanashiCollectibles_v2_seed.sql` then `Database/Marketplace_Migration_seed.sql` (replace the placeholder password hashes with real bcrypt hashes first, or just register through the API instead of running the seed's user inserts).
+2. Run in order (paths updated 2026-09-14 — the old `NanashiCollectibles_v2.sql` /
+   `Marketplace_Migration*.sql` files no longer exist; their content was merged
+   into `Database/schema/` and `Database/All.sql` during the database cleanup —
+   see `Database/README.md`):
+   - `Database/All.sql` (fresh-install script — creates all 49 current tables; equivalent to running `Database/schema/001_core_auth.sql` through `008_platform_ops.sql` in order, which is already the state a fresh-install `All.sql` produces, so no separate hardening migration step is needed for a NEW database)
+   - Optionally `Database/seeds/reference.sql` then `Database/seeds/development.sql` (replace the placeholder password hashes with real bcrypt hashes first, or just register through the API instead of running the seed's user inserts)
+   - For an EXISTING database instead of a fresh one, run `Database/migrations/0001_add_checkout_idempotency_and_bank_encryption.sql` instead of `All.sql`
 3. Set `Backend/.env.dev` (or an isolated `DOTENV_FILE`): `MYSQL_*`, `JWT_SECRET`, `PAYMENT_PROVIDER=mock`, `MARKETPLACE_DATA_ENCRYPTION_KEY` (generate via the command in `env.example`).
 4. `cd Backend && npm install && npm run dev` — confirm `[DB] connected: YES` in the startup log.
 

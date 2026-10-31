@@ -1,0 +1,22 @@
+# SPA fallback for BrowserRouter (React Router) on LiteSpeed/Apache.
+#
+# This site is deployed at the root of its own subdomain
+# (portfolio-recce.nanashicollectibles.com), so RewriteBase is "/", not a
+# subdirectory. If that ever changes, RewriteBase must match the real
+# deploy path.
+#
+# Vite copies everything in public/ verbatim into dist/ on build, so this
+# file ships as dist/.htaccess automatically — do not move it into dist/
+# by hand, edit this copy instead.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # Let real files/directories (index.html, /assets/*, favicon, etc.) serve normally.
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+
+  # Everything else is an application route — hand it to index.html so
+  # React Router can resolve it client-side.
+  RewriteRule ^ index.html [L]
+</IfModule>

@@ -1,9 +1,9 @@
 import Section from "../../components/layout/Section.jsx";
 import SectionHeading from "../../components/ui/SectionHeading.jsx";
-import Card from "../../components/ui/Card.jsx";
 import Button from "../../components/ui/Button.jsx";
 import { SkeletonCard } from "../../components/ui/Skeleton.jsx";
 import EmptyState from "../../components/ui/EmptyState.jsx";
+import ErrorState from "../../components/ui/ErrorState.jsx";
 import TournamentCard from "../../features/tournament/TournamentCard.jsx";
 import { useTournaments } from "../../features/tournament/useTournaments.js";
 
@@ -30,14 +30,16 @@ export default function TournamentListPage() {
 
       <div className="mt-10">
         {isConnectionFailure ? (
-          <Card className="flex flex-col items-start gap-3">
-            <p className="text-sm text-amber-50/70">
-              Couldn't connect to the tournament server. Check your connection and try again.
-            </p>
-            <Button variant="secondary" onClick={() => window.location.reload()}>
-              Retry
-            </Button>
-          </Card>
+          <ErrorState
+            icon="sparkle"
+            title="Couldn't load tournaments"
+            description="Couldn't connect to the tournament server. Check your connection and try again."
+            action={
+              <Button variant="secondary" onClick={() => window.location.reload()}>
+                Retry
+              </Button>
+            }
+          />
         ) : isConnecting ? (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <SkeletonCard />
@@ -45,12 +47,16 @@ export default function TournamentListPage() {
             <SkeletonCard className="hidden lg:block" />
           </div>
         ) : status === "error" ? (
-          <Card className="flex flex-col items-start gap-3">
-            <p className="text-sm text-amber-50/70">{error}</p>
-            <Button variant="secondary" onClick={refresh}>
-              Try again
-            </Button>
-          </Card>
+          <ErrorState
+            icon="sparkle"
+            title="Couldn't load tournaments"
+            description={error}
+            action={
+              <Button variant="secondary" onClick={refresh}>
+                Try again
+              </Button>
+            }
+          />
         ) : tournaments.length === 0 ? (
           <EmptyState
             title="No tournaments are open right now"

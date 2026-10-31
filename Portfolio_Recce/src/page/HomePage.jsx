@@ -1,26 +1,49 @@
+import { useRef } from "react";
 import { Link } from "react-router-dom";
-import { heroReel } from "./pageData";
+import aboutImage from "../../assets/images/about-me.jpg";
+
+const stats = [
+  ["2", "Aircraft in the Fleet"],
+  ["12+", "Locations Flown Across Brunei"],
+  ["5.4K", "Max Capture Resolution"],
+];
 
 function HomePage() {
+  const heroRef = useRef(null);
+  const reducedMotion =
+    typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  const handlePointerMove = (event) => {
+    if (reducedMotion || !heroRef.current) return;
+    const rect = heroRef.current.getBoundingClientRect();
+    const x = ((event.clientX - rect.left) / rect.width) * 100;
+    const y = ((event.clientY - rect.top) / rect.height) * 100;
+    heroRef.current.style.setProperty("--spot-x", `${x}%`);
+    heroRef.current.style.setProperty("--spot-y", `${y}%`);
+  };
+
   return (
     <>
-      <section className="relative min-h-[92vh] overflow-hidden px-4 pb-12 pt-32 md:px-10">
-        <video
-          className="absolute inset-0 h-full w-full object-cover"
-          autoPlay
-          muted
-          loop
-          playsInline
-        >
-          <source src={heroReel} type="video/mp4" />
-        </video>
-        <div className="absolute inset-0 bg-[linear-gradient(130deg,rgba(10,15,22,0.65)_0%,rgba(10,15,22,0.15)_50%,rgba(10,15,22,0.60)_100%),linear-gradient(180deg,rgba(10,15,22,0)_0%,rgba(10,15,22,0.55)_100%)]" />
+      <section
+        ref={heroRef}
+        onMouseMove={handlePointerMove}
+        className="relative min-h-[92vh] overflow-hidden px-4 pb-12 pt-32 md:px-10"
+      >
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 bg-[radial-gradient(circle_at_18%_8%,rgba(39,210,255,0.28),transparent_42%),radial-gradient(circle_at_85%_75%,rgba(255,143,63,0.2),transparent_45%),linear-gradient(180deg,#0a0f15_0%,#0c131b_45%,#0d141d_100%)]"
+        />
+        <div aria-hidden="true" className="hero-spotlight absolute inset-0" />
+        <div
+          aria-hidden="true"
+          className="hero-grid absolute inset-0 opacity-[0.15]"
+        />
 
         <div className="relative z-10 reveal">
           <p className="mb-1 text-xs font-semibold uppercase tracking-[0.12em] text-skyaccent md:text-sm">
-            Licensed Drone Operator
+            Drone Pilot, Brunei
           </p>
-          <h1 className="max-w-[13ch] font-display text-5xl leading-[0.95] tracking-wide md:text-8xl">
+          <h1 className="reveal-blur max-w-[13ch] font-display text-5xl leading-[0.95] tracking-wide md:text-8xl">
             Aerial Storytelling with Precision and Edge.
           </h1>
           <p className="mt-4 max-w-2xl text-sm text-slate-300 md:text-base">
@@ -30,13 +53,13 @@ function HomePage() {
           <div className="mt-6 flex flex-wrap gap-3">
             <Link
               to="/contact"
-              className="rounded-full bg-gradient-to-r from-skyaccent to-cyan-200 px-5 py-3 font-semibold text-slate-950"
+              className="rounded-full bg-gradient-to-r from-skyaccent to-cyan-200 px-5 py-3 font-semibold text-slate-950 transition hover:brightness-110"
             >
               Move to contact
             </Link>
             <Link
               to="/work"
-              className="rounded-full border border-white/25 bg-white/10 px-5 py-3 font-semibold text-white"
+              className="rounded-full border border-white/25 bg-white/10 px-5 py-3 font-semibold text-white transition hover:border-white/50 hover:bg-white/15"
             >
               Watch Highlights
             </Link>
@@ -44,11 +67,7 @@ function HomePage() {
         </div>
 
         <div className="relative z-10 mt-12 grid gap-4 md:mt-24 md:grid-cols-3 reveal">
-          {[
-            ["250+ Hrs", "Flight Time Logged"],
-            ["4K/5.1K", "Capture Quality"],
-            ["100%", "Safety First Workflow"],
-          ].map(([value, label]) => (
+          {stats.map(([value, label]) => (
             <article
               key={label}
               className="rounded-2xl border border-white/20 bg-slate-900/65 p-4 shadow-panel"
@@ -63,7 +82,7 @@ function HomePage() {
       <section className="px-4 pt-14 md:px-10 md:pt-20">
         <div className="reveal relative mx-auto max-w-5xl overflow-hidden rounded-3xl border border-white/15 shadow-panel">
           <img
-            src="/assets/images/about-me.jpg"
+            src={aboutImage}
             alt=""
             aria-hidden="true"
             className="absolute inset-0 h-full w-full object-cover opacity-70"
@@ -80,7 +99,7 @@ function HomePage() {
                   I am drawn to challenges, and flying gave that drive a direction.
                 </h2>
               </div>
-              <div className="space-y-4 text-justify text-slate-300">
+              <div className="space-y-4 text-slate-300">
                 <p>
                   Aviation was always part of my dream, even though it was not a path I could fully pursue. When I first
                   discovered drones, I saw them as a hobby, something exciting that let me experience a small part of that

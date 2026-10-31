@@ -1,0 +1,11 @@
+# Apache / cPanel: send client-side routes (/rsvp/<token>, /admin, …) to the app.
+RewriteEngine On
+
+# Never answer API requests with index.html. If /api/* reaches this static host,
+# the API is not routed here — return a real 404 so the app reports it clearly
+# instead of receiving an HTML page with status 200.
+RewriteRule ^api(/|$) - [R=404,L]
+
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ index.html [L]

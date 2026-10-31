@@ -5,21 +5,42 @@ export const site = {
     "A multi-purpose platform for trading card games, collectibles and hobby products, drone and software development services, and RVS esports tournaments.",
 };
 
+// Header.jsx's primary customer-facing navigation — kept to top-level
+// destinations rather than one item per page, per the navbar redesign
+// (2026-09-16). TCG and RVS Esports moved from two permanent top-level items
+// into one "Explore" category; Services already had children, just gained
+// short descriptions to match. "Portfolio" (added 2026-09-27) is the site
+// owner's personal portfolio, a plain link with no children like "Shop"/
+// "About". `to` on a dropdown parent is used only for active-route matching
+// (see Header.jsx isParentActive) — "Explore" has no landing page of its
+// own, so its trigger is a toggle button, not a link; "Services" does have
+// one (/services) so its own route still counts toward its active state.
 export const primaryNav = [
   { label: "Shop", to: "/shop" },
+  {
+    label: "Explore",
+    children: [
+      { label: "TCG", to: "/tcg", description: "Trading cards, games and community" },
+      { label: "RVS Esports", to: "/esports", description: "Tournaments and competitive gaming" },
+    ],
+  },
   {
     label: "Services",
     to: "/services",
     children: [
-      { label: "Drone Services", to: "/services/drone" },
-      { label: "Website Development", to: "/services/web-development" },
-      { label: "Application Development", to: "/services/application-development" },
+      { label: "Drone Services", to: "/services/drone", description: "Aerial and FPV work" },
+      { label: "Website Development", to: "/services/web-development", description: "Business and product websites" },
+      { label: "Application Development", to: "/services/application-development", description: "Custom digital systems" },
+      { label: "Ticketing Service", to: "/services/ticketing", description: "Event ticketing, seating, registration, and booking" },
     ],
   },
-  { label: "TCG", to: "/tcg" },
-  { label: "RVS Esports", to: "/esports" },
+  { label: "Portfolio", to: "/portfolio" },
   { label: "About", to: "/about" },
 ];
+
+// Secondary/utility navigation — visually separate from primaryNav (right-
+// side utility zone in Header.jsx), never mixed into the primary cluster.
+export const utilityNav = [{ label: "Merchant Portal", to: "/merchant" }];
 
 export const footerNav = [
   {
@@ -36,6 +57,7 @@ export const footerNav = [
       { label: "Drone Services", to: "/services/drone" },
       { label: "Website Development", to: "/services/web-development" },
       { label: "Application Development", to: "/services/application-development" },
+      { label: "Ticketing Service", to: "/services/ticketing" },
     ],
   },
   {
@@ -49,6 +71,7 @@ export const footerNav = [
     heading: "Company",
     links: [
       { label: "About", to: "/about" },
+      { label: "Portfolio", to: "/portfolio" },
       { label: "Contact", to: "/contact" },
     ],
   },
@@ -147,6 +170,42 @@ export const services = [
       "Management systems",
       "Registration systems",
       "Dashboards",
+    ],
+  },
+  {
+    key: "ticketing",
+    name: "Ticketing Service",
+    to: "/services/ticketing",
+    summary: "Registration, ticket sales, seating, and capacity management for real events.",
+    // No SERVICES table row exists for this yet (unlike drone/web-dev/app-dev),
+    // so ServiceDetailPage skips the direct QuotationForm (which requires a
+    // real backend service id to attach an enquiry to) and shows a /contact
+    // CTA instead — see ServiceDetailPage.jsx.
+    quotable: false,
+    // Honest status labels: the ticketing backend (Database/schema/009_ticketing.sql,
+    // Backend/services/ticketing/, Backend/routes/api/ticketing.routes.js) has real
+    // inventory/hold-session logic, but no customer-facing purchase flow exists yet
+    // (no /events pages) and no payment/order/check-in wiring — unlabeled items are
+    // the ones with genuine backend support today; the rest are explicitly planned.
+    examples: [
+      "Reserved seating & general admission",
+      "Ticket categories & pricing tiers",
+      "Live capacity & availability tracking",
+      "Booking holds during checkout",
+      "Online ticket sales (in development)",
+      "Interactive seat selection (planned)",
+      "Payment integration (planned)",
+      "QR / digital tickets & event check-in (planned)",
+    ],
+    audience: [
+      "Concerts",
+      "Conventions",
+      "Esports tournaments",
+      "Exhibitions",
+      "Workshops",
+      "Private events",
+      "Community events",
+      "Seated performances",
     ],
   },
 ];

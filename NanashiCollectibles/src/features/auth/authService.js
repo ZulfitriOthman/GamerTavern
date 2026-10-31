@@ -60,3 +60,21 @@ export function me(token) {
     headers: { Authorization: `Bearer ${token}` },
   });
 }
+
+// POST /api/auth/forgot-password — body: { email } — returns { ok, message }.
+// Response is intentionally the same whether or not the email is registered —
+// don't branch UI behavior on it beyond showing the message.
+export function forgotPassword({ email }) {
+  return request("/api/auth/forgot-password", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+// POST /api/auth/reset-password — body: { token, password, confirmPassword } — returns { ok, message }
+export function resetPassword({ token, password, confirmPassword }) {
+  return request("/api/auth/reset-password", {
+    method: "POST",
+    body: JSON.stringify({ token, password, confirmPassword }),
+  });
+}

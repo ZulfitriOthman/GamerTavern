@@ -1,10 +1,13 @@
 // Backend/modules/encryption.module.js
 //
-// Application-level authenticated encryption (AES-256-GCM) for the one
-// field in the schema that genuinely needs it right now:
-// merchant_bank_details.account_number. Never used for anything else
-// without a deliberate decision — this is not a general-purpose "encrypt
-// everything" helper.
+// Application-level authenticated encryption (AES-256-GCM) for sensitive
+// fields the schema stores at rest. Originally written for
+// merchant_bank_details.account_number; reused as-is (same helper, same
+// key) for merchant_payment_accounts' encrypted credential payload
+// (Merchant Payments Stage 1 — see Database/schema/010_merchant_payments.sql).
+// Still not a general-purpose "encrypt everything" helper — extend its use
+// only for fields that genuinely need authenticated encryption at rest,
+// as a deliberate decision.
 //
 // MARKETPLACE_DATA_ENCRYPTION_KEY must be a 64-character hex string
 // (32 bytes). Generate one with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
@@ -49,4 +52,19 @@ export function maskLast4(value) {
 
 export function isEncryptionConfigured() {
   return Boolean(process.env.MARKETPLACE_DATA_ENCRYPTION_KEY);
+}
+
+// Full validation (presence + correct decoded length) without throwing —
+// for startup diagnostics (see server.js). Never returns or logs the key
+// itself; `error` is always one of getKey()'s static messages above.
+export function validateEncryptionKey() {
+  if (!process.env.MARKETPLACE_DATA_ENCRYPTION_KEY) {
+    return { configured: false, valid: false, error: "MARKETPLACE_DATA_ENCRYPTION_KEY is not set." };
+  }
+  try {
+    getKey();
+    return { configured: true, valid: true, error: null };
+  } catch (err) {
+    return { configured: true, valid: false, error: err.message };
+  }
 }

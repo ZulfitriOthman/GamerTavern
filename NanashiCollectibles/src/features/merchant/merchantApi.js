@@ -108,6 +108,11 @@ export function updateOrderStatus(token, id, { status, trackingNumber, carrier }
   });
 }
 
+// POST /api/merchant/orders/:id/payment/confirm — "Confirm Bank Transfer Received".
+export function confirmOrderPayment(token, id, { merchantId } = {}) {
+  return request(`/api/merchant/orders/${id}/payment/confirm`, { method: "POST", token, query: { merchantId } });
+}
+
 // ---- Staff ----
 export function getStaff(token, { merchantId } = {}) {
   return request("/api/merchant/staff", { token, query: { merchantId } });
@@ -133,4 +138,54 @@ export function updateSettings(token, fields, { merchantId } = {}) {
 
 export function saveBankDetails(token, fields, { merchantId } = {}) {
   return request("/api/merchant/settings/bank-details", { method: "POST", token, body: fields, query: { merchantId } });
+}
+
+export function updateBankDetails(token, id, fields, { merchantId } = {}) {
+  return request(`/api/merchant/settings/bank-details/${id}`, { method: "PATCH", token, body: fields, query: { merchantId } });
+}
+
+export function deleteBankDetails(token, id, { merchantId } = {}) {
+  return request(`/api/merchant/settings/bank-details/${id}`, { method: "DELETE", token, query: { merchantId } });
+}
+
+export function setDefaultBankDetails(token, id, { merchantId } = {}) {
+  return request(`/api/merchant/settings/bank-details/${id}/default`, { method: "POST", token, query: { merchantId } });
+}
+
+// ---- Payment methods ----
+export function getPaymentMethods(token, { merchantId } = {}) {
+  return request("/api/merchant/settings/payment-methods", { token, query: { merchantId } });
+}
+
+export function updatePaymentMethods(token, fields, { merchantId } = {}) {
+  return request("/api/merchant/settings/payment-methods", { method: "PATCH", token, body: fields, query: { merchantId } });
+}
+
+// ---- Fulfilment methods (Delivery / Pickup) ----
+export function getFulfilmentMethods(token, { merchantId } = {}) {
+  return request("/api/merchant/settings/fulfilment-methods", { token, query: { merchantId } });
+}
+
+export function updateFulfilmentMethods(token, fields, { merchantId } = {}) {
+  return request("/api/merchant/settings/fulfilment-methods", { method: "PATCH", token, body: fields, query: { merchantId } });
+}
+
+// ---- Payment accounts (online payment gateway configuration — see
+// CLAUDE.md §62 "Merchant Payments": configuration only, not proof that
+// online routing works for this merchant) ----
+export function getPaymentAccounts(token, { merchantId } = {}) {
+  return request("/api/merchant/settings/payment-accounts", { token, query: { merchantId } });
+}
+
+export function savePaymentAccount(token, fields, { merchantId } = {}) {
+  return request("/api/merchant/settings/payment-accounts", { method: "POST", token, body: fields, query: { merchantId } });
+}
+
+// ---- Notifications (WhatsApp order notifications) ----
+export function getNotificationSettings(token, { merchantId } = {}) {
+  return request("/api/merchant/settings/notifications", { token, query: { merchantId } });
+}
+
+export function updateNotificationSettings(token, fields, { merchantId } = {}) {
+  return request("/api/merchant/settings/notifications", { method: "PATCH", token, body: fields, query: { merchantId } });
 }

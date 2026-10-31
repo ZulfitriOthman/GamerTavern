@@ -36,7 +36,18 @@ export default function MerchantSettingsProfilePage() {
     }
   }, [data]);
 
-  if (status === "error") return <EmptyState title="Couldn't load settings" description={error} />;
+  if (status === "error")
+    return (
+      <EmptyState
+        title="Couldn't load settings"
+        description={error}
+        action={
+          <Button variant="secondary" size="sm" onClick={refresh}>
+            Try again
+          </Button>
+        }
+      />
+    );
   if (status === "loading" || !form) return <SkeletonText lines={5} />;
 
   const { merchant, addresses } = data.data;

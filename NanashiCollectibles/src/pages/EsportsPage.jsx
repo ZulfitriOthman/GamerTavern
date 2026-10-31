@@ -4,6 +4,7 @@ import Card from "../components/ui/Card.jsx";
 import Button from "../components/ui/Button.jsx";
 import { SkeletonCard } from "../components/ui/Skeleton.jsx";
 import EmptyState from "../components/ui/EmptyState.jsx";
+import ErrorState from "../components/ui/ErrorState.jsx";
 import TournamentCard from "../features/tournament/TournamentCard.jsx";
 import { useTournaments } from "../features/tournament/useTournaments.js";
 
@@ -31,14 +32,16 @@ function TournamentsGrid() {
 
   if (hasError) {
     return (
-      <Card className="flex flex-col items-start gap-3">
-        <p className="text-sm text-amber-50/70">
-          {socketStatus === "error" ? "Couldn't connect to the tournament server." : error}
-        </p>
-        <Button variant="secondary" onClick={socketStatus === "error" ? () => window.location.reload() : refresh}>
-          Try again
-        </Button>
-      </Card>
+      <ErrorState
+        icon="sparkle"
+        title="Couldn't load tournaments"
+        description={socketStatus === "error" ? "Couldn't connect to the tournament server." : error}
+        action={
+          <Button variant="secondary" onClick={socketStatus === "error" ? () => window.location.reload() : refresh}>
+            Try again
+          </Button>
+        }
+      />
     );
   }
 

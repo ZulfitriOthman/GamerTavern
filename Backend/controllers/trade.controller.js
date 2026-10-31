@@ -29,8 +29,8 @@ function safeRow(row) {
 const SELECT_LISTING_SQL = `
   SELECT l.id, l.user_id, l.product_id, l.title, l.tcg_game_id, g.name AS tcg_game_name,
          l.condition_label, l.listing_type, l.want_text, l.notes, l.status, l.created_at
-  FROM trade_listings l
-  LEFT JOIN tcg_games g ON g.id = l.tcg_game_id
+  FROM TRADE_LISTINGS l
+  LEFT JOIN TCG_GAMES g ON g.id = l.tcg_game_id
 `;
 
 export default function tradeSocketController({ socket, io, db }) {
@@ -62,7 +62,7 @@ export default function tradeSocketController({ socket, io, db }) {
 
     try {
       const [res] = await db.execute(
-        `INSERT INTO trade_listings
+        `INSERT INTO TRADE_LISTINGS
         (user_id, title, tcg_game_id, condition_label, listing_type, want_text, notes)
         VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [userId, title, tcgGameId, condition || null, type, want || null, notes || null]
@@ -146,7 +146,7 @@ export default function tradeSocketController({ socket, io, db }) {
 
     try {
       const [rows] = await db.execute(
-        `SELECT user_id FROM trade_listings WHERE id = ?`,
+        `SELECT user_id FROM TRADE_LISTINGS WHERE id = ?`,
         [listingId]
       );
 
@@ -159,7 +159,7 @@ export default function tradeSocketController({ socket, io, db }) {
       }
 
       await db.execute(
-        `UPDATE trade_listings SET status = 'cancelled' WHERE id = ?`,
+        `UPDATE TRADE_LISTINGS SET status = 'cancelled' WHERE id = ?`,
         [listingId]
       );
 

@@ -1,9 +1,6 @@
-import { useState } from "react";
+import profileImage from "../../assets/images/profile-izrat.jpg";
 
 function ContactPage() {
-  const [profileImageFailed, setProfileImageFailed] = useState(false);
-  const profileImage = "/assets/images/profile-izrat.jpg";
-
   const focusAreas = [
     "FPV Cinematic",
     "Real Estate Media",
@@ -25,18 +22,11 @@ function ContactPage() {
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.1fr_1fr] lg:gap-8">
           <div className="rounded-2xl border border-white/15 bg-slate-950/30 p-5 md:p-6">
             <div className="mb-5 flex items-center gap-4">
-              {!profileImageFailed ? (
-                <img
-                  src={profileImage}
-                  alt="Portrait of Muhd Izrat"
-                  className="h-20 w-20 rounded-2xl border border-white/20 object-cover shadow-lg"
-                  onError={() => setProfileImageFailed(true)}
-                />
-              ) : (
-                <div className="grid h-20 w-20 place-content-center rounded-2xl border border-skyaccent/35 bg-skyaccent/15 font-display text-2xl tracking-wide text-skyaccent">
-                  MI
-                </div>
-              )}
+              <img
+                src={profileImage}
+                alt="Portrait of Muhd Izrat"
+                className="h-20 w-20 rounded-2xl border border-white/20 object-cover shadow-lg"
+              />
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.12em] text-skyaccent md:text-sm">
                   Pilot Profile

@@ -19,11 +19,16 @@ const TONE_BY_STATUS = {
   REFUND_PENDING: "gold",
   CANCELLED: "danger",
   FAILED: "danger",
-  SUSPENDED: "danger",
+  SUSPENDED: "gold",
+  BANNED: "danger",
   REJECTED: "danger",
   VOIDED: "danger",
   REFUNDED: "neutral",
   PARTIALLY_REFUNDED: "neutral",
+  NOT_CONFIGURED: "neutral",
+  DISABLED: "neutral",
+  ERROR: "danger",
+  AWAITING_TRANSFER: "gold",
 };
 
 function toLabel(status) {

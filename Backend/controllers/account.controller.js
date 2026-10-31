@@ -168,7 +168,7 @@ export default function accountSocketController({
       const passwordHash = await bcrypt.hash(password, rounds);
 
       const [result] = await db.execute(
-        `INSERT INTO users (role, name, email, phone, password_hash, profile_icon)
+        `INSERT INTO USERS (role, name, email, phone, password_hash, profile_icon)
          VALUES (?, ?, ?, ?, ?, ?)`,
         [role, name, email, phone, passwordHash, payload.profileIcon || null],
       );
@@ -177,7 +177,7 @@ export default function accountSocketController({
 
       const [rows] = await db.execute(
         `SELECT id, role, name, email, phone, profile_icon, status, created_at, updated_at
-         FROM users
+         FROM USERS
          WHERE id = ?`,
         [userId],
       );
@@ -283,7 +283,7 @@ export default function accountSocketController({
       }
       try {
         const [pwRows] = await db.execute(
-          `SELECT password_hash FROM users WHERE id = ?`,
+          `SELECT password_hash FROM USERS WHERE id = ?`,
           [id],
         );
         const currentHash = pwRows?.[0]?.password_hash;
@@ -314,7 +314,7 @@ export default function accountSocketController({
       params.push(id);
 
       const [result] = await db.execute(
-        `UPDATE users SET ${fields.join(", ")}
+        `UPDATE USERS SET ${fields.join(", ")}
          WHERE id = ?`,
         params,
       );
@@ -325,7 +325,7 @@ export default function accountSocketController({
 
       const [rows] = await db.execute(
         `SELECT id, role, name, email, phone, profile_icon, status, created_at, updated_at
-         FROM users
+         FROM USERS
          WHERE id = ?`,
         [id],
       );
@@ -386,12 +386,12 @@ export default function accountSocketController({
       // ✅ IMPORTANT: when logging in by NAME, pick the most recent row (avoid duplicates)
       const sql = isEmail
         ? `SELECT id, role, name, email, phone, profile_icon, password_hash, status, created_at, updated_at
-           FROM users
+           FROM USERS
            WHERE LOWER(email) = LOWER(?)
            ORDER BY id DESC
            LIMIT 1`
         : `SELECT id, role, name, email, phone, profile_icon, password_hash, status, created_at, updated_at
-           FROM users
+           FROM USERS
            WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))
            ORDER BY id DESC
            LIMIT 1`;
@@ -437,7 +437,7 @@ export default function accountSocketController({
 
     try {
       const [uRows] = await db.execute(
-        `SELECT id, email FROM users WHERE LOWER(email) = LOWER(?) ORDER BY id DESC LIMIT 1`,
+        `SELECT id, email FROM USERS WHERE LOWER(email) = LOWER(?) ORDER BY id DESC LIMIT 1`,
         [email],
       );
 
@@ -457,7 +457,7 @@ export default function accountSocketController({
         .digest("hex");
 
       await db.execute(
-        `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+        `INSERT INTO PASSWORD_RESET_TOKENS (user_id, token_hash, expires_at)
          VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE))`,
         [user.id, tokenHash, ttlMin],
       );
@@ -517,7 +517,7 @@ export default function accountSocketController({
 
       const [rows] = await db.execute(
         `SELECT id, user_id, expires_at, used_at
-         FROM password_reset_tokens
+         FROM PASSWORD_RESET_TOKENS
          WHERE token_hash = ?
          LIMIT 1`,
         [tokenHash],
@@ -539,7 +539,7 @@ export default function accountSocketController({
         await conn.beginTransaction();
 
         const [uRes] = await conn.execute(
-          `UPDATE users
+          `UPDATE USERS
            SET password_hash = ?, updated_at = NOW()
            WHERE id = ?`,
           [passwordHash, rp.user_id],
@@ -551,7 +551,7 @@ export default function accountSocketController({
         }
 
         await conn.execute(
-          `UPDATE password_reset_tokens
+          `UPDATE PASSWORD_RESET_TOKENS
            SET used_at = NOW()
            WHERE id = ?`,
           [rp.id],

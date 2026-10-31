@@ -88,6 +88,7 @@ export default function MerchantProductsListPage() {
         emptyTitle={search || status ? "No products match these filters" : "No products yet"}
         emptyDescription={search || status ? "Try a different search or status." : "Create your first product to get started."}
         onRowClick={(row) => navigate(`/merchant/products/${row.id}`)}
+        onRetry={refresh}
         columns={[
           { key: "name", header: "Product", render: (r) => r.name },
           { key: "code", header: "SKU", render: (r) => r.code || "—" },
@@ -107,12 +108,6 @@ export default function MerchantProductsListPage() {
       />
 
       <Pagination pagination={pagination} onPageChange={(p) => updateParams({ page: p })} />
-
-      {loadStatus === "error" ? (
-        <button onClick={refresh} className="self-start text-sm text-brand-400 hover:text-brand-300">
-          Try again
-        </button>
-      ) : null}
     </div>
   );
 }

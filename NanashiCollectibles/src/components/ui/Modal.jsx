@@ -3,7 +3,12 @@ import { useEffect, useRef } from "react";
 // Minimal accessible dialog: traps focus, closes on Escape/overlay click, restores
 // focus to the trigger on close. No animation library — a CSS transition, already
 // neutralized by the app-wide prefers-reduced-motion override in index.css.
-export default function Modal({ open, onClose, title, children, footer }) {
+const SIZES = {
+  md: "max-w-md",
+  xl: "max-w-5xl",
+};
+
+export default function Modal({ open, onClose, title, children, footer, size = "md" }) {
   const dialogRef = useRef(null);
   const previouslyFocused = useRef(null);
 
@@ -52,10 +57,10 @@ export default function Modal({ open, onClose, title, children, footer }) {
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="modal-in relative w-full max-w-md rounded-xl border border-white/10 bg-ink-800 p-6 shadow-2xl shadow-black/50"
+        className={["modal-in relative flex max-h-[90vh] w-full flex-col rounded-xl border border-white/10 bg-ink-800 p-6 shadow-2xl shadow-black/50", SIZES[size] || SIZES.md].join(" ")}
       >
         {title ? <h2 className="font-display text-lg font-semibold text-amber-50">{title}</h2> : null}
-        <div className={title ? "mt-4" : ""}>{children}</div>
+        <div className={["min-h-0 overflow-y-auto", title ? "mt-4" : ""].join(" ")}>{children}</div>
         {footer ? <div className="mt-6 flex justify-end gap-3">{footer}</div> : null}
       </div>
     </div>

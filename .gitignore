@@ -34,5 +34,11 @@ NanashiCollectibles/.env*
 dir
 
 
-# Local portfolio videos
-Portfolio_Recce/assets/videos/
+# Local portfolio videos — raw client footage stays out of git (large binaries).
+# Web-optimized exports in assets/videos/web/ ARE tracked; they're the actual
+# production assets the site ships.
+Portfolio_Recce/assets/videos/*.MP4
+Portfolio_Recce/assets/videos/*.mp4
+
+# Database backups contain real customer/merchant data — never committed.
+Database/backups/

@@ -36,12 +36,25 @@ export function archiveProduct(socket, id) {
   return emitWithAck(socket, "product:archive", { id });
 }
 
-export function adjustInventory(socket, { productId, delta, reason }) {
-  return emitWithAck(socket, "inventory:adjust", { productId, delta, reason });
+// type: "stock_in" | "stock_out", quantity: a POSITIVE magnitude — the
+// backend (Backend/controllers/product.controller.js's inventory:adjust)
+// is the single source of truth for turning these into a signed delta.
+// Never send a pre-signed delta here — that's exactly what caused a
+// negative quantity to silently increase stock before this was fixed.
+export function adjustInventory(socket, { productId, type, quantity, reason }) {
+  return emitWithAck(socket, "inventory:adjust", { productId, type, quantity, reason });
 }
 
 // base64 upload — matches Backend/controllers/product.controller.js's image:upload
 // event exactly (fileName + base64 data URI payload, 5MB limit enforced server-side).
-export function uploadProductImage(socket, { fileName, base64 }) {
-  return emitWithAck(socket, "image:upload", { fileName, base64 });
+// Guarantees a { imageUrl } result on success or throws — never resolves to an
+// object missing imageUrl, so callers can destructure it directly without a
+// defensive `|| {}` that would silently hide a broken contract instead of
+// surfacing it.
+export async function uploadProductImage(socket, { fileName, base64 }) {
+  const result = await emitWithAck(socket, "image:upload", { fileName, base64 });
+  if (!result?.imageUrl) {
+    throw new Error("Image upload did not return an image URL.");
+  }
+  return result;
 }

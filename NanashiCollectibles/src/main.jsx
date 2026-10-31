@@ -5,6 +5,8 @@ import App from "./app/App.jsx";
 import { AuthProvider } from "./features/auth/AuthProvider.jsx";
 import { SocketProvider } from "./services/socket/SocketProvider.jsx";
 import { ToastProvider } from "./components/ui/ToastProvider.jsx";
+import { CartProvider } from "./features/cart/CartProvider.jsx";
+import { WishlistProvider } from "./features/shop/WishlistProvider.jsx";
 import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")).render(
@@ -13,7 +15,11 @@ ReactDOM.createRoot(document.getElementById("root")).render(
       <AuthProvider>
         <SocketProvider>
           <ToastProvider>
-            <App />
+            <CartProvider>
+              <WishlistProvider>
+                <App />
+              </WishlistProvider>
+            </CartProvider>
           </ToastProvider>
         </SocketProvider>
       </AuthProvider>

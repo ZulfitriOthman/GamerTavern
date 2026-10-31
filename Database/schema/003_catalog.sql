@@ -1,0 +1,175 @@
+-- ================================================================
+-- 003 — CATALOG (PRODUCTS, variants, inventory)
+-- ================================================================
+-- NOTE on PRODUCTS.MERCHANT_ID: that column and its foreign key are
+-- added at the top of 004_merchants.sql, not here. It genuinely
+-- depends on the `MERCHANTS` table (created in 004), and file order
+-- (003 before 004) can't be changed without renumbering every file —
+-- so, exactly like the original Marketplace_Migration.sql did, the
+-- column is added via ALTER TABLE once its target exists. Every other
+-- catalog column below is the current, final shape already.
+-- ================================================================
+
+-- Added 2026-09-17 — what KIND of product this is within its category
+-- (Single Card, Booster Box, ... under Trading Card Games), a distinct
+-- axis from PRODUCTS.TCG_GAME_ID (which game) and PRODUCT_CATEGORIES
+-- (commerce category). Scoped per CATEGORY_ID rather than being a global
+-- list — deliberately, so a future category (Gunpla grades, Computer
+-- Parts component types, ...) can get its own rows with zero schema
+-- change, instead of one flat enum or per-type boolean columns on
+-- PRODUCTS (IS_BOOSTER_BOX, IS_SINGLE_CARD, ...) that wouldn't scale past
+-- Trading Card Games. SLUG (not a separate CODE column) is the stable
+-- value application logic matches against — same convention as
+-- TCG_GAMES/PRODUCT_CATEGORIES already use.
+CREATE TABLE PRODUCT_TYPES (
+  ID           INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  CATEGORY_ID  INT UNSIGNED NOT NULL,
+  NAME         VARCHAR(100) NOT NULL,
+  SLUG         VARCHAR(120) NOT NULL,
+  SORT_ORDER   INT UNSIGNED NOT NULL DEFAULT 0,
+  STATUS       VARCHAR(20)  NOT NULL DEFAULT 'active',           -- 'active' | 'inactive' — app-validated
+  CREATED_AT   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UPDATED_AT   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT FK_PRODUCT_TYPES_CATEGORY
+    FOREIGN KEY (CATEGORY_ID) REFERENCES PRODUCT_CATEGORIES(ID) ON DELETE CASCADE,
+  UNIQUE KEY UQ_PRODUCT_TYPES_CATEGORY_SLUG (CATEGORY_ID, SLUG),
+  INDEX IDX_PRODUCT_TYPES_CATEGORY (CATEGORY_ID)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE PRODUCTS (
+  ID                INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  VENDOR_ID         INT UNSIGNED NOT NULL,
+  CATEGORY_ID       INT UNSIGNED NOT NULL,
+  TCG_GAME_ID       INT UNSIGNED NULL,                           -- only set when CATEGORY_ID is a TCG-related CATEGORY
+  PRODUCT_TYPE_ID   INT UNSIGNED NULL,                           -- added 2026-09-17 — e.g. Single Card / Booster Box; only set when PRODUCT_TYPES has rows for CATEGORY_ID (see resolveProductTypeRequirement() in product.controller.js)
+  NAME              VARCHAR(150) NOT NULL,
+  SLUG              VARCHAR(180) NOT NULL,
+  CODE              VARCHAR(100) NULL,                            -- SKU
+  DESCRIPTION       LONGTEXT NULL,
+  SHORT_DESCRIPTION VARCHAR(500) NULL,
+  BRAND             VARCHAR(100) NULL,
+  CONDITION_LABEL   VARCHAR(50) NULL,
+  PRICE             DECIMAL(10,2) NOT NULL,
+  STOCK_QUANTITY    INT UNSIGNED NOT NULL DEFAULT 0,               -- current stock; single source of truth (see INVENTORY_MOVEMENTS)
+  LOW_STOCK_THRESHOLD INT UNSIGNED NULL,
+  STATUS            VARCHAR(20) NOT NULL DEFAULT 'active',        -- 'active' | 'archived' | 'draft' | 'out_of_stock' — app-validated
+  FEATURED          TINYINT(1) NOT NULL DEFAULT 0,
+  WEIGHT_GRAMS      INT UNSIGNED NULL,
+  TAGS              VARCHAR(255) NULL,
+  CREATED_AT        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UPDATED_AT        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT FK_PRODUCTS_VENDOR
+    FOREIGN KEY (VENDOR_ID) REFERENCES USERS(ID) ON DELETE RESTRICT,
+  CONSTRAINT FK_PRODUCTS_CATEGORY
+    FOREIGN KEY (CATEGORY_ID) REFERENCES PRODUCT_CATEGORIES(ID) ON DELETE RESTRICT,
+  CONSTRAINT FK_PRODUCTS_TCG_GAME
+    FOREIGN KEY (TCG_GAME_ID) REFERENCES TCG_GAMES(ID) ON DELETE SET NULL,
+  CONSTRAINT FK_PRODUCTS_PRODUCT_TYPE
+    FOREIGN KEY (PRODUCT_TYPE_ID) REFERENCES PRODUCT_TYPES(ID) ON DELETE SET NULL,
+  UNIQUE KEY UQ_PRODUCTS_SLUG (SLUG),
+  INDEX IDX_PRODUCTS_VENDOR (VENDOR_ID),
+  INDEX IDX_PRODUCTS_CATEGORY (CATEGORY_ID),
+  INDEX IDX_PRODUCTS_TCG_GAME (TCG_GAME_ID),
+  INDEX IDX_PRODUCTS_PRODUCT_TYPE (PRODUCT_TYPE_ID),
+  INDEX IDX_PRODUCTS_CODE (CODE)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- VENDOR_ID uses ON DELETE RESTRICT: a vendor account can't be hard-deleted
+-- while it still owns PRODUCTS (and, transitively, inventory history) —
+-- archive the vendor (USERS.STATUS = 'deleted') instead.
+
+CREATE TABLE PRODUCT_IMAGES (
+  ID          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  PRODUCT_ID  INT UNSIGNED NOT NULL,
+  IMAGE_URL   LONGTEXT NOT NULL,
+  SORT_ORDER  INT UNSIGNED NOT NULL DEFAULT 0,
+  IS_PRIMARY  TINYINT(1) NOT NULL DEFAULT 0,
+  CREATED_AT  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT FK_PRODUCT_IMAGES_PRODUCT
+    FOREIGN KEY (PRODUCT_ID) REFERENCES PRODUCTS(ID) ON DELETE CASCADE,
+  INDEX IDX_PRODUCT_IMAGES_PRODUCT (PRODUCT_ID)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Product variants: simple, standard model. An option is a named axis
+-- (e.g. "Colour"), an option VALUE is one choice on that axis (e.g.
+-- "Red"), a variant is one concrete SKU-able combination, linked to
+-- the option values that make it up.
+--
+-- STATUS: DORMANT / RESERVED FOR PLANNED FEATURE (PRODUCT_OPTIONS,
+-- PRODUCT_OPTION_VALUES, PRODUCT_VARIANT_OPTION_VALUES) — schema-complete,
+-- zero backend or frontend references as of this audit (2026-09-14).
+-- PRODUCT_VARIANTS itself IS read by cart/checkout (defensively handles
+-- a VARIANT_ID if one is ever set) but has no creation path in the
+-- merchant product-management backend yet. Keep these tables; remove
+-- only if this feature is formally abandoned.
+
+CREATE TABLE PRODUCT_OPTIONS (
+  ID          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  PRODUCT_ID  INT UNSIGNED NOT NULL,
+  NAME        VARCHAR(50) NOT NULL,                     -- e.g. 'Colour', 'Size', 'Language'
+  SORT_ORDER  INT UNSIGNED NOT NULL DEFAULT 0,
+  CREATED_AT  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT FK_PRODUCT_OPTIONS_PRODUCT
+    FOREIGN KEY (PRODUCT_ID) REFERENCES PRODUCTS(ID) ON DELETE CASCADE,
+  UNIQUE KEY UQ_PRODUCT_OPTIONS_PRODUCT_NAME (PRODUCT_ID, NAME),
+  INDEX IDX_PRODUCT_OPTIONS_PRODUCT (PRODUCT_ID)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE PRODUCT_OPTION_VALUES (
+  ID         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  OPTION_ID  INT UNSIGNED NOT NULL,
+  VALUE      VARCHAR(100) NOT NULL,                     -- e.g. 'Red', 'M', 'Japanese'
+  SORT_ORDER INT UNSIGNED NOT NULL DEFAULT 0,
+  CREATED_AT TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT FK_PRODUCT_OPTION_VALUES_OPTION
+    FOREIGN KEY (OPTION_ID) REFERENCES PRODUCT_OPTIONS(ID) ON DELETE CASCADE,
+  UNIQUE KEY UQ_PRODUCT_OPTION_VALUES_OPTION_VALUE (OPTION_ID, VALUE),
+  INDEX IDX_PRODUCT_OPTION_VALUES_OPTION (OPTION_ID)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE PRODUCT_VARIANTS (
+  ID              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  PRODUCT_ID      INT UNSIGNED NOT NULL,
+  SKU             VARCHAR(100) NULL,
+  PRICE_OVERRIDE  DECIMAL(10,2) NULL,                   -- NULL = use PRODUCTS.PRICE
+  STOCK_QUANTITY  INT UNSIGNED NOT NULL DEFAULT 0,       -- single source of truth for THIS variant
+  STATUS          VARCHAR(20) NOT NULL DEFAULT 'active', -- active | archived
+  CREATED_AT      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UPDATED_AT      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT FK_PRODUCT_VARIANTS_PRODUCT
+    FOREIGN KEY (PRODUCT_ID) REFERENCES PRODUCTS(ID) ON DELETE RESTRICT,
+  UNIQUE KEY UQ_PRODUCT_VARIANTS_SKU (SKU),
+  INDEX IDX_PRODUCT_VARIANTS_PRODUCT (PRODUCT_ID)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE PRODUCT_VARIANT_OPTION_VALUES (
+  ID               INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  VARIANT_ID       INT UNSIGNED NOT NULL,
+  OPTION_VALUE_ID  INT UNSIGNED NOT NULL,
+  CONSTRAINT FK_PVOV_VARIANT
+    FOREIGN KEY (VARIANT_ID) REFERENCES PRODUCT_VARIANTS(ID) ON DELETE CASCADE,
+  CONSTRAINT FK_PVOV_OPTION_VALUE
+    FOREIGN KEY (OPTION_VALUE_ID) REFERENCES PRODUCT_OPTION_VALUES(ID) ON DELETE RESTRICT,
+  UNIQUE KEY UQ_PVOV_VARIANT_OPTION_VALUE (VARIANT_ID, OPTION_VALUE_ID),
+  INDEX IDX_PVOV_OPTION_VALUE (OPTION_VALUE_ID)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE INVENTORY_MOVEMENTS (
+  ID          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  PRODUCT_ID  INT UNSIGNED NOT NULL,
+  VARIANT_ID  INT UNSIGNED NULL,                                 -- NULL = movement applies to the base product
+  DELTA       INT NOT NULL,                                      -- signed: positive (restock) or negative (sale/adjustment)
+  REASON      VARCHAR(100) NULL,
+  CREATED_AT  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT FK_INVENTORY_MOVEMENTS_PRODUCT
+    FOREIGN KEY (PRODUCT_ID) REFERENCES PRODUCTS(ID) ON DELETE RESTRICT,
+  CONSTRAINT FK_INVENTORY_MOVEMENTS_VARIANT
+    FOREIGN KEY (VARIANT_ID) REFERENCES PRODUCT_VARIANTS(ID) ON DELETE SET NULL,
+  INDEX IDX_INVENTORY_MOVEMENTS_PRODUCT (PRODUCT_ID),
+  INDEX IDX_INVENTORY_MOVEMENTS_VARIANT (VARIANT_ID),
+  INDEX IDX_INVENTORY_MOVEMENTS_CREATED_AT (CREATED_AT)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- ON DELETE RESTRICT (not CASCADE): a product with recorded stock history
+-- can never be physically deleted — set PRODUCTS.STATUS = 'archived'
+-- instead. BACKEND REQUIREMENT: every write that changes
+-- PRODUCTS.STOCK_QUANTITY / PRODUCT_VARIANTS.STOCK_QUANTITY must, in the
+-- same transaction, also insert the matching INVENTORY_MOVEMENTS row.

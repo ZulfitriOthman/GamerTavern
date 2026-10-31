@@ -3,8 +3,11 @@ import { Link } from "react-router-dom";
 import Card from "../ui/Card.jsx";
 import Button from "../ui/Button.jsx";
 import { TextField, TextareaField, SelectField } from "../ui/Field.jsx";
+import FieldHelp from "../ui/FieldHelp.jsx";
 import ProductImageEditor from "./ProductImageEditor.jsx";
 import { useProductCategories } from "../../features/merchant/useProductCategories.js";
+import { useTcgGames } from "../../features/tcg/useTcgGames.js";
+import { useProductTypes } from "../../features/shop/useProductTypes.js";
 
 const STATUS_OPTIONS = [
   { value: "draft", label: "Draft — not visible to customers" },
@@ -13,11 +16,36 @@ const STATUS_OPTIONS = [
   { value: "archived", label: "Archived" },
 ];
 
+// Matches Backend/controllers/product.controller.js's own gating exactly —
+// by category SLUG (stable), never by display name. "Trading Card Games"
+// requires a TCG Game (a card belongs to exactly one game); "TCG
+// Accessories" allows one optionally (a deck box can be game-branded or
+// generic); every other category never shows or stores one.
+const TCG_GAME_REQUIRED_SLUG = "trading-card-games";
+const TCG_GAME_OPTIONAL_SLUG = "tcg-accessories";
+
+// PRODUCT_IMAGES rows come back from the backend as { image_url, is_primary,
+// sort_order } (snake_case, matching the DB columns — see
+// Backend/controllers/product.controller.js's fetchImagesByProductIds). The
+// image editor's own contract is { url, isPrimary } (camelCase — matching
+// what ProductImageEditor.jsx builds for a freshly-uploaded image). Without
+// this mapping, every pre-existing image on an edit page had img.url
+// undefined, which resolveProductImageUrl() turns into a broken <img src>,
+// and would have re-saved as an empty image_url on the next submit.
+function toEditorImages(images) {
+  return (images || []).map((img) => ({
+    url: img.url ?? img.image_url,
+    isPrimary: img.isPrimary ?? Boolean(img.is_primary),
+  }));
+}
+
 function toFormState(product) {
   return {
     name: product?.name || "",
     code: product?.code || "",
     categoryId: product?.category_id ? String(product.category_id) : "",
+    tcgGameId: product?.tcg_game_id ? String(product.tcg_game_id) : "",
+    productTypeId: product?.product_type_id ? String(product.product_type_id) : "",
     brand: product?.brand || "",
     shortDescription: product?.short_description || "",
     description: product?.description || "",
@@ -37,15 +65,49 @@ function toFormState(product) {
 export default function ProductForm({ product = null, onSubmit, submitting, submitLabel }) {
   const isEdit = Boolean(product);
   const { categories, status: categoriesStatus } = useProductCategories();
+  const { games: tcgGames, status: tcgGamesStatus } = useTcgGames();
+  const { types: allProductTypes, status: productTypesStatus } = useProductTypes();
   const [form, setForm] = useState(() => toFormState(product));
-  const [images, setImages] = useState(product?.images || []);
+  const [images, setImages] = useState(() => toEditorImages(product?.images));
   const [error, setError] = useState(null);
+
+  const selectedCategory = categories.find((c) => String(c.id) === form.categoryId);
+  const tcgRequirement =
+    selectedCategory?.slug === TCG_GAME_REQUIRED_SLUG ? "required" : selectedCategory?.slug === TCG_GAME_OPTIONAL_SLUG ? "optional" : "none";
+  const showTcgGameField = tcgRequirement !== "none";
+
+  // Data-driven, not a hardcoded category slug (mirrors
+  // resolveProductTypeRequirement() in product.controller.js): the
+  // selected category requires a Product Type iff PRODUCT_TYPES has any
+  // active rows for it — today that's only Trading Card Games, but a
+  // future category (Gunpla grades, ...) starts requiring one the moment
+  // rows exist, with no code change here.
+  const productTypeOptions = selectedCategory ? allProductTypes.filter((t) => t.category_id === selectedCategory.id) : [];
+  const showProductTypeField = productTypeOptions.length > 0;
 
   function updateField(field) {
     return (event) => {
       const value = event.target.type === "checkbox" ? event.target.checked : event.target.value;
       setForm((prev) => ({ ...prev, [field]: value }));
     };
+  }
+
+  // Switching away from a TCG-related category must not silently leave a
+  // stale game selection behind, hidden but still set — clear it the moment
+  // the category no longer supports one. (The backend enforces this too,
+  // regardless of what the form sends — see product.controller.js.)
+  function updateCategory(event) {
+    const categoryId = event.target.value;
+    const nextCategory = categories.find((c) => String(c.id) === categoryId);
+    const nextRequirement =
+      nextCategory?.slug === TCG_GAME_REQUIRED_SLUG ? "required" : nextCategory?.slug === TCG_GAME_OPTIONAL_SLUG ? "optional" : "none";
+    const nextHasProductTypes = nextCategory ? allProductTypes.some((t) => t.category_id === nextCategory.id) : false;
+    setForm((prev) => ({
+      ...prev,
+      categoryId,
+      tcgGameId: nextRequirement === "none" ? "" : prev.tcgGameId,
+      productTypeId: nextHasProductTypes ? prev.productTypeId : "",
+    }));
   }
 
   async function handleSubmit(event) {
@@ -60,6 +122,14 @@ export default function ProductForm({ product = null, onSubmit, submitting, subm
       setError("Choose a category.");
       return;
     }
+    if (tcgRequirement === "required" && !form.tcgGameId) {
+      setError("Choose a TCG Game.");
+      return;
+    }
+    if (showProductTypeField && !form.productTypeId) {
+      setError("Choose a Product Type.");
+      return;
+    }
     const price = Number(form.price);
     if (!Number.isFinite(price) || price < 0) {
       setError("Enter a valid, non-negative price.");
@@ -70,6 +140,8 @@ export default function ProductForm({ product = null, onSubmit, submitting, subm
       name: form.name.trim(),
       code: form.code.trim(),
       categoryId: Number(form.categoryId),
+      tcgGameId: showTcgGameField && form.tcgGameId ? Number(form.tcgGameId) : null,
+      productTypeId: showProductTypeField && form.productTypeId ? Number(form.productTypeId) : null,
       brand: form.brand.trim() || undefined,
       shortDescription: form.shortDescription.trim() || undefined,
       description: form.description.trim() || undefined,
@@ -99,7 +171,32 @@ export default function ProductForm({ product = null, onSubmit, submitting, subm
         <h2 className="font-display text-base font-semibold text-amber-50">Basics</h2>
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <TextField id="pf-name" label="Product name" value={form.name} onChange={updateField("name")} required />
-          <TextField id="pf-code" label="SKU" value={form.code} onChange={updateField("code")} required />
+          <TextField
+            id="pf-code"
+            label="SKU"
+            labelExtra={
+              <FieldHelp label="What is an SKU?">
+                SKU stands for Stock Keeping Unit. It's a unique code used to identify and manage this product in your
+                inventory.
+                <br />
+                <br />
+                Example: TCG-SLEEVE-001
+                {tcgRequirement === "required" ? (
+                  <>
+                    <br />
+                    <br />
+                    Tip: for Trading Card Games products, you may include the game and product type to make stock
+                    easier to identify — e.g. Vanguard Booster Box → VG-BB-001, Pokémon Booster Box → PKM-BB-001,
+                    Magic Single Card → MTG-SC-001. This is only a naming suggestion, not a required format.
+                  </>
+                ) : null}
+              </FieldHelp>
+            }
+            hint="Unique product code used for inventory tracking."
+            value={form.code}
+            onChange={updateField("code")}
+            required
+          />
         </div>
 
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -107,7 +204,7 @@ export default function ProductForm({ product = null, onSubmit, submitting, subm
             id="pf-category"
             label="Category"
             value={form.categoryId}
-            onChange={updateField("categoryId")}
+            onChange={updateCategory}
             hint={categoriesStatus === "error" ? "Couldn't load categories." : undefined}
             required
           >
@@ -118,8 +215,50 @@ export default function ProductForm({ product = null, onSubmit, submitting, subm
               </option>
             ))}
           </SelectField>
-          <TextField id="pf-brand" label="Brand" hint="Optional" value={form.brand} onChange={updateField("brand")} />
+          {showTcgGameField ? (
+            <SelectField
+              id="pf-tcg-game"
+              label="TCG Game"
+              value={form.tcgGameId}
+              onChange={updateField("tcgGameId")}
+              hint={tcgGamesStatus === "error" ? "Couldn't load TCG games." : tcgRequirement === "optional" ? "Optional" : undefined}
+              required={tcgRequirement === "required"}
+            >
+              <option value="">{tcgRequirement === "required" ? "Select a game" : "No specific game"}</option>
+              {tcgGames.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+            </SelectField>
+          ) : (
+            <TextField id="pf-brand" label="Brand" hint="Optional" value={form.brand} onChange={updateField("brand")} />
+          )}
         </div>
+
+        {showTcgGameField ? (
+          <div className={["mt-4 grid gap-4", showProductTypeField ? "sm:grid-cols-3" : "sm:grid-cols-2"].join(" ")}>
+            {showProductTypeField ? (
+              <SelectField
+                id="pf-product-type"
+                label="TCG Product Type"
+                value={form.productTypeId}
+                onChange={updateField("productTypeId")}
+                hint={productTypesStatus === "error" ? "Couldn't load product types." : "What the customer is buying — not your SKU."}
+                required
+              >
+                <option value="">Select a type</option>
+                {productTypeOptions.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </SelectField>
+            ) : null}
+            <TextField id="pf-brand" label="Brand" hint="Optional" value={form.brand} onChange={updateField("brand")} />
+            <TextField id="pf-condition" label="Condition" hint="Optional, e.g. New, Used" value={form.conditionLabel} onChange={updateField("conditionLabel")} />
+          </div>
+        ) : null}
 
         <div className="mt-4">
           <TextField id="pf-short-desc" label="Short description" hint="Optional, shown in listings" value={form.shortDescription} onChange={updateField("shortDescription")} />
@@ -127,10 +266,17 @@ export default function ProductForm({ product = null, onSubmit, submitting, subm
         <div className="mt-4">
           <TextareaField id="pf-description" label="Description" hint="Optional" rows={5} value={form.description} onChange={updateField("description")} />
         </div>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
-          <TextField id="pf-condition" label="Condition" hint="Optional, e.g. New, Used" value={form.conditionLabel} onChange={updateField("conditionLabel")} />
-          <TextField id="pf-tags" label="Tags" hint="Optional, comma-separated" value={form.tags} onChange={updateField("tags")} />
-        </div>
+
+        {showTcgGameField ? (
+          <div className="mt-4">
+            <TextField id="pf-tags" label="Tags" hint="Optional, comma-separated — e.g. Maelstrom, V-Series, Aqua Force" value={form.tags} onChange={updateField("tags")} />
+          </div>
+        ) : (
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <TextField id="pf-condition" label="Condition" hint="Optional, e.g. New, Used" value={form.conditionLabel} onChange={updateField("conditionLabel")} />
+            <TextField id="pf-tags" label="Tags" hint="Optional, comma-separated" value={form.tags} onChange={updateField("tags")} />
+          </div>
+        )}
       </Card>
 
       <Card variant="form">

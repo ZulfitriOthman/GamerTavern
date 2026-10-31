@@ -51,9 +51,9 @@ const SELECT_NEWS_SQL = `
   SELECT n.id, n.category_id, c.name AS category_name, n.tcg_game_id, g.name AS tcg_game_name,
          n.title, n.slug, n.content, n.image_url, n.author, n.tags, n.status,
          n.published_at, n.created_at, n.updated_at
-  FROM news n
-  LEFT JOIN news_categories c ON c.id = n.category_id
-  LEFT JOIN tcg_games g ON g.id = n.tcg_game_id
+  FROM NEWS n
+  LEFT JOIN NEWS_CATEGORIES c ON c.id = n.category_id
+  LEFT JOIN TCG_GAMES g ON g.id = n.tcg_game_id
 `;
 
 export default function newsSocketController({ socket, io, db }) {
@@ -125,7 +125,7 @@ export default function newsSocketController({ socket, io, db }) {
   socket.on("news_categories:list", async (_payload, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
     try {
-      const [rows] = await db.query(`SELECT id, name, slug FROM news_categories ORDER BY name`);
+      const [rows] = await db.query(`SELECT id, name, slug FROM NEWS_CATEGORIES ORDER BY name`);
       return ack({ success: true, data: rows || [] });
     } catch (err) {
       console.error("[news_categories:list] error", err);
@@ -172,7 +172,7 @@ export default function newsSocketController({ socket, io, db }) {
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
           const [result] = await db.execute(
-            `INSERT INTO news (category_id, tcg_game_id, title, slug, content, image_url, author, tags, status, published_at)
+            `INSERT INTO NEWS (category_id, tcg_game_id, title, slug, content, image_url, author, tags, status, published_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [categoryId, tcgGameId || null, title, slug, content, imageUrl || null, author, tags || null, status, publishedAt]
           );
@@ -197,7 +197,7 @@ export default function newsSocketController({ socket, io, db }) {
         (async () => {
           try {
             const [userRows] = await db.execute(
-              "SELECT email FROM users WHERE email IS NOT NULL AND email <> ''",
+              "SELECT email FROM USERS WHERE email IS NOT NULL AND email <> ''",
             );
             const recipients = userRows.map((r) => r.email);
             if (!recipients.length) return;
@@ -260,7 +260,7 @@ export default function newsSocketController({ socket, io, db }) {
   /* =========================================================
      UPDATE NEWS  (ADMIN ONLY)
      ========================================================= */
-  socket.on("news:update", async (payload = {}, cb) => {
+  socket.on("NEWS:update", async (payload = {}, cb) => {
     const ack = typeof cb === "function" ? cb : () => {};
 
     const auth = requireAdmin(socket);
@@ -332,7 +332,7 @@ export default function newsSocketController({ socket, io, db }) {
     params.push(id);
 
     try {
-      const [result] = await db.execute(`UPDATE news SET ${sets.join(", ")} WHERE id = ?`, params);
+      const [result] = await db.execute(`UPDATE NEWS SET ${sets.join(", ")} WHERE id = ?`, params);
       if (result.affectedRows === 0) {
         return ack({ success: false, message: "News not found." });
       }
@@ -345,8 +345,8 @@ export default function newsSocketController({ socket, io, db }) {
       if (err?.code === "ER_NO_REFERENCED_ROW_2" || err?.code === "ER_NO_REFERENCED_ROW") {
         return ack({ success: false, message: "Unknown categoryId or tcgGameId." });
       }
-      console.error("[news:update] error", err);
-      return ack({ success: false, message: "Failed to update news." });
+      console.error("[NEWS:update] error", err);
+      return ack({ success: false, message: "Failed to update NEWS." });
     }
   });
 
@@ -363,7 +363,7 @@ export default function newsSocketController({ socket, io, db }) {
     if (!id) return ack({ success: false, message: "News id is required." });
 
     try {
-      const [result] = await db.execute("DELETE FROM news WHERE id = ?", [id]);
+      const [result] = await db.execute("DELETE FROM NEWS WHERE id = ?", [id]);
       if (result.affectedRows === 0) {
         return ack({ success: false, message: "News not found." });
       }

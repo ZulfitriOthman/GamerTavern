@@ -1,6 +1,9 @@
+import { useState } from "react";
 import { useParams } from "react-router-dom";
 import SectionHeading from "../../components/ui/SectionHeading.jsx";
 import Card from "../../components/ui/Card.jsx";
+import Button from "../../components/ui/Button.jsx";
+import Modal from "../../components/ui/Modal.jsx";
 import StatusBadge from "../../components/ui/StatusBadge.jsx";
 import EmptyState from "../../components/ui/EmptyState.jsx";
 import { SkeletonText } from "../../components/ui/Skeleton.jsx";
@@ -10,11 +13,34 @@ import { useApiResource } from "../../features/merchant/useApiResource.js";
 import * as merchantApi from "../../features/merchant/merchantApi.js";
 import { useToast } from "../../components/ui/ToastContext.js";
 import { formatMoney, formatDateTime } from "../../features/merchant/format.js";
+import { resolveUploadUrl } from "../../features/shop/productImage.js";
+import { formatAddressLines } from "../../features/checkout/addressFormat.js";
+
+// Confirmable = the payment record's status has a real PENDING/AWAITING
+// transition to PAID (see Backend/modules/orderStateMachine.module.js
+// MERCHANT_ORDER_PAYMENT_TRANSITIONS) — mirrors the backend's own check
+// rather than hardcoding one method's status name here.
+const CONFIRMABLE_PAYMENT_STATUSES = ["AWAITING_TRANSFER", "PENDING"];
+
+const PAYMENT_METHOD_LABELS = {
+  BANK_TRANSFER: "Bank Transfer",
+  PAY_ON_DELIVERY: "Pay on Delivery",
+  PAY_ON_PICKUP: "Pay on Pickup",
+  ONLINE_PAYMENT: "Online Payment",
+};
+
+const CONFIRM_BUTTON_LABELS = {
+  BANK_TRANSFER: "Confirm Bank Transfer Received",
+  PAY_ON_DELIVERY: "Confirm Delivery Payment Received",
+  PAY_ON_PICKUP: "Confirm Pickup Payment Received",
+};
 
 export default function MerchantOrderDetailPage() {
   const { id } = useParams();
   const { token, activeMerchant } = useMerchantAuth();
   const { push } = useToast();
+  const [confirmingPayment, setConfirmingPayment] = useState(false);
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
 
   const { status, data, error, refresh } = useApiResource(
     () => merchantApi.getOrder(token, id, { merchantId: activeMerchant?.merchantId }),
@@ -27,6 +53,20 @@ export default function MerchantOrderDetailPage() {
     refresh();
   }
 
+  async function handleConfirmPayment() {
+    setConfirmingPayment(true);
+    try {
+      await merchantApi.confirmOrderPayment(token, id, { merchantId: activeMerchant?.merchantId });
+      push({ tone: "success", message: "Payment confirmed." });
+      setConfirmModalOpen(false);
+      refresh();
+    } catch (err) {
+      push({ tone: "error", message: err.message });
+    } finally {
+      setConfirmingPayment(false);
+    }
+  }
+
   if (status === "loading") {
     return (
       <div className="max-w-3xl">
@@ -35,7 +75,17 @@ export default function MerchantOrderDetailPage() {
     );
   }
   if (status === "error") {
-    return <EmptyState title="Couldn't load this order" description={error} />;
+    return (
+      <EmptyState
+        title="Couldn't load this order"
+        description={error}
+        action={
+          <Button variant="secondary" size="sm" onClick={refresh}>
+            Try again
+          </Button>
+        }
+      />
+    );
   }
 
   const order = data.data;
@@ -79,6 +129,62 @@ export default function MerchantOrderDetailPage() {
             </div>
           </Card>
 
+          {order.fulfilmentType ? (
+            <Card variant="data">
+              <h2 className="font-display text-base font-semibold text-amber-50">Fulfilment: {order.fulfilmentType === "DELIVERY" ? "Delivery" : "Pickup"}</h2>
+
+              {order.fulfilmentType === "DELIVERY" ? (
+                order.deliveryAddress ? (
+                  <dl className="mt-4 flex flex-col gap-3 text-sm">
+                    <div>
+                      <dt className="text-xs uppercase tracking-wide text-amber-50/40">Recipient</dt>
+                      <dd className="mt-1 text-amber-50/85">{order.deliveryAddress.recipientName}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs uppercase tracking-wide text-amber-50/40">Phone</dt>
+                      <dd className="mt-1 text-amber-50/85">{order.deliveryAddress.phone}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs uppercase tracking-wide text-amber-50/40">Address</dt>
+                      <dd className="mt-1 text-amber-50/85">
+                        {formatAddressLines(order.deliveryAddress).map((line, i) => (
+                          <p key={i}>{line}</p>
+                        ))}
+                      </dd>
+                    </div>
+                    {order.delivery_instructions ? (
+                      <div>
+                        <dt className="text-xs uppercase tracking-wide text-amber-50/40">Delivery instructions</dt>
+                        <dd className="mt-1 text-amber-50/85">{order.delivery_instructions}</dd>
+                      </div>
+                    ) : null}
+                    <div>
+                      <dt className="text-xs uppercase tracking-wide text-amber-50/40">Reference photo</dt>
+                      <dd className="mt-1.5">
+                        {order.deliveryReferencePhoto ? (
+                          <a
+                            href={resolveUploadUrl(order.deliveryReferencePhoto.fileUrl)}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-sm font-medium text-brand-400 hover:text-brand-300 focus-ring rounded"
+                          >
+                            View image
+                          </a>
+                        ) : (
+                          <span className="text-amber-50/45">Not provided</span>
+                        )}
+                      </dd>
+                    </div>
+                  </dl>
+                ) : (
+                  <p className="mt-3 text-sm text-amber-50/45">No delivery address on file.</p>
+                )
+              ) : (
+                <p className="mt-3 text-sm text-amber-50/60">Customer will collect this order in person.</p>
+              )}
+            </Card>
+          ) : null}
+
           {order.history?.length ? (
             <Card variant="data">
               <h2 className="font-display text-base font-semibold text-amber-50">History</h2>
@@ -107,7 +213,52 @@ export default function MerchantOrderDetailPage() {
             <div className="mt-3">
               <StatusBadge status={order.payment_status} />
             </div>
+
+            {order.payment ? (
+              <div className="mt-4 flex flex-col gap-3 border-t border-white/10 pt-4">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-amber-50/60">{PAYMENT_METHOD_LABELS[order.payment.payment_method] || order.payment.payment_method}</span>
+                  <StatusBadge status={order.payment.status} />
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-amber-50/60">Amount</span>
+                  <span className="text-amber-50/85">{formatMoney(order.payment.amount)}</span>
+                </div>
+                {order.payment.reference ? (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-amber-50/60">Reference</span>
+                    <span className="font-mono text-amber-50/85">{order.payment.reference}</span>
+                  </div>
+                ) : null}
+                {CONFIRMABLE_PAYMENT_STATUSES.includes(order.payment.status) ? (
+                  <Button size="sm" onClick={() => setConfirmModalOpen(true)}>
+                    {CONFIRM_BUTTON_LABELS[order.payment.payment_method] || "Confirm Payment Received"}
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
           </Card>
+
+          <Modal
+            open={confirmModalOpen}
+            onClose={() => setConfirmModalOpen(false)}
+            title={CONFIRM_BUTTON_LABELS[order.payment?.payment_method] || "Confirm payment received"}
+            footer={
+              <>
+                <Button variant="secondary" onClick={() => setConfirmModalOpen(false)} disabled={confirmingPayment}>
+                  Cancel
+                </Button>
+                <Button onClick={handleConfirmPayment} isLoading={confirmingPayment}>
+                  Confirm Received
+                </Button>
+              </>
+            }
+          >
+            <p className="text-sm text-amber-50/70">
+              Confirm that you have received {order.payment ? formatMoney(order.payment.amount) : ""}
+              {order.payment?.payment_method === "BANK_TRANSFER" ? " via bank transfer" : ""} for this order. This cannot be undone.
+            </p>
+          </Modal>
 
           {order.shipment ? (
             <Card variant="data">

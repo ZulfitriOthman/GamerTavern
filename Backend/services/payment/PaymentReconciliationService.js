@@ -30,7 +30,7 @@ export default class PaymentReconciliationService {
   async findStalePendingOrders({ olderThanMinutes = 15 } = {}) {
     const [rows] = await this.db.query(
       `SELECT id, order_number, user_id, created_at
-         FROM orders
+         FROM ORDERS
         WHERE status = 'PENDING_PAYMENT' AND payment_status = 'PENDING'
           AND created_at < DATE_SUB(NOW(), INTERVAL ? MINUTE)
         ORDER BY created_at ASC`,
@@ -47,7 +47,12 @@ export default class PaymentReconciliationService {
       conn = await this.db.getConnection();
       await conn.beginTransaction();
 
-      const [orderRows] = await conn.execute(`SELECT * FROM orders WHERE id = ? FOR UPDATE`, [orderId]);
+      const [orderRows] = await conn.execute(
+        `SELECT id, order_number, user_id, shipping_address_id, billing_address_id, shipping_method_id, coupon_id,
+                subtotal, discount_total, shipping_total, grand_total, currency, payment_status, status, placed_at, created_at, updated_at
+           FROM ORDERS WHERE id = ? FOR UPDATE`,
+        [orderId]
+      );
       const order = orderRows[0];
       if (!order) {
         await conn.rollback();
@@ -59,7 +64,8 @@ export default class PaymentReconciliationService {
       }
 
       const [txnRows] = await conn.execute(
-        `SELECT * FROM payment_transactions WHERE order_id = ? ORDER BY created_at DESC LIMIT 1`,
+        `SELECT id, order_id, provider, provider_transaction_id, amount, currency, status, raw_response, created_at, updated_at
+           FROM PAYMENT_TRANSACTIONS WHERE order_id = ? ORDER BY created_at DESC LIMIT 1`,
         [orderId]
       );
       const latestTransaction = txnRows[0];
@@ -73,9 +79,9 @@ export default class PaymentReconciliationService {
           await conn.rollback();
           return { orderId, action: "WOULD_MARK_PAID", reason: "A PAID payment_transactions row exists." };
         }
-        await conn.execute(`UPDATE orders SET payment_status = 'PAID', status = 'PROCESSING', updated_at = NOW() WHERE id = ?`, [orderId]);
+        await conn.execute(`UPDATE ORDERS SET payment_status = 'PAID', status = 'PROCESSING', updated_at = NOW() WHERE id = ?`, [orderId]);
         await conn.execute(
-          `INSERT INTO order_status_history (order_id, old_status, new_status, changed_by_type, changed_by_user_id, note)
+          `INSERT INTO ORDER_STATUS_HISTORY (order_id, old_status, new_status, changed_by_type, changed_by_user_id, note)
            VALUES (?, 'PENDING_PAYMENT', 'PROCESSING', 'system', ?, 'Reconciliation: found a PAID payment record, self-healed order status.')`,
           [orderId, actorUserId]
         );
@@ -91,22 +97,22 @@ export default class PaymentReconciliationService {
         return { orderId, action: "WOULD_CANCEL", reason: "No successful payment on record past the stale threshold." };
       }
 
-      await conn.execute(`UPDATE orders SET payment_status = 'FAILED', status = 'CANCELLED', updated_at = NOW() WHERE id = ?`, [orderId]);
-      await conn.execute(`UPDATE merchant_orders SET status = 'CANCELLED', updated_at = NOW() WHERE order_id = ?`, [orderId]);
+      await conn.execute(`UPDATE ORDERS SET payment_status = 'FAILED', status = 'CANCELLED', updated_at = NOW() WHERE id = ?`, [orderId]);
+      await conn.execute(`UPDATE MERCHANT_ORDERS SET status = 'CANCELLED', updated_at = NOW() WHERE order_id = ?`, [orderId]);
       await conn.execute(
-        `INSERT INTO order_status_history (order_id, old_status, new_status, changed_by_type, changed_by_user_id, note)
+        `INSERT INTO ORDER_STATUS_HISTORY (order_id, old_status, new_status, changed_by_type, changed_by_user_id, note)
          VALUES (?, 'PENDING_PAYMENT', 'CANCELLED', 'system', ?, 'Reconciliation: no payment ever recorded past the stale threshold. Inventory restored.')`,
         [orderId, actorUserId]
       );
 
-      const [items] = await conn.execute(`SELECT product_id, variant_id, quantity FROM order_items WHERE order_id = ?`, [orderId]);
+      const [items] = await conn.execute(`SELECT product_id, variant_id, quantity FROM ORDER_ITEMS WHERE order_id = ?`, [orderId]);
       for (const item of items) {
         if (item.variant_id) {
-          await conn.execute(`UPDATE product_variants SET stock_quantity = stock_quantity + ?, updated_at = NOW() WHERE id = ?`, [item.quantity, item.variant_id]);
-          await conn.execute(`INSERT INTO inventory_movements (product_id, variant_id, delta, reason) VALUES (?, ?, ?, 'cancelled_order')`, [item.product_id, item.variant_id, item.quantity]);
+          await conn.execute(`UPDATE PRODUCT_VARIANTS SET stock_quantity = stock_quantity + ?, updated_at = NOW() WHERE id = ?`, [item.quantity, item.variant_id]);
+          await conn.execute(`INSERT INTO INVENTORY_MOVEMENTS (product_id, variant_id, delta, reason) VALUES (?, ?, ?, 'cancelled_order')`, [item.product_id, item.variant_id, item.quantity]);
         } else {
-          await conn.execute(`UPDATE products SET stock_quantity = stock_quantity + ?, updated_at = NOW() WHERE id = ?`, [item.quantity, item.product_id]);
-          await conn.execute(`INSERT INTO inventory_movements (product_id, delta, reason) VALUES (?, ?, 'cancelled_order')`, [item.product_id, item.quantity]);
+          await conn.execute(`UPDATE PRODUCTS SET stock_quantity = stock_quantity + ?, updated_at = NOW() WHERE id = ?`, [item.quantity, item.product_id]);
+          await conn.execute(`INSERT INTO INVENTORY_MOVEMENTS (product_id, delta, reason) VALUES (?, ?, 'cancelled_order')`, [item.product_id, item.quantity]);
         }
       }
 

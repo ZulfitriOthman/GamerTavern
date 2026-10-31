@@ -167,33 +167,62 @@ Sibling database:
 
 ```text
 ../Database/
-├── All.sql
-├── All.dbml
-├── All.dbdiagram
-├── NanashiCollectibles_v2.sql
-└── NanashiCollectibles_v2_seed.sql
+├── README.md
+├── All.sql                — fresh-install script (schema/001-008 concatenated)
+├── schema/                 — current schema, split by domain (001_core_auth.sql ... 008_platform_ops.sql)
+├── migrations/             — forward changes applied to an existing database
+├── seeds/
+│   ├── reference.sql        — safe, production-appropriate lookup data
+│   └── development.sql      — fake merchants/users/products, DEV ONLY
+├── archive/                — superseded pre-v2 schema (All.sql/.dbml/.dbdiagram), historical reference only
+└── backups/                 — gitignored; timestamped dumps
 ```
+
+UPDATED (2026-09-14 database cleanup): `Database/NanashiCollectibles_v2.sql` and
+`Database/Marketplace_Migration*.sql` no longer exist as standalone files —
+their content was merged and split into `Database/schema/001_core_auth.sql`
+through `008_platform_ops.sql`, and `Database/All.sql` is now the single
+fresh-install script (regenerated from those 8 files). See `Database/README.md`
+for the full structure, status conventions, and domain map.
 
 ## Canonical files
 
-Current database schema:
-
-```text
-Database/NanashiCollectibles_v2.sql
-```
-
-Reference seed data:
-
-```text
-Database/NanashiCollectibles_v2_seed.sql
-```
-
-Legacy only:
+Current database schema (fresh-install):
 
 ```text
 Database/All.sql
-Database/All.dbml
-Database/All.dbdiagram
+```
+
+Current database schema (split by domain, dependency order):
+
+```text
+Database/schema/001_core_auth.sql ... Database/schema/008_platform_ops.sql
+```
+
+Reference seed data (safe for any environment):
+
+```text
+Database/seeds/reference.sql
+```
+
+Development-only seed data (never run against production):
+
+```text
+Database/seeds/development.sql
+```
+
+Forward migrations for an already-existing database:
+
+```text
+Database/migrations/
+```
+
+Legacy only — confirmed NOT present in the live database, kept for historical reference:
+
+```text
+Database/archive/All.sql
+Database/archive/All.dbml
+Database/archive/All.dbdiagram
 ```
 
 Do not use the legacy schema as the source of truth for current backend behavior.
@@ -393,7 +422,7 @@ as the frontend source of truth for static business/domain configuration.
 It also provides the reference values used to generate:
 
 ```text
-Database/NanashiCollectibles_v2_seed.sql
+Database/seeds/reference.sql
 ```
 
 ## API responsibilities
@@ -597,6 +626,7 @@ Current v2 domain mapping:
 | Services           | `services`                                                                               |
 | Enquiries          | `enquiries`                                                                              |
 | Merchants          | `merchants`, `merchant_users`, `merchant_addresses`, `merchant_bank_details`             |
+| Merchant payments  | `merchant_payment_methods`, `merchant_payment_accounts`, `merchant_order_payments` (live 2026-09-16, `merchant_order_payments` still unwritten — see §62 addendum) |
 | Product variants   | `product_options`, `product_option_values`, `product_variants`, `product_variant_option_values` |
 | Cart / Wishlist    | `carts`, `cart_items`, `wishlists`, `wishlist_items`                                     |
 | Orders             | `orders`, `merchant_orders`, `order_items`, `order_status_history`, `shipments`, `shipping_methods` |
@@ -605,7 +635,7 @@ Current v2 domain mapping:
 | Payouts / Platform | `merchant_payouts`, `merchant_payout_items`, `platform_settings`                         |
 | Ops                | `notifications`, `audit_logs`                                                            |
 
-(Marketplace domains added by `Database/Marketplace_Migration.sql` — see section 62.)
+(Marketplace domains — see `Database/schema/004_merchants.sql` through `008_platform_ops.sql` and section 62.)
 
 ---
 
@@ -935,24 +965,42 @@ Preserve this privacy boundary.
 
 # 20. Database Rules
 
-Canonical schema:
+Canonical schema (fresh-install):
 
 ```text
-Database/NanashiCollectibles_v2.sql
+Database/All.sql
+```
+
+Canonical schema (split by domain, dependency order):
+
+```text
+Database/schema/001_core_auth.sql ... Database/schema/008_platform_ops.sql
 ```
 
 Reference seed:
 
 ```text
-Database/NanashiCollectibles_v2_seed.sql
+Database/seeds/reference.sql
 ```
 
-Legacy:
+Development-only seed (never run against production):
 
 ```text
-Database/All.sql
-Database/All.dbml
-Database/All.dbdiagram
+Database/seeds/development.sql
+```
+
+Forward migrations for an already-existing database:
+
+```text
+Database/migrations/
+```
+
+Legacy — confirmed NOT present in the live database, kept for historical reference only:
+
+```text
+Database/archive/All.sql
+Database/archive/All.dbml
+Database/archive/All.dbdiagram
 ```
 
 ## Database ownership policy
@@ -2092,7 +2140,7 @@ Inspect thoroughly before modification.
 
 ---
 
-## `Database/NanashiCollectibles_v2.sql`
+## `Database/schema/` (and `Database/All.sql`, generated from it)
 
 This schema is the contract assumed by migrated backend code.
 
@@ -2100,7 +2148,7 @@ Changing column names, constraints, or relationships without corresponding backe
 
 Remember:
 
-the schema has not yet been fully integration-tested against a real database.
+the schema has been exercised live (2026-09-14 database cleanup: a full merchant registration → approval → dashboard → cart → checkout workflow ran successfully against the real database, including the `checkout_idempotency` write), but a *fresh* `Database/All.sql` import into an empty database from scratch has not yet been confirmed end-to-end — see `Database/README.md` and the cleanup report for status.
 
 ---
 
@@ -2634,7 +2682,8 @@ Applied on top of everything above, before any frontend was built:
   new rows must go through `Backend/modules/encryption.module.js`
   (AES-256-GCM, `MARKETPLACE_DATA_ENCRYPTION_KEY`) via
   `POST /api/merchant/settings/bank-details` (OWNER-only). API responses
-  only ever return a masked `****last4`.
+  only ever return a masked `****last4`. Extended in Merchant Payments
+  Stage 1 with full CRUD (PATCH/DELETE/set-default) — see below.
 * **Product ownership fix**: `product.controller.js`'s update/delete/
   archive/inventory-adjust ownership check previously only allowed the
   exact creating `vendor_id` — a `MERCHANT_ADMIN`/`MERCHANT_EMPLOYEE`
@@ -2646,10 +2695,314 @@ Applied on top of everything above, before any frontend was built:
   `/api/merchant/orders`, `GET /api/orders`, `GET /api/reviews`, and the
   Socket.IO `product:list` event.
 
+## Merchant Payments (Stage 1 — per-merchant payment methods)
+
+Added 2026-09-16, on top of everything in §62 above. Lets each merchant
+choose which customer-facing payment method(s) they accept — `BANK_TRANSFER`
+and/or `ONLINE_PAYMENT` — rather than the marketplace assuming one method
+for everyone. Full rationale: the architecture audit report (this
+conversation) and `Database/README.md` "Merchant Payments".
+
+* **Data model**: `merchant_bank_details` is extended (not duplicated) with
+  `DISPLAY_NAME` (customer-facing name, distinct from `ACCOUNT_NAME` — the
+  legal account holder name), `BANK_OTHER_LABEL` (free text, only used when
+  `BANK_NAME = 'OTHER'`), and `NOTES`. Two new tables:
+  `merchant_payment_methods` (per-merchant on/off toggle) and
+  `merchant_payment_accounts` (per-merchant online-gateway configuration,
+  credentials stored as one encrypted JSON payload via the same
+  `encryption.module.js` helper — never fixed `API_KEY`/`API_SECRET`
+  columns, since different gateways need different credential shapes). A
+  third table, `merchant_order_payments` (one row per `merchant_order`'s
+  payment, since a multi-merchant order's merchants can each be in a
+  different payment state), is schema-provisioned but has **no backend
+  writer yet** — that is Stage 2 (the actual customer-facing
+  bank-transfer checkout flow), not this stage.
+* **`Backend/modules/merchantPayments.module.js`** is the single source of
+  truth for the app-validated vocabularies (`SUPPORTED_BANKS`,
+  `PAYMENT_METHODS`, `PAYMENT_ACCOUNT_STATUSES`) — mirrors the
+  "don't hand-roll a transition table" philosophy of
+  `orderStateMachine.module.js`, which itself gained
+  `MERCHANT_ORDER_PAYMENT_TRANSITIONS` in this stage (unused until Stage 2
+  wires it up).
+* **CRITICAL — online payment is setup, not settlement.** A merchant
+  enabling `ONLINE_PAYMENT` in `merchant_payment_methods`, or saving a
+  `merchant_payment_accounts` row, does **not** mean payments actually route
+  to that merchant. The real checkout path
+  (`Backend/routes/api/checkout.routes.js` → `PaymentService`) still
+  charges one platform-level provider for the entire cart regardless of
+  which merchants are in it (confirmed in the architecture audit — no code
+  threads a merchant-specific credential into the charge call, and the real
+  CyberSource integration doesn't process real charges at all yet). Do not
+  build a customer-facing flow that implies per-merchant online settlement
+  works. `merchant_payment_accounts.status` may only be written as
+  `NOT_CONFIGURED` / `PENDING` / `DISABLED` / `ERROR` by any code path
+  today — nothing may set `ACTIVE` until real per-merchant charge routing
+  is implemented and verified against the actual gateway.
+* **Bank-transfer snapshot design**: when Stage 2 eventually creates a
+  `merchant_order_payments` row for a bank-transfer order, it must copy the
+  bank instructions (`SNAPSHOT_*` columns, independently re-encrypted at
+  snapshot time) rather than pointing only at the mutable
+  `merchant_bank_details` row — a merchant editing/deleting their bank
+  details later must never change what an already-placed order displays.
+* **Endpoints added** (all under `/api/merchant`, OWNER-only unless noted):
+  `GET/POST/PATCH/DELETE /settings/bank-details[/:id]`,
+  `POST /settings/bank-details/:id/default`,
+  `GET /settings/payment-methods` (EMPLOYEE+) /
+  `PATCH /settings/payment-methods` (ADMIN+),
+  `GET/POST /settings/payment-accounts`.
+* **Frontend**: `MerchantSettingsBankPage.jsx` (route `/merchant/settings/bank`,
+  tab now labeled "Payments") evolved to cover payment-method toggles, full
+  bank-account CRUD (including a "keep existing / replace account number"
+  edit flow that never decrypts an existing number just to prefill a form),
+  and an honest "not connected" online-payment status section.
+* **Live-verified 2026-09-16**: `migrations/0004_add_merchant_payment_methods.sql`
+  is applied to the live `nanashi_collectibles` database — structurally
+  confirmed via `information_schema` (not just `SHOW CREATE TABLE`), and the
+  bank-details/payment-methods/payment-accounts backend was functionally
+  tested end-to-end against it (create/edit/keep-existing/replace-account-
+  number/delete/set-default, method toggles, payment-account config) through
+  a throwaway `TEST_`-prefixed merchant/user, all rows deleted afterward (0
+  residual). `merchant_order_payments` is live but still has no writer.
+  **Gap found**: `Backend/.env.dev` has no `MARKETPLACE_DATA_ENCRYPTION_KEY`
+  set — bank-detail writes correctly 503 until an operator sets one; this is
+  an ops action, not a code defect. `server.js` now validates this at
+  startup (`[security] Marketplace data encryption: configured|NOT
+  configured`, never logs the key) and refuses to start in production
+  without a valid one — see `modules/encryption.module.js`
+  `validateEncryptionKey()`.
+* **CORRECTED 2026-09-16 — payment-method eligibility is intersection-based,
+  fail-closed, for BOTH methods.** An earlier version of
+  `GET /api/checkout/eligibility` reported Online Payment as universally
+  available regardless of merchant configuration — that was a bug, not the
+  intended design, and has been fixed. The rule now, enforced identically
+  for `BANK_TRANSFER` and `ONLINE_PAYMENT`: a method is offered at checkout
+  only if **every** merchant represented in the cart has explicitly enabled
+  it (a missing `merchant_payment_methods` row means disabled — never a
+  default-enabled fallback). Bank Transfer additionally requires at least
+  one bank account on file. If neither method clears every merchant,
+  checkout is blocked with a clear message rather than silently falling
+  back to either method. This is re-verified a second time, under a fresh
+  row lock, inside the authoritative checkout transaction itself (both
+  `POST /api/checkout` and `POST /api/checkout/bank-transfer`) — never
+  trust the earlier `GET /eligibility` read alone, since merchant
+  configuration can change in between. `ONLINE_PAYMENT` enabled still only
+  ever means "this merchant permits the existing platform-level online
+  checkout" (see the CRITICAL note above) — that has not changed, only the
+  gating has.
+
+## WhatsApp Merchant Notifications (NEW_ORDER only)
+
+Added 2026-09-16. Transactional-only (not a chat system): after checkout
+commits, one WhatsApp message per merchant-order tells that merchant a new
+order arrived. Layering (never call a provider directly from a route):
+```
+checkout.routes.js → NotificationService.notifyNewOrderForOrder()
+  → notifyNewOrder() (per MERCHANT_ORDER)
+    → WhatsAppService.sendNewOrderNotification()
+      → WhatsAppProvider: MockWhatsAppProvider (default) | WhatsAppCloudProvider
+```
+* **Opt-in, fail-closed**: `MERCHANTS.WHATSAPP_NOTIFICATIONS_ENABLED` defaults
+  to 0 and `WHATSAPP_PHONE` (E.164, distinct from the general `PHONE`
+  column) must be explicitly configured — Merchant Settings → Notifications.
+  No number or not enabled = silently skipped, never blocks checkout.
+* **Never blocks or rolls back an order**: called only *after* the checkout
+  transaction commits (both the online and bank-transfer paths), and
+  `NotificationService` never throws — a WhatsApp/Meta outage only ever
+  fails that one notification, never the order.
+* **Idempotent by construction**: `OUTBOUND_NOTIFICATIONS` has
+  `UNIQUE(MERCHANT_ORDER_ID, CHANNEL, TYPE)` — the row is claimed via
+  `INSERT` *before* the provider is ever called; a duplicate-key error means
+  "already queued/sent," so a retried checkout can never double-send. This
+  is a separate table from the existing `NOTIFICATIONS` in-app inbox
+  (`USER_ID`/`TITLE`/`BODY`/`IS_READ`, zero delivery-channel concept, zero
+  consumers) — reusing that one would have conflated two different things.
+* **`WHATSAPP_PROVIDER`** env var: `mock` (default — logs sanitized
+  metadata, zero network calls, safe for dev) | `cloud` (real WhatsApp
+  Business Cloud API — **not live-tested against Meta**, no credentials
+  were available to verify it; matches `CyberSourceProvider`'s honesty
+  posture) | `disabled` (no-op, not even a log line). Business-initiated
+  messages require a pre-approved Meta template (`WHATSAPP_TEMPLATE_NEW_ORDER`,
+  default name `new_merchant_order`) — variable order is fixed in
+  `WhatsAppService.sendNewOrderNotification`'s doc comment
+  (`merchant_name, order_number, merchant_order_number, item_count, amount,
+  payment_method, payment_status, order_url`) and must match whatever is
+  actually registered in Meta Business Manager.
+* **Message content**: order numbers, item count, amount, payment
+  method/status, and a merchant-portal link only — no bank details, no
+  payment tokens, no customer PII. `LAST_ERROR` is sanitized (provider
+  message/code only, truncated) — never a raw request/response body.
+* Only `NEW_ORDER` is implemented. `PAYMENT_RECEIVED`, `ORDER_CANCELLED`,
+  `LOW_STOCK`, `DISPUTE_OPENED`, `PAYOUT_PROCESSED` are documented future
+  types (`modules/notifications.module.js`) — not built.
+* **Schema prepared, not yet applied to the live database** as of this
+  writing — `migrations/0005_add_whatsapp_notifications.sql` needs to be
+  run (see Database/README.md) before any of this can be live-verified.
+
+## Merchant Commission Receivable
+
+Added 2026-09-18. Full detail in `Database/README.md` "Merchant Commission
+Receivable" — summarized here:
+
+* The opposite direction from `merchant_payouts` (Nanashi owes merchant):
+  `merchant_commission_statements`/`_statement_items`/`_payments` track
+  commission the *merchant* owes *Nanashi*, and only ever accrue for
+  orders a customer paid directly to the merchant (Bank Transfer / Pay on
+  Delivery / Pay on Pickup) — an Online Payment order never generates one,
+  since Nanashi already holds that money. The payment-routing rule lives
+  in one place, `Backend/modules/merchantFinance.module.js`, reused by
+  both this feature and the existing admin analytics endpoint.
+* Statements are never auto-generated — an admin explicitly issues one
+  (`POST /api/admin/merchants/:id/commission-statements`) for a period;
+  a `UNIQUE(merchant_order_id)` constraint on `_statement_items` makes
+  double-billing the same order impossible at the database level.
+  Payments (`POST .../commission-statements/:id/payments`) support
+  partial amounts and recompute the statement's balance/status.
+* Admin Merchant Detail page gained a "Commission Due" KPI, a Financial
+  Overview split into Sales / Nanashi-Owes-Merchant / Merchant-Owes-Nanashi
+  groups, and a Commission Receivable section (aging buckets, unbilled
+  orders, statements, Issue Statement / Record Payment actions).
+* **Not implemented this stage**: a merchant-facing view under Merchant
+  Portal (Payouts/Finance) — admin-only for now.
+* **Status**: schema and backend/frontend code complete, build/lint
+  clean — **not yet applied to or verified against any live database**
+  (`migrations/0009_add_merchant_commission_receivable.sql` not yet run).
+
+## TCG Product Type
+
+Added 2026-09-17. Full detail in `Database/README.md` "TCG Product Type" —
+summarized here:
+
+* New `product_types` table (scoped per `product_categories.id`, not a
+  global flat list) plus `products.product_type_id` (nullable FK), so the
+  Shop's Category + TCG Game filters gained a third: Product Type (Single
+  Card, Booster Pack, Booster Box, Starter Deck, Trial Deck, Structure
+  Deck, Deck Set, Bundle / Collection, Other — Trading Card Games only for
+  now). Deliberately NOT per-type boolean columns on `products` — that
+  wouldn't scale to future categories (Gunpla grades, Computer Parts
+  types, ...), which this design supports with zero schema change.
+* `Backend/controllers/product.controller.js`'s `resolveProductTypeRequirement()`
+  requires a `product_type_id` for any category with active `product_types`
+  rows — data-driven, not a hardcoded category slug check. A category
+  changed away from a configured one has its stale `product_type_id`
+  cleared server-side regardless of what the client sends.
+* `ProductForm.jsx` shows the dropdown (required) whenever the selected
+  category has any product types; the Shop's new `ProductTypeFilter`
+  (beside Sort, not duplicated in the sidebar) does the same for browsing.
+  Search additionally matches `tags`/`brand`/`short_description` — SKU
+  remains purely the merchant's own inventory code, never parsed to infer
+  type.
+* **Status**: schema and backend/frontend code complete, build/lint clean —
+  **not yet applied to or verified against any live database**
+  (`migrations/0008_add_product_types.sql` not yet run).
+
+## Customer Delivery Checkout
+
+Added 2026-09-19, on top of the Fulfilment + Offline Payment Methods work
+below. Full detail in `Database/README.md` "Customer Delivery Checkout" —
+summarized here:
+
+* Fulfilment is now a real, interactive checkout step. Delivery collects a
+  real address (reuses `customer_addresses`, one new nullable
+  `ADDRESS_LINE2` column — no separate address-book UI was built, just
+  minimal list/create via `Backend/routes/api/addresses.routes.js`),
+  optional delivery instructions (`orders.delivery_instructions`), and an
+  optional one-per-order reference photo (new table
+  `ORDER_DELIVERY_ATTACHMENTS`, uploaded via a new authenticated
+  `POST /api/upload/delivery-reference` reusing the existing multer
+  pattern). Pickup shows the merchant's own registered address
+  (`merchant_addresses`) when one exists — never an invented one.
+* **Kept at `ORDERS` scope, not `MERCHANT_ORDERS`** — fulfilment is chosen
+  once per checkout under the existing one-shipping-method-per-order model,
+  so delivery details live at the same level. A merchant reads their own
+  order's delivery info by joining through their own `merchant_orders` row,
+  already ownership-scoped.
+* `checkout.routes.js` `reserveOrder()` independently validates a Delivery
+  order has a real `shippingAddressId` (never trusts the frontend), and
+  validates the reference-photo URL matches the app's own upload path
+  before storing it — never an arbitrary client-supplied URL, never base64
+  in the database.
+* **Status**: schema and backend/frontend code complete, build/lint clean —
+  **not yet applied to or verified against any live database**
+  (`Database/migrations/0007_add_delivery_checkout_fields.sql` not yet run).
+
+## Merchant Fulfilment + Offline Payment Methods
+
+Added 2026-09-18, on top of Merchant Payments Stage 2 (checkout now has a
+real, working bank-transfer flow — see the correction in the "Merchant
+Payments" section above; the "configuration only" framing below was stale).
+Lets customers pay **Pay on Delivery** or **Pay on Pickup**, and lets each
+merchant say which fulfilment methods (Delivery, Pickup) they actually
+support — full rationale and column-level detail in `Database/README.md`
+"Merchant Fulfilment + Offline Payment Methods".
+
+* **Payment method vs. fulfilment method stay strictly separate.**
+  `MERCHANT_PAYMENT_METHODS.METHOD` gained `PAY_ON_DELIVERY`/`PAY_ON_PICKUP`
+  (`Backend/modules/merchantPayments.module.js`) — both payment methods,
+  never "Delivery" itself. `MERCHANT_FULFILMENT_METHODS` (new table,
+  `DELIVERY` | `PICKUP`, same "no row = disabled" convention as payment
+  methods) is a separate module, `Backend/modules/fulfilment.module.js`,
+  which also maps `SHIPPING_METHODS.CODE` -> fulfilment type
+  (`'pickup'` -> `PICKUP`, everything else -> `DELIVERY`).
+* **Checkout eligibility is a joint intersection**, computed in
+  `checkout.routes.js`: `GET /api/checkout/fulfilment-methods` gates which
+  `SHIPPING_METHODS` rows are even offered (every merchant in the cart must
+  enable that fulfilment type); `GET /api/checkout/eligibility?shippingMethodId=`
+  then gates payment methods against the chosen type — `PAY_ON_DELIVERY`
+  only ever appears under Delivery, `PAY_ON_PICKUP` only under Pickup. Both
+  are re-verified a second time, under a fresh row lock, inside the
+  checkout transaction itself (`POST /api/checkout/pay-on-delivery` and
+  `/pay-on-pickup`, new endpoints alongside the existing `/bank-transfer`) —
+  never trust the `GET` reads alone.
+* **Offline, always.** Neither method calls `PaymentService.charge()` —
+  `settleOfflineOrder()` (the generalized former `settleBankTransferOrder()`
+  in `checkout.routes.js`) branches on `paymentMethod` but never touches
+  `PAYMENT_TRANSACTIONS` for any of `BANK_TRANSFER`/`PAY_ON_DELIVERY`/
+  `PAY_ON_PICKUP`. No bank account, card, or gateway credential is required
+  for Pay on Delivery/Pickup.
+* **`MERCHANT_ORDER_PAYMENTS` lifecycle differs by method.** Bank transfer:
+  `PENDING -> AWAITING_TRANSFER -> PAID`. Pay on Delivery/Pickup: created
+  directly as `PENDING`, merchant confirms straight to `PAID` — added as a
+  new direct transition in `MERCHANT_ORDER_PAYMENT_TRANSITIONS`
+  (`orderStateMachine.module.js`).
+* **The "fulfilment can't advance until payment is confirmed" gate is now
+  bank-transfer-specific.** `PATCH /api/merchant/orders/:id/status`
+  previously blocked ANY merchant order with an unpaid `MERCHANT_ORDER_PAYMENTS`
+  row from advancing past `PROCESSING` — correct for bank transfer (customer
+  should pay before you ship), wrong for Pay on Delivery/Pickup (payment
+  happens at/after delivery, so fulfilment must be free to reach that point
+  first). The guard now checks `payment_method = 'BANK_TRANSFER'` explicitly.
+* **`POST /api/merchant/orders/:id/payment/confirm` is now fully generic**
+  across every offline method — it asks `canTransitionMerchantOrderPayment()`
+  whether the current status can reach `PAID` rather than hardcoding
+  `AWAITING_TRANSFER`. The merchant order detail page's confirmation dialog
+  (`MerchantOrderDetailPage.jsx`) is unchanged in shape, just method-aware in
+  its labels ("Confirm Delivery Payment Received" / "Confirm Pickup Payment
+  Received" / "Confirm Bank Transfer Received").
+* **Customer-facing payment status is method-aware**, not a bare
+  `PENDING` badge — `OrderConfirmationPage.jsx` shows "Payment due on
+  delivery" / "Payment due on pickup" for these two methods, distinct from
+  bank transfer's "Awaiting transfer".
+* **Reference seed changed**: `Database/seeds/reference.sql`'s single
+  `"Pickup / Merchant Arranged"` placeholder `SHIPPING_METHODS` row is now
+  two real rows (`Pickup`, `Local Delivery`) so Delivery and Pickup are
+  genuinely distinct, selectable checkout choices.
+* **Status**: schema and backend/frontend code complete, build/lint clean —
+  **not yet applied to or verified against any live database** as of this
+  writing (`Database/migrations/0006_add_fulfilment_and_offline_payment_methods.sql`
+  has not been run).
+
 ## Known limitations (marketplace layer)
 
 * No frontend has been built against these APIs yet (merchant dashboard,
   storefront cart/checkout/account pages) — backend/DB only so far.
+* **Merchant Payments Stage 2 (bank transfer) is live in code**: checkout
+  lets a customer choose bank transfer, `merchant_order_payments` rows are
+  created and confirmed through it — see "Merchant Payments" above (an
+  earlier "configuration only, Stage 2 not built" note here was stale and
+  has been corrected). Real per-merchant *online*-payment routing still does
+  not exist — enabling `ONLINE_PAYMENT` remains setup only. QR payment
+  remains completely deferred (no schema, no UI, no fake verification)
+  pending business research.
 * No automated payout transfer — `merchant_payouts` is a ledger an admin
   fills in manually, per spec.
 * `CyberSourceProvider.refund()` is not implemented — process real
@@ -2666,3 +3019,13 @@ Applied on top of everything above, before any frontend was built:
   correct because `MockCyberSourceProvider` has no real external side
   effect. It must NOT be run as-is once `PAYMENT_PROVIDER=cybersource`
   is real — see the header note in `PaymentReconciliationService.js`.
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).

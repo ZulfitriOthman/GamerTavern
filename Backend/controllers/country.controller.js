@@ -8,7 +8,7 @@ export default function countrySocketController({ socket, db }) {
   socket.on("country:list", async (_payload, ack) => {
     try {
       const [rows] = await db.query(
-        "SELECT id, name, iso_code AS isoCode, calling_code AS callingCode, flag FROM countries ORDER BY name"
+        "SELECT id, name, iso_code AS isoCode, calling_code AS callingCode, flag FROM COUNTRIES ORDER BY name"
       );
       const data = rows || [];
 

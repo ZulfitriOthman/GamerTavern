@@ -17,7 +17,10 @@ export default function MerchantSettingsLayout() {
           Profile
         </NavLink>
         <NavLink to="/merchant/settings/bank" className={tabClasses}>
-          Bank details
+          Payments
+        </NavLink>
+        <NavLink to="/merchant/settings/notifications" className={tabClasses}>
+          Notifications
         </NavLink>
       </div>
 

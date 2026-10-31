@@ -1,0 +1,154 @@
+@import 'tailwindcss';
+
+/* ---------------------------------------------------------------------------
+   Design tokens — quiet luxury: ivory, beige, champagne and espresso with a
+   muted gold accent and a whisper of sage. Token names are shared with the
+   admin dashboard, so change values here rather than renaming.
+   --------------------------------------------------------------------------- */
+@theme {
+  --color-ivory: #fbf8f3;
+  --color-cream: #f5efe6;
+  --color-beige: #f0e8dc;
+  --color-linen: #ebe1d2;
+  --color-champagne: #e2d2b6;
+  --color-sand: #cbb692;
+  --color-gold: #a8895a;
+  --color-gold-deep: #7f663f;
+  --color-taupe: #8b7c6c;
+  --color-sage: #a2ac97;
+  --color-sage-soft: #e4e7de;
+  --color-sage-deep: #5d6955;
+  --color-ink: #2e2925;
+  --color-espresso: #29231f;
+  --color-muted: #6f655b;
+  --color-rose: #a3574d;
+
+  --font-display: 'Marcellus', 'Cormorant Garamond', 'Times New Roman', serif;
+  --font-serif: 'Cormorant Garamond', 'Times New Roman', serif;
+  --font-script: 'Great Vibes', 'Cormorant Garamond', cursive;
+  --font-sans: 'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-arabic: 'Amiri', 'Traditional Arabic', serif;
+
+  --shadow-soft: 0 1px 2px rgb(41 35 31 / 0.04), 0 10px 30px -14px rgb(41 35 31 / 0.18);
+  --shadow-lift: 0 2px 6px rgb(41 35 31 / 0.05), 0 30px 60px -28px rgb(41 35 31 / 0.35);
+
+  --animate-slow-zoom: slow-zoom 18s ease-out both;
+  @keyframes slow-zoom {
+    from { transform: scale(1.12); }
+    to { transform: scale(1); }
+  }
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+    scroll-padding-top: 5rem; /* anchor targets clear the fixed navbar */
+  }
+  body {
+    @apply bg-ivory font-sans text-ink antialiased;
+  }
+  h1, h2, h3, h4 {
+    @apply font-display font-normal text-ink;
+    letter-spacing: 0.02em;
+  }
+  ::selection {
+    background: rgb(168 137 90 / 0.25);
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-gold);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+/* Component classes. They live in the components layer so any utility class
+   (e.g. `btn-outline px-4`) reliably overrides them. They only @apply built-in
+   utilities — Tailwind v4 cannot @apply custom classes. */
+@layer components {
+  .eyebrow {
+    @apply font-sans text-[0.68rem] font-semibold tracking-[0.34em] text-gold-deep uppercase;
+  }
+  .card {
+    @apply rounded-2xl border border-linen bg-white/80 shadow-soft;
+  }
+  .paper {
+    @apply rounded-[1.5rem] border border-linen bg-ivory shadow-lift;
+  }
+  .btn,
+  .btn-primary,
+  .btn-gold,
+  .btn-outline,
+  .btn-ghost,
+  .btn-danger,
+  .btn-light {
+    @apply inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-full px-7 py-2.5 text-[0.72rem] font-semibold tracking-[0.2em] uppercase transition duration-300 select-none disabled:cursor-not-allowed disabled:opacity-55;
+  }
+  .btn-primary {
+    @apply bg-espresso text-ivory shadow-soft hover:-translate-y-0.5 hover:bg-gold-deep hover:shadow-lift active:translate-y-0 disabled:translate-y-0;
+  }
+  .btn-gold {
+    @apply bg-gold text-white shadow-soft hover:-translate-y-0.5 hover:bg-gold-deep hover:shadow-lift active:translate-y-0;
+  }
+  .btn-outline {
+    @apply border border-gold/70 bg-transparent text-ink hover:border-gold-deep hover:bg-gold hover:text-white;
+  }
+  .btn-light {
+    @apply border border-white/60 bg-white/10 text-white backdrop-blur-sm hover:bg-white hover:text-espresso;
+  }
+  .btn-ghost {
+    @apply px-4 tracking-[0.12em] text-muted normal-case hover:bg-cream hover:text-ink;
+  }
+  .btn-danger {
+    @apply bg-rose text-white hover:bg-rose/90;
+  }
+  .field-label {
+    @apply mb-1.5 block text-[0.68rem] font-semibold tracking-[0.18em] text-muted uppercase;
+  }
+  .input {
+    @apply block w-full rounded-xl border border-linen bg-white px-4 py-3 text-base text-ink transition placeholder:text-muted/60 focus:border-gold focus:ring-4 focus:ring-gold/15 focus:outline-none disabled:bg-cream/60 sm:text-[0.95rem];
+  }
+  .input[aria-invalid='true'] {
+    @apply border-rose/70 focus:ring-rose/15;
+  }
+}
+
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar { display: none; }
+}
+
+/* Envelope: the flap is a triangle that folds back in 3D. */
+.envelope-flap {
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  transform-origin: top center;
+  backface-visibility: hidden;
+}
+.envelope-pocket {
+  clip-path: polygon(0 0, 50% 52%, 100% 0, 100% 100%, 0 100%);
+}
+
+/* Arched frame used for portraits and the photo-less hero. */
+.arch {
+  border-radius: 999px 999px 1.25rem 1.25rem;
+}
+
+/* Shimmer for loading placeholders. */
+.skeleton {
+  @apply rounded-xl bg-linen;
+  background-image: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.55), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s infinite linear;
+}
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}

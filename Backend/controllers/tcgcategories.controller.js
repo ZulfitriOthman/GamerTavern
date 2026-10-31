@@ -24,7 +24,7 @@ export default function tcgCategoriesSocketController({ socket, io, db }) {
   socket.on("tcgcategories:list", async (_payload, ack) => {
     try {
       const [rows] = await db.query(
-        "SELECT id, name, slug, status FROM tcg_games ORDER BY name"
+        "SELECT id, name, slug, status FROM TCG_GAMES ORDER BY name"
       );
       if (typeof ack === "function") ack({ success: true, data: rows || [] });
       socket.emit("tcgcategories:list", rows || []);
@@ -49,10 +49,10 @@ export default function tcgCategoriesSocketController({ socket, io, db }) {
     const slug = toStr(payload?.slug) || slugify(name);
 
     try {
-      await db.execute("INSERT INTO tcg_games (name, slug) VALUES (?, ?)", [name, slug]);
+      await db.execute("INSERT INTO TCG_GAMES (name, slug) VALUES (?, ?)", [name, slug]);
 
       const [rows] = await db.query(
-        "SELECT id, name, slug, status FROM tcg_games ORDER BY name"
+        "SELECT id, name, slug, status FROM TCG_GAMES ORDER BY name"
       );
 
       respond({ success: true, data: rows || [], message: "TCG game created." });
