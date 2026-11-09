@@ -1,0 +1,19 @@
+services:
+  backend:
+    image: node:24-bookworm-slim
+    working_dir: /workspace/Backend
+    ports:
+      - "127.0.0.1:3002:3002"
+    volumes:
+      - .:/workspace/Backend
+      - ../Wedding:/workspace/Wedding
+      - backend_node_modules:/workspace/Backend/node_modules
+      - wedding_node_modules:/workspace/Wedding/server/node_modules
+    command: >
+      sh -c "npm ci --prefix /workspace/Wedding/server &&
+             npm ci &&
+             npm run dev -- --legacy-watch"
+
+volumes:
+  backend_node_modules:
+  wedding_node_modules:

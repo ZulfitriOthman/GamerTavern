@@ -1,0 +1,107 @@
+.petals {
+  pointer-events: none;
+  user-select: none;
+  overflow: hidden;
+}
+
+.petal {
+  position: absolute;
+  top: 0;
+  left: var(--x);
+  width: var(--size);
+  opacity: 0;
+  color: #b89bd6;
+}
+
+.petal:nth-child(3n + 2) {
+  color: #9c7cc4;
+}
+
+.petal:nth-child(3n) {
+  color: #d9c7ef;
+}
+
+.petal__sway {
+  display: block;
+}
+
+/* Ambient: a fixed viewport layer between section backgrounds and text */
+
+.petals--ambient {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+}
+
+.petals--ambient .petal {
+  animation: petal-fall var(--duration) linear var(--delay) infinite;
+}
+
+.petals--ambient .petal__sway {
+  animation: petal-sway calc(var(--duration) / 4) ease-in-out infinite alternate;
+}
+
+@keyframes petal-fall {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -6vh, 0) rotate(0deg);
+  }
+  12%,
+  88% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--drift), 104vh, 0) rotate(var(--spin));
+  }
+}
+
+@keyframes petal-sway {
+  from {
+    transform: translateX(-10px) rotate(-25deg);
+  }
+  to {
+    transform: translateX(10px) rotate(30deg);
+  }
+}
+
+@media (max-width: 600px) {
+  .petals--ambient .petal:nth-child(n + 5) {
+    display: none;
+  }
+}
+
+/* Burst: a handful of petals released as the cover opens */
+
+.petals--burst {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+}
+
+.petals--burst .petal {
+  top: var(--y);
+  animation: petal-burst 1.3s cubic-bezier(0.25, 0.6, 0.3, 1) var(--delay)
+    forwards;
+}
+
+@keyframes petal-burst {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) rotate(0deg);
+  }
+  15% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(calc(var(--dx) * 1vmin), calc(var(--dy) * 1vmin))
+      rotate(var(--spin));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .petals {
+    display: none;
+  }
+}

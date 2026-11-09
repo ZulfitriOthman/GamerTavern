@@ -1,0 +1,747 @@
+/* Page shell ------------------------------------------------------------ */
+
+.site {
+  /* Contains bouquets that overhang the viewport edges */
+  overflow-x: clip;
+  transition:
+    opacity 0.9s ease 0.3s,
+    transform 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) 0.3s;
+}
+
+/* Hidden beneath the cover until it opens */
+.site.is-pending {
+  opacity: 0;
+  transform: translateY(24px);
+}
+
+.container {
+  width: 100%;
+  max-width: 1160px;
+  margin-inline: auto;
+  padding-inline: clamp(20px, 5vw, 48px);
+}
+
+section {
+  position: relative;
+}
+
+/* Text always sits above the decorative layers */
+.hero__content,
+.hero__cue-wrap,
+.container {
+  position: relative;
+  z-index: 2;
+}
+
+/* Floral bouquets ------------------------------------------------------- */
+
+.bouquet {
+  position: absolute;
+  z-index: 1;
+  height: auto;
+  pointer-events: none;
+  user-select: none;
+  /* Centre pivot keeps mirrored artwork in place while it sways */
+  transform-origin: 50% 50%;
+  animation: sway 7s ease-in-out infinite alternate;
+}
+
+.bouquet--tl {
+  top: -6px;
+  left: -6px;
+  transform: scaleY(-1);
+}
+
+.bouquet--tr {
+  top: -6px;
+  right: -6px;
+  transform: scale(-1, -1);
+  animation-duration: 8s;
+  animation-delay: -3s;
+}
+
+.bouquet--bl {
+  bottom: -6px;
+  left: -6px;
+  animation-delay: -1.5s;
+}
+
+.bouquet--br {
+  bottom: -6px;
+  right: -6px;
+  transform: scaleX(-1);
+  animation-duration: 8.5s;
+  animation-delay: -4s;
+}
+
+/* Barely-there sway; `rotate` composes with the mirror transforms */
+@keyframes sway {
+  from {
+    rotate: -1deg;
+  }
+  to {
+    rotate: 1deg;
+  }
+}
+
+/* Hero ------------------------------------------------------------------ */
+
+.hero {
+  /* Scales with whichever viewport side is larger, so tall tablets stay framed */
+  --bouquet: clamp(150px, max(27vw, 24vh), 440px);
+  /* Room kept clear at the bottom for the absolutely positioned scroll cue */
+  --cue-offset: clamp(26px, 4vh, 44px);
+  --cue-space: calc(var(--cue-offset) + 72px);
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  min-height: 100svh;
+  padding: calc(var(--bouquet) * 0.42) clamp(24px, 6vw, 64px) var(--cue-space);
+  overflow: clip;
+  text-align: center;
+  background: radial-gradient(
+    ellipse 70% 60% at 50% 45%,
+    rgb(255 253 248 / 0.9) 0%,
+    rgb(255 253 248 / 0) 70%
+  );
+}
+
+@media (min-width: 1024px) {
+  /* Bouquets sit beside the text on wide screens, so less top clearance */
+  .hero {
+    padding-top: clamp(48px, 7vh, 96px);
+  }
+
+  .greeting {
+    margin-bottom: 12px;
+  }
+}
+
+/* Fine double gold frame */
+.hero__frame {
+  position: absolute;
+  inset: clamp(10px, 1.8vw, 26px);
+  border: 1px solid var(--gold);
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+.hero__frame::after {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  border: 1px solid var(--gold);
+  opacity: 0.45;
+}
+
+.hero__bouquet {
+  width: var(--bouquet);
+}
+
+.hero__bouquet--small {
+  width: calc(var(--bouquet) * 0.62);
+}
+
+.hero__content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 980px;
+}
+
+.hero__crest {
+  width: clamp(120px, 13vw, 170px);
+  height: auto;
+  margin-bottom: clamp(10px, 2vw, 22px);
+  color: var(--gold);
+}
+
+.hero__title {
+  font-family: var(--font-script);
+  font-weight: 400;
+  font-size: clamp(3.2rem, 8vw, 6.5rem);
+  line-height: 1.04;
+  color: var(--purple);
+  text-wrap: balance;
+}
+
+.hero__title:focus {
+  /* Programmatic focus target only; no ring needed */
+  outline: none;
+}
+
+.greeting {
+  margin-bottom: clamp(16px, 2.4vw, 28px);
+}
+
+.greeting__bismillah {
+  font-family: var(--font-arabic);
+  font-size: clamp(1.6rem, 1.2rem + 1.6vw, 2.4rem);
+  line-height: 1.5;
+  margin-bottom: 6px;
+  color: var(--purple);
+}
+
+.greeting__salam {
+  font-size: clamp(1.1rem, 0.95rem + 0.6vw, 1.4rem);
+  font-style: italic;
+  line-height: 1.4;
+  color: var(--purple-soft);
+  text-wrap: balance;
+}
+
+/* Couple names (hero and cover) */
+.couple {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1em;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  color: var(--purple);
+}
+
+.couple__name {
+  text-wrap: balance;
+}
+
+.couple__joiner {
+  font-family: var(--font-script);
+  font-weight: 400;
+  font-size: 1.3em;
+  line-height: 1.15;
+  letter-spacing: 0;
+  color: var(--lavender);
+}
+
+.hero__names {
+  font-size: clamp(1.45rem, 1rem + 1.8vw, 2.5rem);
+}
+
+.hero__text {
+  max-width: 46ch;
+  margin: clamp(14px, 2vw, 24px) auto 0;
+  font-size: clamp(1.15rem, 0.9rem + 0.8vw, 1.5rem);
+  line-height: 1.6;
+  color: var(--purple-soft);
+  text-wrap: pretty;
+}
+
+.hero__cue-wrap {
+  position: absolute;
+  bottom: var(--cue-offset);
+  left: 50%;
+  translate: -50% 0;
+}
+
+.hero__cue {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  color: var(--purple-soft);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+.hero__cue svg {
+  width: 22px;
+  height: 22px;
+  color: var(--gold);
+  animation: cue-bob 2.4s ease-in-out infinite;
+}
+
+.hero__cue:hover {
+  color: var(--purple);
+}
+
+.hero__cue:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 3px;
+}
+
+@keyframes cue-bob {
+  50% {
+    transform: translateY(5px);
+  }
+}
+
+/* Shared ---------------------------------------------------------------- */
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.divider {
+  width: clamp(170px, 18vw, 240px);
+  height: auto;
+  margin: clamp(16px, 2.4vw, 28px) auto;
+  color: var(--gold);
+}
+
+.section-title {
+  font-family: var(--font-script);
+  font-weight: 400;
+  font-size: clamp(2.6rem, 5.5vw, 4.2rem);
+  line-height: 1.1;
+  text-align: center;
+  color: var(--purple);
+}
+
+/* Event details --------------------------------------------------------- */
+
+.details {
+  padding-block: clamp(64px, 9vw, 120px);
+  background: linear-gradient(
+    180deg,
+    rgb(239 230 248 / 0) 0%,
+    rgb(239 230 248 / 0.6) 22%,
+    rgb(239 230 248 / 0.6) 78%,
+    rgb(239 230 248 / 0) 100%
+  );
+}
+
+/* Faded gold hairlines above and below the band */
+.details::before,
+.details::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  width: min(1060px, 86%);
+  height: 1px;
+  translate: -50% 0;
+  background: linear-gradient(
+    90deg,
+    rgb(176 141 87 / 0),
+    rgb(176 141 87 / 0.7),
+    rgb(176 141 87 / 0)
+  );
+}
+
+.details::before {
+  top: 0;
+}
+
+.details::after {
+  bottom: 0;
+}
+
+.details__grid {
+  display: grid;
+  gap: clamp(40px, 8vw, 56px);
+}
+
+.detail {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+/* Short gold rule between stacked items */
+.detail + .detail::before {
+  content: '';
+  position: absolute;
+  top: calc(clamp(40px, 8vw, 56px) / -2);
+  left: 50%;
+  width: 72px;
+  height: 1px;
+  translate: -50% 0;
+  background: linear-gradient(
+    90deg,
+    rgb(176 141 87 / 0),
+    var(--gold),
+    rgb(176 141 87 / 0)
+  );
+}
+
+.detail__icon {
+  display: grid;
+  place-items: center;
+  width: clamp(56px, 5vw, 66px);
+  aspect-ratio: 1;
+  margin-bottom: 16px;
+  border-radius: 50%;
+  background: var(--lavender-pale);
+  color: var(--lavender);
+  box-shadow:
+    inset 0 0 0 1px rgb(142 107 184 / 0.25),
+    0 0 0 5px rgb(255 253 248 / 0.9),
+    0 0 0 6px rgb(176 141 87 / 0.45);
+}
+
+.detail__icon svg {
+  width: 46%;
+  height: 46%;
+}
+
+.detail__label {
+  margin-bottom: 10px;
+  font-family: var(--font-serif);
+  font-size: clamp(0.85rem, 1vw, 0.95rem);
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--lavender);
+}
+
+.detail__value {
+  font-size: clamp(1.4rem, 2.2vw, 1.85rem);
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--purple);
+  text-wrap: balance;
+}
+
+.detail__sub {
+  margin-top: 6px;
+  font-size: clamp(1.1rem, 1.5vw, 1.3rem);
+  line-height: 1.5;
+  color: var(--purple-soft);
+}
+
+/* Stacked time entries inside the Masa card */
+.detail__schedule {
+  display: grid;
+  gap: clamp(14px, 2vw, 20px);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-wrap: normal;
+}
+
+/* Gold-outlined pill linking to the venue on Google Maps */
+.map-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 0.55em 1.15em;
+  border: 1px solid var(--gold);
+  border-radius: 999px;
+  background: rgb(255 253 248 / 0.7);
+  color: var(--purple);
+  font-size: 0.98rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  line-height: 1.3;
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    background-color 0.25s ease,
+    color 0.25s ease;
+}
+
+.map-link svg {
+  flex: none;
+  width: 17px;
+  height: 17px;
+  color: var(--gold);
+  transition: color 0.25s ease;
+}
+
+.map-link:hover {
+  background: var(--purple);
+  color: var(--ivory);
+}
+
+.map-link:hover svg {
+  color: #d6b56b;
+}
+
+.map-link:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 3px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (min-width: 760px) {
+  .details__grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0;
+  }
+
+  .detail {
+    padding-inline: clamp(16px, 3vw, 40px);
+  }
+
+  /* Vertical gold hairline between columns */
+  .detail + .detail::before {
+    top: 8%;
+    left: 0;
+    width: 1px;
+    height: 84%;
+    translate: none;
+    background: linear-gradient(
+      180deg,
+      rgb(176 141 87 / 0),
+      rgb(176 141 87 / 0.65),
+      rgb(176 141 87 / 0)
+    );
+  }
+}
+
+/* Narrow three-column range: give each column a little more room */
+@media (min-width: 760px) and (max-width: 999px) {
+  .detail {
+    padding-inline: 8px;
+  }
+}
+
+/* Aturcara -------------------------------------------------------------- */
+
+.programme {
+  padding-block: clamp(72px, 9vw, 124px) clamp(16px, 2vw, 28px);
+}
+
+.timeline {
+  --row-gap: clamp(26px, 4vw, 40px);
+
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  column-gap: clamp(18px, 3vw, 40px);
+  row-gap: var(--row-gap);
+  width: fit-content;
+  max-width: 100%;
+  margin: clamp(12px, 2vw, 24px) auto 0;
+  padding: 0;
+  list-style: none;
+}
+
+@media (min-width: 600px) {
+  /* Equal outer columns centre the line on the page */
+  .timeline {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    width: min(760px, 100%);
+  }
+}
+
+.timeline__item {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+}
+
+.timeline__time {
+  font-size: clamp(1.2rem, 2vw, 1.5rem);
+  font-weight: 600;
+  text-align: right;
+  white-space: nowrap;
+  color: var(--purple);
+}
+
+.timeline__activity {
+  font-size: clamp(1.15rem, 1.9vw, 1.45rem);
+  line-height: 1.4;
+  color: var(--purple-soft);
+}
+
+.timeline__marker {
+  position: relative;
+  align-self: stretch;
+  width: 16px;
+}
+
+/* Fine gold connecting line, split into per-item segments */
+.timeline__marker::before {
+  content: '';
+  position: absolute;
+  top: calc(var(--row-gap) / -2);
+  bottom: calc(var(--row-gap) / -2);
+  left: 50%;
+  width: 1px;
+  translate: -50% 0;
+  background: var(--gold);
+  opacity: 0.6;
+}
+
+.timeline__item:first-child .timeline__marker::before {
+  top: 50%;
+}
+
+.timeline__item:last-child .timeline__marker::before {
+  bottom: 50%;
+}
+
+/* Lavender marker */
+.timeline__marker::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  translate: -50% -50%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #d9c7ef, var(--lavender));
+  box-shadow:
+    0 0 0 1px var(--gold),
+    0 0 0 5px var(--ivory);
+}
+
+/* Yang Berharap --------------------------------------------------------- */
+
+.family {
+  padding-block: clamp(64px, 8vw, 110px) clamp(16px, 2vw, 28px);
+}
+
+.family__list {
+  display: grid;
+  gap: 0.55em;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  text-align: center;
+  font-size: clamp(1.1rem, 0.95rem + 0.6vw, 1.35rem);
+  color: var(--purple-soft);
+}
+
+/* Closing --------------------------------------------------------------- */
+
+.closing {
+  --bouquet: clamp(150px, 24vw, 380px);
+
+  padding-block: clamp(32px, 4vw, 48px) calc(var(--bouquet) * 0.6 + 16px);
+  overflow: clip;
+  text-align: center;
+}
+
+/* Directly after the details band (programme and family hidden) */
+.details + .closing {
+  padding-top: clamp(56px, 7vw, 96px);
+}
+
+@media (min-width: 760px) {
+  /* Bouquets sit beside the text here, so less clearance is needed */
+  .closing {
+    padding-bottom: clamp(96px, 10vw, 150px);
+  }
+}
+
+.closing__bouquet {
+  width: var(--bouquet);
+}
+
+.closing__content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.closing__text {
+  max-width: 48ch;
+  margin-inline: auto;
+  font-size: clamp(1.15rem, 0.95rem + 0.8vw, 1.5rem);
+  line-height: 1.75;
+  color: var(--purple-soft);
+  text-wrap: pretty;
+}
+
+.closing__flourish {
+  margin-top: clamp(18px, 2.4vw, 30px);
+}
+
+.closing__flourish .crest {
+  width: clamp(110px, 12vw, 160px);
+  height: auto;
+  color: var(--gold);
+}
+
+/* Reveal motion --------------------------------------------------------- */
+
+.reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 0.8s ease var(--reveal-delay, 0ms),
+    transform 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) var(--reveal-delay, 0ms);
+}
+
+.reveal.is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+/* Gold dividers draw outward from the centre */
+.divider__lines path {
+  stroke-dasharray: 1 1.02;
+  stroke-dashoffset: 1;
+  opacity: 0;
+  transition:
+    stroke-dashoffset 1.2s cubic-bezier(0.45, 0, 0.2, 1) var(--reveal-delay, 0ms),
+    opacity 0.2s linear var(--reveal-delay, 0ms);
+}
+
+.divider__gems > * {
+  opacity: 0;
+  transform: scale(0.3);
+  transform-box: fill-box;
+  transform-origin: center;
+  transition:
+    opacity 0.5s ease,
+    transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.divider__gems path {
+  transition-delay: calc(var(--reveal-delay, 0ms) + 0.15s);
+}
+
+.divider__gems circle {
+  transition-delay: calc(var(--reveal-delay, 0ms) + 1s);
+}
+
+.divider.is-drawn .divider__lines path {
+  stroke-dashoffset: 0;
+  opacity: 1;
+}
+
+.divider.is-drawn .divider__gems > * {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .site,
+  .reveal,
+  .divider__lines path,
+  .divider__gems > * {
+    transition: none;
+  }
+
+  .reveal,
+  .divider__gems > * {
+    opacity: 1;
+    transform: none;
+  }
+
+  .divider__lines path {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+
+  .bouquet,
+  .hero__cue svg {
+    animation: none;
+  }
+}
