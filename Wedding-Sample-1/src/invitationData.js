@@ -5,6 +5,17 @@ const invitationData = {
     buttonLabel: 'Buka Jemputan',
   },
 
+  // Background music: "Baraka Allahu Lakuma" by Maher Zain.
+  // Place the MP3 at public/audio/baraka-allahu-lakuma.mp3
+  music: {
+    src: 'audio/Maher Zain - Baraka Allahu Lakuma Lyrics.mp3', // relative to the site base
+    volume: 0.35,
+    labels: {
+      play: 'Mainkan muzik',
+      pause: 'Jeda muzik',
+    },
+  },
+
   greeting: {
     bismillah: 'بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ',
     salam: 'Assalamualaikum Warahmatullahi Wabarakatuh',

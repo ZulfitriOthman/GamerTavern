@@ -6,6 +6,7 @@ import Divider from './components/Divider'
 import FloatingPetals from './components/FloatingPetals'
 import GoldCrest from './components/GoldCrest'
 import InvitationCover from './components/InvitationCover'
+import MusicToggle from './components/MusicToggle'
 import RevealSection from './components/RevealSection'
 import { RevealContext } from './hooks/useReveal'
 import './App.css'
@@ -85,6 +86,7 @@ function DetailItem({ icon, label, delay, children }) {
 function App() {
   const {
     cover,
+    music,
     greeting,
     title,
     couple,
@@ -107,12 +109,40 @@ function App() {
   const isClosed = phase === 'closed'
   const coverMounted = phase !== 'open'
 
+  // Background music lives here so it survives the cover unmounting.
+  const audioRef = useRef(null)
+  const [musicPlaying, setMusicPlaying] = useState(false)
+  const [musicAvailable, setMusicAvailable] = useState(true)
+
+  // Starts (or resumes) playback. Must be called straight from a tap/click
+  // so mobile browsers treat it as user-initiated. Failure is non-fatal.
+  const playMusic = useCallback(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    audio.volume = music.volume // ignored on iOS, where volume is hardware-only
+    const attempt = audio.play()
+    attempt?.catch(() => {
+      if (audio.error) setMusicAvailable(false)
+      setMusicPlaying(false)
+    })
+  }, [music.volume])
+
+  const toggleMusic = useCallback(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    if (audio.paused) playMusic()
+    else audio.pause() // keeps currentTime, so resume continues in place
+  }, [playMusic])
+
   const handleOpen = useCallback(() => {
+    // Synchronously, before any state change or timer.
+    playMusic()
+
     const reduceMotion = window.matchMedia(
       '(prefers-reduced-motion: reduce)',
     ).matches
     setPhase(reduceMotion ? 'open' : 'opening')
-  }, [])
+  }, [playMusic])
 
   // Always start at the top, behind the cover, on a fresh load.
   useEffect(() => {
@@ -143,6 +173,28 @@ function App() {
 
   return (
     <>
+      {/* preload="none": nothing is fetched or played until the guest taps. */}
+      <audio
+        ref={audioRef}
+        src={`${import.meta.env.BASE_URL}${music.src}`}
+        preload="none"
+        loop
+        onPlay={() => setMusicPlaying(true)}
+        onPause={() => setMusicPlaying(false)}
+        onError={() => {
+          setMusicAvailable(false)
+          setMusicPlaying(false)
+        }}
+      />
+
+      {!isClosed && musicAvailable && (
+        <MusicToggle
+          playing={musicPlaying}
+          labels={music.labels}
+          onToggle={toggleMusic}
+        />
+      )}
+
       {coverMounted && (
         <InvitationCover
           title={title}

@@ -1,0 +1,72 @@
+/* Floating purple-and-gold music button --------------------------------- */
+
+.music-toggle {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(16px, env(safe-area-inset-bottom));
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border: 1px solid var(--gold);
+  border-radius: 50%;
+  background: var(--purple);
+  color: #d6b56b;
+  cursor: pointer;
+  box-shadow:
+    0 0 0 3px rgb(176 141 87 / 0.18),
+    0 8px 20px -10px rgb(63 29 92 / 0.7);
+  animation: music-toggle-in 0.6s ease 0.8s both;
+  transition:
+    background-color 0.25s ease,
+    transform 0.25s ease;
+}
+
+.music-toggle svg {
+  width: 22px;
+  height: 22px;
+}
+
+/* Slow gold pulse while music is playing */
+.music-toggle.is-playing::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+  box-shadow: 0 0 14px 2px rgb(214 181 107 / 0.55);
+  opacity: 0.2;
+  pointer-events: none;
+  animation: music-toggle-glow 2.8s ease-in-out infinite;
+}
+
+.music-toggle:hover {
+  background: #50287a;
+  transform: translateY(-1px);
+}
+
+.music-toggle:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 4px;
+}
+
+@keyframes music-toggle-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes music-toggle-glow {
+  50% {
+    opacity: 0.85;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .music-toggle,
+  .music-toggle.is-playing::after {
+    animation: none;
+  }
+}
