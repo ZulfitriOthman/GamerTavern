@@ -113,6 +113,28 @@ CREATE TABLE TOURNAMENT_TEAM_MEMBERS (
 -- team row, each member's registration row, each TOURNAMENT_TEAM_MEMBERS
 -- row, and the captain assignment — must happen in a single DB transaction.
 
+-- Attendent phone app — tournament check-in record (migrations/0010).
+-- One row per checked-in registration; UNIQUE(REGISTRATION_ID) is the
+-- database-level duplicate guard (one check-in per person per tournament).
+-- TOURNAMENT_REGISTRATIONS.STATUS is flipped to 'checked_in' in the same
+-- transaction by Backend/routes/api/attendance.routes.js. New table rather
+-- than new columns: the registration row has no when/by-whom fields, and
+-- this keeps the live, high-blast-radius registrations table untouched.
+CREATE TABLE PHONE_TOURNAMENT_CHECKINS (
+  ID                     INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  TOURNAMENT_ID          INT UNSIGNED NOT NULL,             -- redundant by design: lets the composite FK below be enforced by MySQL itself
+  REGISTRATION_ID        INT UNSIGNED NOT NULL,
+  CHECKED_IN_BY_USER_ID  INT UNSIGNED NULL,                 -- admin who performed the check-in
+  CHECKED_IN_AT          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT FK_PHONE_CHECKINS_REGISTRATION
+    FOREIGN KEY (REGISTRATION_ID, TOURNAMENT_ID)
+    REFERENCES TOURNAMENT_REGISTRATIONS(ID, TOURNAMENT_ID) ON DELETE CASCADE,
+  CONSTRAINT FK_PHONE_CHECKINS_CHECKED_IN_BY
+    FOREIGN KEY (CHECKED_IN_BY_USER_ID) REFERENCES USERS(ID) ON DELETE SET NULL,
+  UNIQUE KEY UQ_PHONE_CHECKINS_REGISTRATION (REGISTRATION_ID),   -- the duplicate guard: one check-in per registration, ever
+  INDEX IDX_PHONE_CHECKINS_TOURNAMENT (TOURNAMENT_ID, CHECKED_IN_AT)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE TRADE_LISTINGS (
   ID                INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   USER_ID           INT UNSIGNED NOT NULL,

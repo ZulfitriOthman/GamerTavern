@@ -29,6 +29,7 @@ import createReviewsRoutes from "./routes/api/reviews.routes.js";
 import createShippingRoutes from "./routes/api/shipping.routes.js";
 import createAdminRoutes from "./routes/api/admin.routes.js";
 import createTicketingRoutes from "./routes/api/ticketing.routes.js";
+import createAttendanceRoutes from "./routes/api/attendance.routes.js";
 import { expireStaleHolds } from "./services/ticketing/ticketHoldService.js";
 import { requireAuth } from "./modules/restAuth.module.js";
 
@@ -420,6 +421,9 @@ app.use("/api/admin", createAdminRoutes({ db }));
 
 // Ticketing (see Database/schema/009_ticketing.sql + Database/README.md "Ticketing")
 app.use("/api/ticketing", createTicketingRoutes({ db, io }));
+
+// Attendent mobile app — admin tournament check-in (see Database/migrations/0010_add_phone_tournament_checkins.sql)
+app.use("/api/attendance", createAttendanceRoutes({ db }));
 
 // Wedding website API (Wedding/server, see Wedding/README.md) → /api/wedding/*
 // Self-contained: its own config (Wedding/server/.env), MySQL pool, cookies,

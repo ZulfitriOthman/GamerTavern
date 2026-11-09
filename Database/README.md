@@ -39,7 +39,9 @@ Database/
 │   ├── 0003_reconcile_ticket_hold_sessions.sql
 │   ├── 0004_add_merchant_payment_methods.sql
 │   ├── 0005_add_whatsapp_notifications.sql
-│   └── 0006_add_fulfilment_and_offline_payment_methods.sql
+│   ├── 0006_add_fulfilment_and_offline_payment_methods.sql
+│   ├── …
+│   └── 0010_add_phone_tournament_checkins.sql
 ├── seeds/
 │   ├── reference.sql          — safe, production-appropriate lookup data
 │   └── development.sql        — fake merchants/users/products, DEV ONLY, never run against production
@@ -77,6 +79,8 @@ SOURCE Database/migrations/0003_reconcile_ticket_hold_sessions.sql;
 SOURCE Database/migrations/0004_add_merchant_payment_methods.sql;
 SOURCE Database/migrations/0005_add_whatsapp_notifications.sql;
 SOURCE Database/migrations/0006_add_fulfilment_and_offline_payment_methods.sql;
+-- … 0007 through 0009 …
+SOURCE Database/migrations/0010_add_phone_tournament_checkins.sql;
 ```
 
 Each migration file documents what it changes and why in its own header. As of this writing, `0001` and `0002` have already been applied to the live database (2026-09-14 and 2026-09-15 respectively) — they're kept in this folder as a record and for any other environment (e.g. a second developer's local database) that still needs them. `0002` was applied live from an earlier pre-hold-session iteration of the ticketing schema; `0003` (applied 2026-09-15, live-verified, 0 rows affected) reconciled `TICKET_HOLDS`/`TICKET_ORDERS` with the current hold-session design — see "Ticketing" below. `0004` (Merchant Payments Stage 1, 2026-09-16) is additive-only (new nullable columns + new tables) and has been applied to and verified against the live database — see "Merchant Payments" below for status. `0005` (WhatsApp Merchant Notifications, 2026-09-16), also additive-only, has NOT yet been applied to any live database as of this writing — see "WhatsApp Merchant Notifications" below.
@@ -118,6 +122,7 @@ mysqldump -h <host> -u <user> -p <database> users password_reset_tokens countrie
 | **Payments** | `payment_transactions`, `refunds`† |
 | **Administration** | `merchant_payouts`, `merchant_payout_items`†, `platform_settings`, `notifications`†, `audit_logs` |
 | **Community/Content** | `deck_lists`, `tournaments`, `tournament_registrations`, `tournament_teams`, `tournament_team_members`, `trade_listings`, `news`, `news_categories`, `services`, `enquiries`, `wishlists`, `wishlist_items`, `reviews` |
+| **Attendent (phone app)** ¶ | `phone_tournament_checkins` (reuses `tournaments`, `tournament_registrations`, `users`, `audit_logs`) |
 | **Reference data** | `countries`, `tcg_games`, `esports_games` |
 | **Ticketing** ‡ | `venue_layouts`, `venue_sections`, `venue_seats`, `events`, `ticket_types`, `event_sections`, `event_seats`, `ticket_hold_sessions`, `ticket_holds`, `ticket_orders`, `ticket_order_items`, `ticket_payment_transactions`, `event_tickets` |
 
@@ -383,3 +388,13 @@ The authoritative transition tables for order/merchant-order/payment/merchant st
 - `merchant_payment_accounts.status` can only ever be set to a non-`ACTIVE` value by current backend code — see "Merchant Payments" above. Do not treat a `PENDING` row as proof that online payments actually route to that merchant.
 - `merchant_order_payments` now has a real backend writer (Stage 2, `checkout.routes.js` bank-transfer path) and a confirmation endpoint (`merchant.routes.js`), live-verified 2026-09-16.
 - `outbound_notifications` and `merchants.whatsapp_phone`/`whatsapp_notifications_enabled` are code-complete but **schema-only** — `migrations/0005_add_whatsapp_notifications.sql` has not yet been applied to any live database. See "WhatsApp Merchant Notifications" above.
+
+## Attendent tournament check-in (phone app)
+
+¶ Added 2026-11-09 (schema/007_content_community.sql, migrations/0010). The Attendent mobile app (`Phone/Attendent/attendent`) lets an **admin** check registered participants (account holders and guests) in to a tournament via `Backend/routes/api/attendance.routes.js` (`/api/attendance/*`).
+
+- **Reused**: `tournaments` (what people check in to), `tournament_registrations` (who; its existing `status = 'checked_in'` value is now actually set, in the same transaction), `users` (the admin), `audit_logs` (`TOURNAMENT_CHECKIN`).
+- **New, `PHONE_`-prefixed (new table owned by the phone app)**: `phone_tournament_checkins` — one row per checked-in registration, recording when and by which admin. `tournament_registrations` has no when/by-whom columns, and a separate table keeps that live, high-blast-radius table unaltered. `UNIQUE(registration_id)` is the duplicate guard (one check-in per person per tournament); a composite FK `(registration_id, tournament_id)` reuses `uq_registrations_id_tournament`; `ON DELETE CASCADE` keeps the existing leave/delete flows working.
+- **Duplicate contract**: first check-in → `201`, `alreadyCheckedIn: false`; any repeat (retry, double tap, second device) → `200`, `alreadyCheckedIn: true` with the original time/admin, never a second row.
+- **Status**: **SCHEMA-ONLY, NOT YET APPLIED TO ANY LIVE DATABASE.** Purely additive and idempotent. Verified only against a throwaway local MariaDB 10.6.28 (fresh `All.sql` install + migration applied twice): API auth/validation/state cases, 50 concurrent submissions → exactly one row per registration, unique key and composite FK rejecting bad rows directly.
+

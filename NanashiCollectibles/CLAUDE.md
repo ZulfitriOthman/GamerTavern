@@ -634,6 +634,7 @@ Current v2 domain mapping:
 | Coupons / Reviews  | `coupons`, `coupon_usage`, `reviews`                                                     |
 | Payouts / Platform | `merchant_payouts`, `merchant_payout_items`, `platform_settings`                         |
 | Ops                | `notifications`, `audit_logs`                                                            |
+| Attendent check-in | `phone_tournament_checkins` (+ reuses `tournament_registrations.status = 'checked_in'`) — admin-only REST at `/api/attendance`, see `Database/README.md` "Attendent tournament check-in" |
 
 (Marketplace domains — see `Database/schema/004_merchants.sql` through `008_platform_ops.sql` and section 62.)
 
