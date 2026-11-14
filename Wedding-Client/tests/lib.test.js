@@ -66,26 +66,26 @@ test('programme: confirmed times only, in order, in Bahasa Melayu', () => {
   assert.deepEqual(
     weddingData.programme.map((p) => [p.when, p.title]),
     [
-      ['1:15 PM – 2:15 PM', 'Menerima Jemputan'],
-      ['2:15 PM', 'Majlis Menghantar Berian & Akad Nikah'],
+      ['2:00 PM – 2:30 PM', 'Menerima Jemputan'],
+      ['2:30 PM', 'Majlis Menghantar Berian & Akad Nikah'],
       ['Seterusnya', 'Majlis Bersanding'],
       ['Diikuti Dengan', 'Bacaan Doa Selamat dan Seterusnya Menikmati Jamuan'],
     ],
   )
 })
 
-test('countdown targets 22 Jan 2027, 1:15 PM Brunei time (05:15 UTC)', () => {
+test('countdown targets 22 Jan 2027, 2:00 PM Brunei time (06:00 UTC)', () => {
   const e = weddingData.event
   const target = zonedInstant(e.date, e.startTime, e.timeZone)
-  assert.equal(target.toISOString(), '2027-01-22T05:15:00.000Z')
-  assert.equal(countdownParts(target, Date.parse('2027-01-21T05:15:00Z')).days, 1)
-  assert.equal(countdownParts(target, Date.parse('2027-01-22T06:00:00Z')).done, true)
+  assert.equal(target.toISOString(), '2027-01-22T06:00:00.000Z')
+  assert.equal(countdownParts(target, Date.parse('2027-01-21T06:00:00Z')).days, 1)
+  assert.equal(countdownParts(target, Date.parse('2027-01-22T06:30:00Z')).done, true)
 })
 
-test('calendar entry starts at 1:15 PM and invents no end time', () => {
+test('calendar entry starts at 2:00 PM and invents no end time', () => {
   const ics = icsContent(calendarEvent(weddingData.event, weddingData.venue, weddingData.couple), weddingData.event.timeZone)
-  assert.match(ics, /DTSTART:20270122T051500Z/)
-  assert.match(ics, /DTEND:20270122T051500Z/)
+  assert.match(ics, /DTSTART:20270122T060000Z/)
+  assert.match(ics, /DTEND:20270122T060000Z/)
   assert.match(ics, /SUMMARY:Naqiuddin & Syafina · MAJLIS MENGHANTAR BERIAN\\, AKAD NIKAH & BERSANDING/)
   assert.match(ics, /DESCRIPTION:Md Nurzakwan Naqiuddin bin Md Haris Fadzillah & Norana Syafina binti Abdul Latiff\\n/)
 })

@@ -1,0 +1,27 @@
+{
+  "name": "@mashoor/shared",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./api": "./src/api.js",
+    "./AuthProvider": "./src/AuthProvider.jsx",
+    "./useAuth": "./src/useAuth.js",
+    "./LoginPage": "./src/LoginPage.jsx",
+    "./styles.css": "./src/styles.css",
+    "./format": "./src/format.js",
+    "./PasswordInput": "./src/PasswordInput.jsx",
+    "./returnPath": "./src/returnPath.js",
+    "./ui": "./src/ui.jsx",
+    "./Icon": "./src/Icon.jsx",
+    "./inspection": "./src/inspection.js",
+    "./InspectionView": "./src/InspectionView.jsx",
+    "./checklist": "./src/checklist.js",
+    "./ChecklistForm": "./src/ChecklistForm.jsx",
+    "./ChecklistPrint": "./src/ChecklistPrint.jsx",
+    "./DamageDiagram": "./src/DamageDiagram.jsx"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-router": "^7.0.0"
+  }
+}

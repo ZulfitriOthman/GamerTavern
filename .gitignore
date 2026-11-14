@@ -42,3 +42,7 @@ Portfolio_Recce/assets/videos/*.mp4
 
 # Database backups contain real customer/merchant data — never committed.
 Database/backups/
+
+# Mashoor API (Backend/mashoor) — local SQLite database with staff/vendor accounts.
+Backend/mashoor/data/
+Backend/mashoor/storage/

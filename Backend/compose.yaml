@@ -7,6 +7,7 @@ services:
     volumes:
       - .:/workspace/Backend
       - ../Wedding:/workspace/Wedding
+      - ../Database/mashoor:/workspace/Database/mashoor:ro
       - backend_node_modules:/workspace/Backend/node_modules
       - wedding_node_modules:/workspace/Wedding/server/node_modules
     command: >

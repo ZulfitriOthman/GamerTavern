@@ -24,7 +24,7 @@ npm run lint
 
 | Key | What |
 | --- | --- |
-| `event` | Title (and how it breaks onto lines), day, date text, Hijri date, ISO date, countdown start time (1:15 PM) and time zone (`Asia/Brunei`) |
+| `event` | Title (and how it breaks onto lines), day, date text, Hijri date, ISO date, countdown start time (2:00 PM) and time zone (`Asia/Brunei`) |
 | `couple` | Pengantin Lelaki and Pengantin Perempuan: full official name (invitation), shorter name (hero), short name ("Naqiuddin & Syafina" headings) and initial (the "N & S" monogram) |
 | `opening` | Bismillahirrahmanirrahim (Arabic and Latin) |
 | `venue` | Name, address lines, optional Google Maps link and photo |
@@ -37,7 +37,7 @@ npm run lint
 
 **The supplied details are copied exactly.** `tests/lib.test.js` repeats them independently: every name in order, the title, day, date, Hijri date, address and programme. Any accidental edit to `weddingData.js` makes `npm test` fail.
 
-**Not shown, because not confirmed:** end times, and times for Majlis Bersanding and the doa or jamuan. The countdown and the calendar entry use **1:15 PM**, the start of Menerima Jemputan, and the calendar entry has no invented end time.
+**Not shown, because not confirmed:** end times, and times for Majlis Bersanding and the doa or jamuan. The countdown and the calendar entry use **2:00 PM**, the start of Menerima Jemputan, and the calendar entry has no invented end time.
 
 ## Sections (one page)
 

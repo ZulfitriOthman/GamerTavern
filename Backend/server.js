@@ -260,6 +260,27 @@ io.engine.on("initial_headers", (_headers, req) => {
   console.log("[engine.io] origin:", req.headers.origin);
 });
 
+/* ------------------------------ Mashoor API ------------------------------ */
+// Mashoor catalog sharing (Backend/mashoor, see Listing-Sample/Mashoor/README.md)
+// → /api/mashoor/* (staff admin site + vendor portal). Self-contained: its own
+// SQLite DB, httpOnly SameSite=Strict cookie sessions, Origin-allowlist CSRF
+// check, 100kb JSON limit, 404 and error handling; settings are MASHOOR_* only.
+// Mounted BEFORE the global JSON parser and CORS below on purpose: its browsers
+// reach it same-origin through the admin/portal dev/preview proxies, so it
+// sends no CORS headers (cross-site reads stay blocked) and applies its own
+// origin check instead of the marketplace CORS allowlist. Loading is guarded so
+// a problem there can never stop the marketplace backend (node:sqlite needs
+// Node 24+). Disable with MASHOOR_MODULE=off.
+if (process.env.MASHOOR_MODULE !== "off") {
+  try {
+    const { createMashoorModule } = await import("./mashoor/src/embed.js");
+    const mashoor = await createMashoorModule();
+    app.use(mashoor.prefix, mashoor.router);
+  } catch (error) {
+    console.error("[mashoor] module not loaded — /api/mashoor disabled:", error.message);
+  }
+}
+
 /* ------------------------------ Middleware ------------------------------ */
 app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: true, limit: "5mb" }));

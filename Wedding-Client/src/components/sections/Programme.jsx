@@ -1,6 +1,6 @@
 // Atur Cara Majlis: a vertical timeline on fine burgundy lines with 8-point-star
 // markers, inside an arch-topped card. Time labels are shown exactly as
-// supplied ("1:15 PM – 2:15 PM", "Seterusnya", …).
+// supplied ("2:00 PM – 2:30 PM", "Seterusnya", …).
 import { weddingData } from '../../data/weddingData.js'
 import { Sprig } from '../decor/Floral.jsx'
 import { EightPointStar } from '../decor/Geometric.jsx'

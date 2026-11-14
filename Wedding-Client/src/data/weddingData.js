@@ -55,8 +55,8 @@ export const weddingData = {
     hijriDate: '14 Syaaban 1448H', // as provided; not recalculated
     date: '2027-01-22', // ISO date for the countdown and calendar
     // The countdown counts to the start of the guest reception (Menerima Jemputan).
-    startTime: '13:15',
-    startTimeText: '1:15 PM',
+    startTime: '14:00',
+    startTimeText: '2:00 PM',
     timeZone: 'Asia/Brunei',
   },
 
@@ -108,8 +108,8 @@ export const weddingData = {
 
   // Atur Cara Majlis — only the confirmed times; the rest are shown as supplied.
   programme: [
-    { when: '1:15 PM – 2:15 PM', title: 'Menerima Jemputan' },
-    { when: '2:15 PM', title: 'Majlis Menghantar Berian & Akad Nikah', highlight: true },
+    { when: '2:00 PM – 2:30 PM', title: 'Menerima Jemputan' },
+    { when: '2:30 PM', title: 'Majlis Menghantar Berian & Akad Nikah', highlight: true },
     { when: 'Seterusnya', title: 'Majlis Bersanding', highlight: true },
     { when: 'Diikuti Dengan', title: 'Bacaan Doa Selamat dan Seterusnya Menikmati Jamuan' },
   ],

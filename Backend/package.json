@@ -7,7 +7,10 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "server": "nodemon server.js"
+    "server": "nodemon server.js",
+    "mashoor:test": "node --test --test-reporter=spec \"mashoor/test/**/*.test.js\"",
+    "mashoor:create-staff": "node --env-file-if-exists=.env.dev mashoor/scripts/create-staff.js",
+    "mashoor:seed-dev": "node --env-file-if-exists=.env.dev mashoor/scripts/seed-dev.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
