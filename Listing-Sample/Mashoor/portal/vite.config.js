@@ -27,13 +27,13 @@ export default defineConfig(({ mode }) => {
       strictPort: true,
       proxy: { '/api/mashoor': apiTarget },
       fs: { allow: ['.', sharedSrc] },
-      allowedHosts: ['portal.nanashicollectibles.com'],
+      allowedHosts: ['portalmashoor.nanashicollectibles.com'],
     },
     preview: {
       port: 5302,
       strictPort: true,
       proxy: { '/api/mashoor': apiTarget },
-      allowedHosts: ['portal.nanashicollectibles.com'],
+      allowedHosts: ['portalmashoor.nanashicollectibles.com'],
     },
   }
 })
