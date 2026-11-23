@@ -2,13 +2,42 @@ import { getSession, readCookie, STAFF_COOKIE, VENDOR_COOKIE } from './sessions.
 
 const UNAUTHENTICATED = { error: 'Not signed in.' }
 
+// Active staff account by id, or null. Shared with the realtime socket checks.
+export function findActiveStaff(db) {
+  const findStaff = db.prepare('SELECT id, email, name, role FROM staff_users WHERE id = ? AND active = 1')
+  return (userId) => findStaff.get(userId) ?? null
+}
+
+// Active portal account (in an active company) by id, as req.vendor, or null.
+// Shared with the realtime socket checks.
+export function findActiveVendor(db) {
+  const findVendor = db.prepare(
+    `SELECT vu.id, vu.username, vu.name, vu.role, c.id AS company_id, c.name AS company_name
+       FROM vendor_users vu
+       JOIN vendor_companies c ON c.id = vu.company_id
+      WHERE vu.id = ? AND vu.active = 1 AND c.status = 'active'`,
+  )
+  return (userId) => {
+    const row = findVendor.get(userId)
+    if (!row) return null
+    return {
+      id: row.id,
+      username: row.username,
+      role: row.role,
+      name: row.name,
+      companyId: row.company_id,
+      companyName: row.company_name,
+    }
+  }
+}
+
 // Staff-only gate for every /api/mashoor/admin route except login/logout.
 export function requireStaff(db) {
-  const findStaff = db.prepare('SELECT id, email, name, role FROM staff_users WHERE id = ? AND active = 1')
+  const findStaff = findActiveStaff(db)
   return (req, res, next) => {
     const token = readCookie(req, STAFF_COOKIE.name)
     const session = getSession(db, 'staff', token)
-    const staff = session && findStaff.get(session.userId)
+    const staff = session && findStaff(session.userId)
     if (!staff) return res.status(401).json(UNAUTHENTICATED)
     req.staff = staff
     req.sessionToken = token
@@ -20,25 +49,13 @@ export function requireStaff(db) {
 // never from the request, and is re-checked on every request so deactivating a
 // user or suspending a company takes effect immediately.
 export function requireVendor(db) {
-  const findVendor = db.prepare(
-    `SELECT vu.id, vu.username, vu.name, vu.role, c.id AS company_id, c.name AS company_name
-       FROM vendor_users vu
-       JOIN vendor_companies c ON c.id = vu.company_id
-      WHERE vu.id = ? AND vu.active = 1 AND c.status = 'active'`,
-  )
+  const findVendor = findActiveVendor(db)
   return (req, res, next) => {
     const token = readCookie(req, VENDOR_COOKIE.name)
     const session = getSession(db, 'vendor', token)
-    const row = session && findVendor.get(session.userId)
-    if (!row) return res.status(401).json(UNAUTHENTICATED)
-    req.vendor = {
-      id: row.id,
-      username: row.username,
-      role: row.role,
-      name: row.name,
-      companyId: row.company_id,
-      companyName: row.company_name,
-    }
+    const vendor = session && findVendor(session.userId)
+    if (!vendor) return res.status(401).json(UNAUTHENTICATED)
+    req.vendor = vendor
     req.sessionToken = token
     next()
   }

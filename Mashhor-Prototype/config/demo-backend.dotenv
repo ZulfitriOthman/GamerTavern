@@ -1,0 +1,35 @@
+# Demo-only settings for the existing Backend service (Backend/server.js).
+# Loaded through the Backend's DOTENV_FILE hook by `npm run dev:api`
+# (scripts/demo.mjs) INSTEAD of Backend/.env.dev, so the demo never reads the
+# developer's real database settings. Contains no secrets.
+
+# Own port: 3002 is the live Backend container (Backend/compose.yaml), which
+# serves the marketplace and its own Mashoor database; the demo never uses it.
+PORT=3012
+
+# Separate Mashhor SQLite database and private file storage (paths relative to
+# Backend/, both under the git-ignored Backend/mashoor/data/).
+MASHOOR_DB_PATH=mashoor/data/demo/mashhor-demo.db
+MASHOOR_STORAGE_DIR=mashoor/data/demo/storage
+# CSRF / socket-handshake origin allow-list (exact origins): the local Vite
+# dev/preview servers, and the two public hostnames served through the
+# Cloudflare tunnel. The browser reaches /api/mashoor and /socket.io on its own
+# hostname; Vite proxies both to this Backend.
+MASHOOR_ALLOWED_ORIGINS=http://localhost:5301,http://localhost:5302,https://mashhor.nanashicollectibles.com,https://portal-mashhor.nanashicollectibles.com
+# The Backend's Socket.IO server checks the marketplace CORS allow-list
+# (server.js isAllowedOrigin) on polling requests, so the same origins are
+# added there too. Only this demo process reads this file.
+EXTRA_ORIGINS=http://localhost:5301,http://localhost:5302,https://mashhor.nanashicollectibles.com,https://portal-mashhor.nanashicollectibles.com
+# MASHOOR_COOKIE_SECURE is left at its default (Secure only in production), as
+# in the existing configuration; the cookies stay httpOnly + SameSite=Strict.
+
+# The marketplace part of the Backend requires MySQL settings to boot. They
+# point at a closed local port on purpose, so the demo can never reach a real
+# (or live) MySQL database. The marketplace health check reports "not
+# connected"; /api/mashoor is unaffected (it uses SQLite).
+MYSQL_HOST=127.0.0.1
+MYSQL_PORT=1
+MYSQL_USER=mashhor_demo_unused
+MYSQL_PASSWORD=mashhor_demo_unused
+MYSQL_DATABASE=mashhor_demo_unused
+WEDDING_MODULE=off

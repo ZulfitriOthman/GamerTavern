@@ -1,0 +1,23 @@
+{
+  "name": "mashhor-prototype",
+  "private": true,
+  "type": "module",
+  "description": "Mashhor Vehicle Inspection and Approval System — client-demo prototype (admin site + portal) on the existing Backend /api/mashoor module.",
+  "scripts": {
+    "install:all": "npm install --prefix admin && npm install --prefix portal",
+    "demo:setup": "node scripts/demo.mjs setup",
+    "demo:reset": "node scripts/demo.mjs reset",
+    "dev": "concurrently -k -n api,admin,portal -c blue,magenta,green \"npm:dev:api\" \"npm:dev:admin\" \"npm:dev:portal\"",
+    "dev:api": "node scripts/demo.mjs api",
+    "dev:admin": "npm run dev --prefix admin",
+    "dev:portal": "npm run dev --prefix portal",
+    "build": "npm run build --prefix admin && npm run build --prefix portal",
+    "preview": "concurrently -k -n api,admin,portal -c blue,magenta,green \"npm:dev:api\" \"npm run preview --prefix admin\" \"npm run preview --prefix portal\"",
+    "lint": "oxlint admin/src portal/src shared/src scripts",
+    "test": "npm run mashoor:test --prefix ../Backend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "oxlint": "^1.90.0"
+  }
+}

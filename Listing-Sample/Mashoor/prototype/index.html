@@ -1,0 +1,1327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mashhor Inspection Prototype</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: a demo control bar on top, then either the Admin website (sidebar) or the Portal website (top nav),
+   mirroring the two production apps. Colours and type follow packages/shared/src/styles.css (light only, like production). */
+:root {
+  --paper: #f6f3ee;
+  --surface: #ffffff;
+  --surface-muted: #fbfaf7;
+  --sunken: #efebe4;
+  --border: #e4ded4;
+  --border-strong: #cec6b8;
+  --text: #1d1b18;
+  --text-muted: #635c52;
+  --text-subtle: #857d71;
+  --accent: #1f5c4f;
+  --accent-hover: #174a3f;
+  --accent-soft: #e6efea;
+  --accent-text: #1a4c41;
+  --on-accent: #ffffff;
+  --success: #1d6b3d;
+  --success-soft: #e4f2e8;
+  --warning: #8a5300;
+  --warning-soft: #fbf0d9;
+  --danger: #b42318;
+  --danger-soft: #fdecea;
+  --info-soft: #eef2f7;
+  --info: #2f4a6b;
+  --demo-bg: #24302c;
+  --demo-fg: #f1ede6;
+  --demo-muted: #b9c2bd;
+  --font-sans: ui-sans-serif, 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-display: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, ui-serif, serif;
+  --font-mono: ui-monospace, 'Cascadia Mono', SFMono-Regular, Consolas, monospace;
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --shadow: 0 1px 2px rgb(29 27 24 / 0.05), 0 4px 12px rgb(29 27 24 / 0.06);
+  --shadow-lg: 0 12px 40px rgb(29 27 24 / 0.18);
+  --focus-ring: 0 0 0 3px rgb(31 92 79 / 0.32);
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--paper); color: var(--text); font-family: var(--font-sans); font-size: 15px; line-height: 1.5; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--demo-bg); }
+h1, h2, h3 { margin: 0; text-wrap: balance; line-height: 1.25; }
+h1 { font-family: var(--font-display); font-size: 1.75rem; font-weight: 600; }
+h2 { font-size: 1.05rem; font-weight: 650; }
+h3 { font-size: 0.95rem; font-weight: 650; }
+p { margin: 0; }
+a { color: var(--accent-text); }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.num { font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--font-mono); font-size: 0.8rem; }
+.subtle { color: var(--text-subtle); }
+.muted { color: var(--text-muted); }
+.prewrap { white-space: pre-wrap; }
+.gutter { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+/* ---- Demo bar (not part of either production site) ---- */
+.demo-bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; background: var(--demo-bg); color: var(--demo-fg); }
+.demo-bar-inner { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 1rem; padding-block: 0.55rem; }
+.demo-title { display: flex; flex-direction: column; min-width: 0; }
+.demo-title strong { font-size: 0.95rem; letter-spacing: 0.01em; }
+.demo-title span { font-size: 0.75rem; color: var(--demo-muted); }
+.demo-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-left: auto; }
+.demo-controls label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--demo-muted); }
+.demo-controls select { background: #33423c; color: var(--demo-fg); border: 1px solid #4d5f57; border-radius: var(--radius-sm); padding: 0.35rem 0.5rem; max-width: 100%; }
+.demo-controls .btn { background: transparent; color: var(--demo-fg); border-color: #4d5f57; }
+.demo-controls .btn:hover { background: #33423c; }
+.demo-controls .btn.armed { background: var(--danger); border-color: var(--danger); color: #fff; }
+.sim-chip { font-size: 0.72rem; font-weight: 650; text-transform: uppercase; letter-spacing: 0.07em; background: #f3c969; color: #2a2207; border-radius: 999px; padding: 0.15rem 0.55rem; white-space: nowrap; }
+
+/* ---- Buttons, badges, forms ---- */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; min-height: 2.4rem; padding: 0.4rem 0.9rem; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); cursor: pointer; text-decoration: none; color: var(--text); font-weight: 550; white-space: nowrap; }
+.btn:hover { background: var(--surface-muted); }
+.btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-danger-outline { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
+.btn-danger-outline:hover { background: var(--danger-soft); }
+.btn-sm { min-height: 2rem; padding: 0.25rem 0.65rem; font-size: 0.85rem; }
+.btn-link { background: none; border: 0; padding: 0; color: var(--accent-text); text-decoration: underline; cursor: pointer; font-weight: 500; min-height: 0; }
+.badge { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.78rem; font-weight: 600; padding: 0.12rem 0.55rem; border-radius: 999px; background: var(--sunken); color: var(--text-muted); white-space: nowrap; border: 1px solid transparent; }
+.badge.warning { background: var(--warning-soft); color: var(--warning); }
+.badge.danger { background: var(--danger-soft); color: var(--danger); }
+.badge.accent { background: var(--accent-soft); color: var(--accent-text); }
+.badge.success { background: var(--success-soft); color: var(--success); }
+.badge.info { background: var(--info-soft); color: var(--info); }
+.badge.outline { background: transparent; border-color: var(--border-strong); }
+.field { display: grid; gap: 0.3rem; min-width: 0; }
+.field > span { font-size: 0.85rem; font-weight: 600; }
+.field .opt { font-weight: 400; color: var(--text-subtle); }
+.field .hint { font-size: 0.8rem; color: var(--text-subtle); }
+.field .err { font-size: 0.8rem; color: var(--danger); font-weight: 550; }
+.input, .select, .textarea { width: 100%; min-height: 2.5rem; padding: 0.45rem 0.65rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); }
+.textarea { min-height: 5rem; resize: vertical; }
+.invalid { border-color: var(--danger); }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+.form-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; justify-content: flex-end; }
+.check { display: flex; gap: 0.5rem; align-items: flex-start; font-size: 0.9rem; }
+
+/* ---- Cards, alerts, tables ---- */
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow); min-width: 0; }
+.card-head { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-start; justify-content: space-between; padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); }
+.card-head p { color: var(--text-muted); font-size: 0.88rem; margin-top: 0.15rem; }
+.card-body { padding: 1rem 1.25rem; display: grid; gap: 1rem; }
+.alert { border-radius: var(--radius); padding: 0.75rem 1rem; border: 1px solid; display: grid; gap: 0.25rem; font-size: 0.92rem; }
+.alert strong { font-weight: 650; }
+.alert.info { background: var(--info-soft); border-color: #d5dde8; color: var(--info); }
+.alert.warning { background: var(--warning-soft); border-color: #efd9a6; color: #5f3a00; }
+.alert.danger { background: var(--danger-soft); border-color: #f4c7c2; color: #7a1a12; }
+.alert.success { background: var(--success-soft); border-color: #bfdcc9; color: #14502d; }
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+th { text-align: left; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-subtle); font-weight: 650; padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--border); background: var(--surface-muted); white-space: nowrap; }
+td { padding: 0.65rem 0.9rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+.cell-title { font-weight: 650; color: var(--text); }
+.cell-sub { display: block; font-size: 0.8rem; color: var(--text-subtle); }
+.empty { padding: 2rem 1.25rem; text-align: center; color: var(--text-muted); }
+.chips { display: flex; flex-wrap: wrap; gap: 0.4rem; padding: 0.75rem 1.25rem; border-bottom: 1px solid var(--border); }
+.chip { border: 1px solid var(--border-strong); background: var(--surface); border-radius: 999px; padding: 0.2rem 0.7rem; font-size: 0.83rem; cursor: pointer; }
+.chip.active { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.tabs { display: flex; flex-wrap: wrap; gap: 0.25rem; padding: 0 1rem; border-bottom: 1px solid var(--border); }
+.tab { background: none; border: 0; border-bottom: 2px solid transparent; padding: 0.75rem 0.6rem; cursor: pointer; color: var(--text-muted); font-weight: 550; display: inline-flex; gap: 0.4rem; align-items: center; }
+.tab.active { color: var(--accent-text); border-bottom-color: var(--accent); }
+.count { font-size: 0.72rem; background: var(--sunken); border-radius: 999px; padding: 0 0.45rem; color: var(--text-muted); }
+.tab.active .count { background: var(--accent-soft); color: var(--accent-text); }
+
+/* ---- Page frame ---- */
+.page { display: grid; gap: 1.25rem; padding-block: 1.5rem 6rem; max-width: 1240px; margin: 0 auto; width: 100%; min-width: 0; }
+.page-header { display: flex; flex-wrap: wrap; gap: 0.75rem 1rem; align-items: flex-end; justify-content: space-between; }
+.page-header .titles { display: grid; gap: 0.3rem; min-width: 0; }
+.page-header .title-row { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
+.page-header .desc { color: var(--text-muted); max-width: 70ch; }
+.back { font-size: 0.85rem; }
+.split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 360px); gap: 1.25rem; align-items: start; }
+.stack { display: grid; gap: 1.25rem; align-content: start; min-width: 0; }
+@media (max-width: 980px) { .split { grid-template-columns: minmax(0, 1fr); } }
+
+/* Admin website: sidebar */
+.admin-shell { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: calc(100vh - 56px); }
+.sidebar { background: var(--surface); border-right: 1px solid var(--border); padding: 1.25rem 0.9rem; display: flex; flex-direction: column; gap: 1.25rem; }
+.brand { display: grid; gap: 0.1rem; }
+.brand strong { font-family: var(--font-display); font-size: 1.2rem; }
+.brand span { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-subtle); font-weight: 650; }
+.site-pill { display: inline-block; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 0.15rem 0.5rem; border-radius: var(--radius-sm); }
+.site-pill.admin { background: #e8e1f3; color: #4a3374; }
+.site-pill.portal { background: #dcebf2; color: #1f4f66; }
+.nav { display: grid; gap: 0.15rem; }
+.nav-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-subtle); font-weight: 650; padding: 0 0.6rem 0.3rem; }
+.nav-link { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.6rem; border-radius: var(--radius-sm); background: none; border: 0; text-align: left; cursor: pointer; color: var(--text-muted); font-weight: 550; width: 100%; }
+.nav-link:hover { background: var(--surface-muted); color: var(--text); }
+.nav-link.active { background: var(--accent-soft); color: var(--accent-text); }
+.user-chip { display: flex; gap: 0.6rem; align-items: center; min-width: 0; }
+.avatar { width: 2rem; height: 2rem; border-radius: 50%; background: var(--accent-soft); color: var(--accent-text); display: grid; place-items: center; font-weight: 700; font-size: 0.8rem; flex: none; }
+.user-chip-text { display: grid; min-width: 0; font-size: 0.82rem; line-height: 1.3; }
+.user-chip-text span { color: var(--text-subtle); overflow-wrap: anywhere; }
+.sidebar-foot { margin-top: auto; display: grid; gap: 0.6rem; border-top: 1px solid var(--border); padding-top: 1rem; }
+.admin-main { min-width: 0; }
+@media (max-width: 860px) {
+  .admin-shell { grid-template-columns: minmax(0, 1fr); }
+  .sidebar { border-right: 0; border-bottom: 1px solid var(--border); flex-direction: row; flex-wrap: wrap; align-items: center; padding: 0.75rem max(16px, env(safe-area-inset-left, 0px)); gap: 0.75rem; }
+  .sidebar .nav { display: flex; flex-wrap: wrap; }
+  .sidebar .nav-label, .sidebar-foot { display: none; }
+  .nav-link { width: auto; }
+}
+
+/* Portal website: top header */
+.portal-header { background: var(--surface); border-bottom: 1px solid var(--border); }
+.portal-header-inner { max-width: 1240px; margin: 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1.5rem; padding-block: 0.75rem; }
+.portal-nav { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.portal-nav .nav-link { width: auto; }
+.portal-header .user-chip { margin-left: auto; }
+
+/* ---- Checklist ---- */
+.legend { display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; font-size: 0.83rem; color: var(--text-muted); }
+.legend b { font-family: var(--font-mono); color: var(--text); }
+.ck-section { border-top: 1px solid var(--border); }
+.ck-section h3 { padding: 0.75rem 1.25rem 0.25rem; }
+.ck-row td.no { width: 3rem; color: var(--text-subtle); }
+.ck-row.missing td { background: var(--danger-soft); }
+.marks { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); overflow: hidden; }
+.marks label { position: relative; }
+.marks input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.marks span { display: block; min-width: 2.75rem; padding: 0.3rem 0.5rem; text-align: center; font-family: var(--font-mono); font-size: 0.85rem; border-right: 1px solid var(--border); background: var(--surface); }
+.marks label:last-child span { border-right: 0; }
+.marks input:checked + span { background: var(--accent); color: var(--on-accent); }
+.marks input:focus-visible + span { box-shadow: inset var(--focus-ring); }
+.mark-ro { font-family: var(--font-mono); font-weight: 700; }
+.mark-ro.defect { color: var(--danger); }
+.mark-blank { color: var(--text-subtle); font-style: italic; }
+.remark-input { min-height: 2.2rem; }
+.damage { display: grid; grid-template-columns: minmax(150px, 200px) minmax(0, 1fr); gap: 1.25rem; align-items: start; }
+@media (max-width: 560px) { .damage { grid-template-columns: minmax(0, 1fr); } }
+.diagram { width: 100%; max-width: 200px; height: auto; background: var(--surface-muted); border: 1px dashed var(--border-strong); border-radius: var(--radius); }
+.diagram.editable { cursor: crosshair; }
+.marker-list { display: grid; gap: 0.5rem; margin: 0; padding: 0; list-style: none; }
+.marker-list li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 0.5rem; align-items: center; }
+.marker-dot { width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--danger); color: #fff; display: grid; place-items: center; font-size: 0.78rem; font-weight: 700; }
+.sticky-actions { position: sticky; bottom: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); padding: 0.75rem 1rem; padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px)); }
+.sticky-actions .grow { flex: 1 1 200px; font-size: 0.88rem; color: var(--text-muted); }
+
+/* ---- Sign-offs, history, next steps ---- */
+.signoffs { display: grid; }
+.signoff { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.5rem 1rem; padding: 0.85rem 1.25rem; border-top: 1px solid var(--border); align-items: center; }
+.signoff:first-child { border-top: 0; }
+.signoff .who { font-size: 0.85rem; color: var(--text-muted); }
+.signoff .state { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; justify-content: flex-end; text-align: right; font-size: 0.85rem; }
+.ack-box { margin: 0 1.25rem 1.25rem; border: 1px dashed var(--border-strong); border-radius: var(--radius); background: var(--surface-muted); }
+.ack-box .signoff { border-top: 0; }
+.ack-note { padding: 0 1.25rem 0.85rem; font-size: 0.8rem; color: var(--text-muted); }
+.timeline { list-style: none; margin: 0; padding: 0.5rem 1.25rem 1rem; display: grid; gap: 0.75rem; }
+.timeline li { display: grid; grid-template-columns: 0.7rem minmax(0, 1fr); gap: 0.6rem; font-size: 0.86rem; }
+.timeline .dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--border-strong); margin-top: 0.4rem; }
+.timeline .dot.sys { background: var(--text-subtle); }
+.timeline .dot.done { background: var(--success); }
+.timeline .dot.ret { background: var(--danger); }
+.timeline .meta { color: var(--text-subtle); font-size: 0.78rem; }
+.timeline .detail { color: var(--text-muted); white-space: pre-wrap; }
+.rev-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
+.rev-list li { display: flex; flex-wrap: wrap; gap: 0.4rem 0.75rem; align-items: center; font-size: 0.86rem; }
+.next { border-left: 4px solid var(--accent); }
+.next ol { margin: 0; padding-left: 1.2rem; display: grid; gap: 0.5rem; }
+.next li { font-size: 0.9rem; }
+.next .who-tag { font-weight: 650; }
+.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 0.35rem 1rem; font-size: 0.88rem; margin: 0; }
+.kv dt { color: var(--text-subtle); }
+.kv dd { margin: 0; overflow-wrap: anywhere; }
+.flow { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; font-size: 0.78rem; }
+.flow .arrow { color: var(--text-subtle); }
+.flow .badge.current { outline: 2px solid currentColor; outline-offset: 1px; }
+
+/* ---- Modal ---- */
+.scrim { position: fixed; inset: 0; z-index: 40; background: rgb(20 18 15 / 0.45); display: grid; place-items: center; padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+.dialog { width: min(520px, 100%); background: var(--surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); display: grid; max-height: 90vh; overflow: auto; }
+.dialog-head { padding: 1.1rem 1.25rem 0.5rem; display: grid; gap: 0.35rem; }
+.dialog-head p { color: var(--text-muted); font-size: 0.9rem; }
+.dialog-body { padding: 0.5rem 1.25rem 1rem; display: grid; gap: 0.75rem; }
+.dialog-foot { padding: 0.85rem 1.25rem; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.6rem; }
+.demo-hint { font-size: 0.82rem; background: #fff6dc; border: 1px solid #f0dc9c; color: #5b4507; border-radius: var(--radius-sm); padding: 0.45rem 0.65rem; }
+
+/* ---- A4 print view ---- */
+.print-toolbar { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
+.print-toolbar .grow { flex: 1 1 220px; }
+.sheet-wrap { overflow-x: auto; padding-bottom: 1rem; }
+.a4 { width: 210mm; min-height: 297mm; margin: 0 auto; background: #fff; color: #111; box-shadow: var(--shadow-lg); padding: 14mm 14mm 16mm; font-size: 10.5pt; line-height: 1.4; display: grid; gap: 5mm; align-content: start; position: relative; }
+.a4 h1 { font-size: 15pt; font-family: var(--font-display); }
+.a4 .doc-head { display: flex; justify-content: space-between; gap: 6mm; border-bottom: 2px solid #111; padding-bottom: 3mm; }
+.a4 table { font-size: 9.5pt; }
+.a4 th, .a4 td { border: 1px solid #999; padding: 1.5mm 2mm; background: none; color: #111; }
+.a4 th { font-size: 8pt; }
+.a4 .sec { font-weight: 700; background: #eee; }
+.a4 .kv { font-size: 9.5pt; }
+.a4 .kv dt { color: #555; }
+.watermark { position: absolute; top: 40%; left: 0; right: 0; text-align: center; font-size: 60pt; font-weight: 800; color: rgb(180 35 24 / 0.12); transform: rotate(-20deg); pointer-events: none; letter-spacing: 0.1em; }
+.sig-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4mm; }
+.sig { border: 1px solid #999; padding: 2.5mm; min-height: 24mm; display: grid; align-content: space-between; font-size: 9pt; }
+.sig .line { border-top: 1px solid #111; padding-top: 1mm; }
+.sim-foot { font-size: 8pt; color: #777; border-top: 1px solid #ccc; padding-top: 2mm; }
+@media print {
+  body { background: #fff; }
+  body::before, .demo-bar, .sidebar, .portal-header, .print-toolbar, .no-print { display: none !important; }
+  .admin-shell { display: block; }
+  .page { padding: 0; }
+  .a4 { box-shadow: none; margin: 0; }
+  @page { size: A4; margin: 0; }
+}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<!-- ===================================================================================
+     WORKFLOW ENGINE — pure functions, no DOM. Mirrors Backend/mashoor/src/inspections.js
+     and routes/portal.js + routes/admin.js (status names, stage rules, error messages).
+     =================================================================================== -->
+<script id="engine">
+const VEHICLE_TYPES = ['FORKLIFT', 'DOUBLE CAB HILUX', 'MEDIUM BUS', 'LARGE BUS'];
+const STATUSES = ['assigned', 'draft', 'pending_verification', 'returned', 'pending_approval', 'approved'];
+const STATUS = {
+  assigned: { label: 'Assigned', tone: '' },
+  draft: { label: 'In progress', tone: '' },
+  pending_verification: { label: 'Pending client verification', tone: 'warning' },
+  returned: { label: 'Re-check requested', tone: 'danger' },
+  pending_approval: { label: 'Pending HOO approval', tone: 'accent' },
+  approved: { label: 'Approved', tone: 'success' },
+};
+const EDITABLE = ['assigned', 'draft', 'returned'];
+const SUBMITTED = ['pending_verification', 'pending_approval', 'approved'];
+const STAGES = ['checked_by', 'agreed_by', 'approved_by', 'acknowledgement'];
+const STAGE_LABELS = { checked_by: 'Checked by', agreed_by: 'Agreed by', approved_by: 'Approved by', acknowledgement: 'Acknowledgement' };
+const ROLE_LABELS = { client: 'Vendor / Client', inspector: 'Inspector' };
+const EVENT_LABELS = {
+  created: 'Inspection created',
+  updated: 'Inspection details updated',
+  started: 'Checklist started',
+  submitted: 'Submitted for client verification',
+  resubmitted: 'Resubmitted after re-check',
+  recheck_requested: 'Re-check requested',
+  submitted_for_approval: 'Verified and submitted to HOO approval',
+  'acknowledgement.auto': 'Auto-acknowledged — no remarks',
+  'signed.checked_by': 'Confirmed as Checked by',
+  'signed.agreed_by': 'Confirmed as Agreed by',
+  'signed.approved_by': 'Approved by Head of Operations',
+  'signed.acknowledgement': 'Acknowledged',
+};
+const LEGEND = [
+  { value: 'ok', symbol: '✓', label: 'Good' },
+  { value: 'defect', symbol: '✗', label: 'Defect / needs attention' },
+  { value: 'na', symbol: 'N/A', label: 'Not applicable' },
+];
+const CAPTIONS = { checked_by: 'MGCSB Inspector', agreed_by: 'MINDEF', approved_by: 'Head of Operations', acknowledgement: '' };
+
+const sec = (title, labels, prefix) => ({ title, items: labels.map((label, i) => ({ key: `${prefix}${i + 1}`, label })) });
+const TEMPLATES = [
+  { id: 't-forklift', vehicleType: 'FORKLIFT', name: 'Forklift Inspection Checklist', version: 3, active: true, sections: [
+    sec('Engine and fluids', ['Engine oil level', 'Hydraulic oil level', 'Coolant level'], 'fe'),
+    sec('Mast and forks', ['Fork condition (cracks, wear)', 'Mast chains and rollers', 'Lift and tilt operation'], 'fm'),
+    sec('Safety', ['Horn and reverse alarm', 'Lights and beacon', 'Seat belt', 'Service and parking brake'], 'fs'),
+  ] },
+  { id: 't-hilux', vehicleType: 'DOUBLE CAB HILUX', name: 'Double Cab Pickup Checklist', version: 2, active: true, sections: [
+    sec('Exterior', ['Body panels and paint', 'Windscreen and wipers', 'Tyres and tread depth'], 'he'),
+    sec('Engine bay', ['Engine oil', 'Battery and terminals', 'Brake fluid'], 'hb'),
+    sec('Cabin', ['Seat belts (all seats)', 'Air-conditioning', 'Dashboard warning lights'], 'hc'),
+  ] },
+  { id: 't-medium-bus', vehicleType: 'MEDIUM BUS', name: 'Medium Bus Checklist', version: 2, active: true, sections: [
+    sec('Exterior', ['Body and mirrors', 'Lights and indicators', 'Tyres and wheel nuts'], 'me'),
+    sec('Passenger area', ['Seats and grab rails', 'Emergency exit and hammer', 'Fire extinguisher (in date)'], 'mp'),
+    sec('Mechanical', ['Engine oil and coolant', 'Brakes', 'Steering play'], 'mm'),
+  ] },
+  { id: 't-large-bus', vehicleType: 'LARGE BUS', name: 'Large Bus Checklist', version: 1, active: true, sections: [
+    sec('Exterior', ['Body, bumpers and mirrors', 'Lights and indicators', 'Tyres and wheel nuts'], 'le'),
+    sec('Passenger area', ['Seats and grab rails', 'Emergency exits and hammers', 'Fire extinguishers (in date)', 'First aid kit'], 'lp'),
+    sec('Mechanical', ['Engine oil and coolant', 'Air brake pressure', 'Suspension'], 'lm'),
+  ] },
+];
+
+class WorkflowError extends Error {
+  constructor(message, code, extra) { super(message); this.code = code; this.extra = extra || {}; }
+}
+const clone = (o) => JSON.parse(JSON.stringify(o));
+const nowIso = () => new Date().toISOString();
+const normalizePersonName = (v) => (typeof v === 'string' ? v.normalize('NFKC').replace(/\s+/g, ' ').trim().toLocaleLowerCase('en-US') : '');
+const clean = (v) => (typeof v === 'string' ? v.trim().slice(0, 60) : '');
+
+function emptyWorking() { return { marks: {}, itemRemarks: {}, comments: '', damage: { markers: [], notes: '' } }; }
+function allItems(template) { return template.sections.flatMap((s, si) => s.items.map((item, ii) => ({ ...item, section: s.title, number: `${si + 1}.${ii + 1}` }))); }
+function missingMarks(template, working) { return allItems(template).filter((i) => !working.marks[i.key]).map((i) => i.key); }
+function hasRemarks(w) {
+  if (Object.values(w.itemRemarks || {}).some((r) => (r || '').trim())) return true;
+  if ((w.comments || '').trim()) return true;
+  if ((w.damage?.notes || '').trim()) return true;
+  return (w.damage?.markers || []).some((m) => (m.note || '').trim());
+}
+function vehicleTitle(v) { return `${v.plate || v.registrationNo || v.modRegistrationNo || 'Vehicle'} · ${v.type}`; }
+
+const getInspection = (s, id) => s.inspections.find((i) => i.id === Number(id));
+const getAccount = (s, id) => s.accounts.find((a) => a.id === id);
+const getOrg = (s, id) => s.orgs.find((o) => o.id === id);
+const getRevision = (insp, n) => insp.revisions.find((r) => r.revision === n);
+const currentRevision = (insp) => getRevision(insp, insp.currentRevision);
+const stagesFor = (s, acct) => STAGES.filter((st) => (s.signatories[acct.orgId] || {})[st] === acct.id);
+const assigneeOf = (s, orgId, stage) => getAccount(s, (s.signatories[orgId] || {})[stage]);
+
+function addEvent(insp, e, at) {
+  insp.events.push({ revision: e.revision ?? null, actorType: e.actorType, actorName: e.actorName ?? null, action: e.action, detail: e.detail ?? null, at });
+}
+const vendorActor = (acct) => ({ actorType: 'vendor', actorName: acct.name });
+
+// ---- Admin: create / update ------------------------------------------------
+function createInspection(s, staff, input, at = nowIso()) {
+  if (!staff || staff.type !== 'staff') throw new WorkflowError('Only Mashhor staff can create inspections.', 'FORBIDDEN');
+  const org = getOrg(s, input.orgId);
+  if (!org) throw new WorkflowError('Choose a vendor / company.', 'FIELD', { field: 'orgId' });
+  const inspector = getAccount(s, input.inspectorId);
+  if (!inspector || inspector.orgId !== org.id || inspector.role !== 'inspector' || !inspector.active) {
+    throw new WorkflowError(`Choose an active Inspector account of ${org.name}.`, 'FIELD', { field: 'inspectorId' });
+  }
+  const template = s.templates.find((t) => t.id === input.templateId);
+  if (!template || !template.active) throw new WorkflowError('Choose an active checklist template.', 'FIELD', { field: 'templateId' });
+  const vehicle = { type: template.vehicleType, plate: clean(input.plate), registrationNo: clean(input.registrationNo), modRegistrationNo: clean(input.modRegistrationNo) };
+  if (!vehicle.plate && !vehicle.registrationNo && !vehicle.modRegistrationNo) {
+    throw new WorkflowError('Enter at least one vehicle identifier (plate, registration no. or MOD registration no.).', 'FIELD', { field: 'plate' });
+  }
+  const insp = {
+    id: s.seq++, orgId: org.id, inspectorId: inspector.id,
+    template: clone(template), // the inspection keeps its own copy of the template version
+    vehicle, status: 'assigned', currentRevision: 0, recheckReason: null,
+    working: emptyWorking(), revisions: [], events: [], createdAt: at, updatedAt: at, approvedAt: null,
+  };
+  addEvent(insp, { actorType: 'staff', actorName: staff.name, action: 'created', detail: `Assigned to ${inspector.name}` }, at);
+  s.inspections.push(insp);
+  return insp;
+}
+
+function updateInspection(s, staff, id, input, at = nowIso()) {
+  const insp = getInspection(s, id);
+  if (!insp) throw new WorkflowError('Inspection not found.', 'NOT_FOUND');
+  if (!EDITABLE.includes(insp.status)) throw new WorkflowError('Only inspections still with the inspector (assigned, draft or returned) can be changed.', 'CONFLICT');
+  const next = { ...insp.vehicle, plate: clean(input.plate), registrationNo: clean(input.registrationNo), modRegistrationNo: clean(input.modRegistrationNo) };
+  if (!next.plate && !next.registrationNo && !next.modRegistrationNo) throw new WorkflowError('Keep at least one vehicle identifier.', 'FIELD', { field: 'plate' });
+  let detail = 'Vehicle details updated';
+  if (input.inspectorId && input.inspectorId !== insp.inspectorId) {
+    const inspector = getAccount(s, input.inspectorId);
+    if (!inspector || inspector.orgId !== insp.orgId || inspector.role !== 'inspector' || !inspector.active) throw new WorkflowError('Choose an active Inspector account of the same company.', 'FIELD', { field: 'inspectorId' });
+    insp.inspectorId = inspector.id;
+    detail = `Reassigned to ${inspector.name}`;
+  }
+  insp.vehicle = next;
+  insp.updatedAt = at;
+  addEvent(insp, { actorType: 'staff', actorName: staff.name, action: 'updated', detail }, at);
+  return insp;
+}
+
+// ---- Portal: inspector -----------------------------------------------------
+function requireAssignedInspector(insp, acct) {
+  if (acct.role !== 'inspector' || insp.inspectorId !== acct.id) throw new WorkflowError('Only the assigned inspector can change this checklist.', 'FORBIDDEN');
+  if (!EDITABLE.includes(insp.status)) throw new WorkflowError('This checklist is not open for editing.', 'CONFLICT');
+}
+function saveDraft(s, acct, id, working, at = nowIso()) {
+  const insp = getInspection(s, id);
+  requireAssignedInspector(insp, acct);
+  insp.working = clone(working);
+  if (insp.status === 'assigned') {
+    insp.status = 'draft';
+    addEvent(insp, { ...vendorActor(acct), action: 'started' }, at);
+  } // a returned inspection stays "returned" until it is resubmitted (as in production)
+  insp.updatedAt = at;
+  return insp;
+}
+function submitInspection(s, acct, id, working, at = nowIso()) {
+  const insp = getInspection(s, id);
+  requireAssignedInspector(insp, acct);
+  insp.working = clone(working);
+  const missing = missingMarks(insp.template, insp.working);
+  if (missing.length) throw new WorkflowError(`Complete the checklist before submitting (${missing.length} missing).`, 'INCOMPLETE', { missing });
+  const revision = insp.currentRevision + 1;
+  const remarks = hasRemarks(insp.working);
+  insp.revisions.push({
+    revision,
+    snapshot: { vehicle: clone(insp.vehicle), template: clone(insp.template), working: clone(insp.working) },
+    submittedAt: at, submittedBy: { id: acct.id, name: acct.name },
+    hasRemarks: remarks, acknowledgement: remarks ? 'pending' : 'auto',
+    verifiedBy: null, signoffs: [],
+  });
+  insp.status = 'pending_verification';
+  insp.currentRevision = revision;
+  insp.recheckReason = null;
+  insp.updatedAt = at;
+  addEvent(insp, { revision, ...vendorActor(acct), action: revision === 1 ? 'submitted' : 'resubmitted' }, at);
+  if (!remarks) addEvent(insp, { revision, actorType: 'system', action: 'acknowledgement.auto', detail: 'Auto-acknowledged — no remarks.' }, at);
+  return insp;
+}
+
+// ---- Portal: client decision ----------------------------------------------
+function requireClientDecision(insp, acct) {
+  if (acct.role !== 'client') throw new WorkflowError('Only client accounts can verify inspections.', 'FORBIDDEN');
+  if (insp.status !== 'pending_verification') throw new WorkflowError('This inspection is not waiting for client verification.', 'CONFLICT');
+}
+function requireCurrentRevision(insp, revision) {
+  if (!Number.isInteger(revision) || revision < 1 || revision !== insp.currentRevision) {
+    throw new WorkflowError('This inspection has changed since you opened it. Reload to review the current revision.', 'STALE_REVISION');
+  }
+  return getRevision(insp, revision);
+}
+function requestRecheck(s, acct, id, revision, reason, at = nowIso()) {
+  const insp = getInspection(s, id);
+  requireClientDecision(insp, acct);
+  requireCurrentRevision(insp, revision);
+  const text = typeof reason === 'string' ? reason.trim() : '';
+  if (text.length < 5) throw new WorkflowError('Explain what is missing or incorrect so the inspector can re-check it.', 'FIELD', { field: 'reason' });
+  insp.status = 'returned';
+  insp.recheckReason = text.slice(0, 2000);
+  insp.updatedAt = at;
+  addEvent(insp, { revision: insp.currentRevision, ...vendorActor(acct), action: 'recheck_requested', detail: insp.recheckReason }, at);
+  return insp;
+}
+function verifyInspection(s, acct, id, revision, at = nowIso()) {
+  const insp = getInspection(s, id);
+  requireClientDecision(insp, acct);
+  const rev = requireCurrentRevision(insp, revision);
+  insp.status = 'pending_approval';
+  rev.verifiedBy = { id: acct.id, name: acct.name, at };
+  insp.updatedAt = at;
+  addEvent(insp, { revision, ...vendorActor(acct), action: 'submitted_for_approval' }, at);
+  return insp;
+}
+
+// ---- Portal: sign-offs -----------------------------------------------------
+// null when the stage may be signed now, otherwise the reason it can't.
+function stageOpen(s, insp, rev, stage) {
+  const signed = new Set(rev.signoffs.map((x) => x.stage));
+  if (stage === 'acknowledgement') {
+    if (!SUBMITTED.includes(insp.status)) return 'This inspection is not submitted.';
+    if (rev.acknowledgement !== 'pending') return 'Acknowledgement is not pending for this revision.';
+    return null;
+  }
+  if (stage === 'checked_by' || stage === 'agreed_by') {
+    return ['pending_verification', 'pending_approval'].includes(insp.status) ? null : 'This stage is not open.';
+  }
+  if (insp.status !== 'pending_approval') return 'Head of Operations approval opens after client verification.';
+  if (!signed.has('checked_by') || !signed.has('agreed_by')) return 'Checked by and Agreed by must be confirmed on this revision first.';
+  if (getOrg(s, insp.orgId).ackBlocksApproval && rev.acknowledgement === 'pending') return 'The acknowledgement must be completed before approval.';
+  return null;
+}
+function signStage(s, acct, id, stage, revision, fullName, at = nowIso()) {
+  const insp = getInspection(s, id);
+  if (!STAGES.includes(stage)) throw new WorkflowError('Unknown stage.', 'NOT_FOUND');
+  if (!stagesFor(s, acct).includes(stage) || acct.orgId !== insp.orgId) throw new WorkflowError('This stage is not assigned to your account.', 'FORBIDDEN');
+  const rev = requireCurrentRevision(insp, revision);
+  if (rev.signoffs.some((x) => x.stage === stage)) throw new WorkflowError('This stage is already confirmed for this revision.', 'CONFLICT');
+  const blocked = stageOpen(s, insp, rev, stage);
+  if (blocked) throw new WorkflowError(blocked, 'CONFLICT');
+  const typed = normalizePersonName(fullName);
+  if (!typed || typed !== normalizePersonName(acct.name)) throw new WorkflowError('The name you entered does not match the full name on your account.', 'FIELD', { field: 'fullName' });
+  rev.signoffs.push({ stage, accountId: acct.id, name: acct.name, at });
+  if (stage === 'acknowledgement') rev.acknowledgement = 'acknowledged';
+  if (stage === 'approved_by') { insp.status = 'approved'; insp.approvedAt = at; }
+  insp.updatedAt = at;
+  addEvent(insp, { revision, ...vendorActor(acct), action: `signed.${stage}` }, at);
+  return insp;
+}
+
+// ---- Portal: visibility and queues ----------------------------------------
+function portalCanView(s, insp, acct) {
+  if (!insp || insp.orgId !== acct.orgId) return false;
+  if (acct.role === 'client') return true;
+  if (insp.inspectorId === acct.id) return true;
+  return stagesFor(s, acct).length > 0;
+}
+function viewerFor(s, insp, acct) {
+  const rev = currentRevision(insp);
+  const isAssignedInspector = acct.role === 'inspector' && insp.inspectorId === acct.id;
+  return {
+    isAssignedInspector,
+    canEdit: isAssignedInspector && EDITABLE.includes(insp.status),
+    canVerify: acct.role === 'client' && insp.status === 'pending_verification',
+    stages: stagesFor(s, acct).map((stage) => {
+      const signed = !!rev && rev.signoffs.some((x) => x.stage === stage);
+      return { stage, signed, blockedReason: !rev ? 'Not submitted yet.' : signed ? null : stageOpen(s, insp, rev, stage) };
+    }),
+  };
+}
+const QUEUES = {
+  inspector: [
+    { key: 'assigned', label: 'Assigned', match: (i) => i.status === 'assigned', empty: 'No newly assigned inspections.' },
+    { key: 'draft', label: 'In progress', match: (i) => i.status === 'draft', empty: 'No checklists in progress.' },
+    { key: 'returned', label: 'Re-check requested', match: (i) => i.status === 'returned', empty: 'Nothing has been returned for re-check.' },
+    { key: 'submitted', label: 'Submitted', match: (i) => SUBMITTED.includes(i.status), empty: 'You haven’t submitted any inspections yet.' },
+  ],
+  client: [
+    { key: 'pending_verification', label: 'Pending verification', match: (i) => i.status === 'pending_verification', empty: 'No inspections are waiting for your verification.' },
+    { key: 'returned', label: 'Re-check requested', match: (i) => i.status === 'returned', empty: 'No inspections are out for re-check.' },
+    { key: 'pending_approval', label: 'Awaiting HOO approval', match: (i) => i.status === 'pending_approval', empty: 'No inspections are waiting for Head of Operations approval.' },
+    { key: 'completed', label: 'Completed', match: (i) => i.status === 'approved', empty: 'No approved inspections yet.' },
+  ],
+};
+function pendingSignoffs(s, acct) {
+  const stages = stagesFor(s, acct);
+  if (!stages.length) return [];
+  return s.inspections.filter((i) => {
+    if (i.orgId !== acct.orgId || !SUBMITTED.includes(i.status)) return false;
+    const rev = currentRevision(i);
+    if (!rev) return false;
+    return stages.some((st) => !rev.signoffs.some((x) => x.stage === st) && stageOpen(s, i, rev, st) === null);
+  });
+}
+function queueList(s, acct, key) {
+  if (key === 'signoffs') return pendingSignoffs(s, acct);
+  const q = (QUEUES[acct.role] || []).find((x) => x.key === key);
+  if (!q) return [];
+  return s.inspections.filter((i) => i.orgId === acct.orgId && (acct.role !== 'inspector' || i.inspectorId === acct.id) && q.match(i));
+}
+
+// ---- Fictional sample data -------------------------------------------------
+function seedState() {
+  const s = {
+    version: 1, seq: 101,
+    staff: [{ id: 'staff1', type: 'staff', name: 'Nadia Rahman', email: 'nadia.rahman@mashhor.example' }],
+    orgs: [
+      { id: 'o1', name: 'MGCSB', status: 'active', ackBlocksApproval: false },
+      { id: 'o2', name: 'Sample Fleet Sdn Bhd', status: 'active', ackBlocksApproval: false },
+    ],
+    accounts: [
+      { id: 'a1', orgId: 'o1', name: 'Hafiz Kamal', username: 'hafiz.kamal', role: 'inspector', active: true },
+      { id: 'a7', orgId: 'o1', name: 'Daniel Wong', username: 'daniel.wong', role: 'inspector', active: true },
+      { id: 'a2', orgId: 'o1', name: 'Siti Aminah', username: 'siti.aminah', role: 'client', active: true },
+      { id: 'a3', orgId: 'o1', name: 'Azman Yusof', username: 'azman.yusof', role: 'inspector', active: true },
+      { id: 'a4', orgId: 'o1', name: 'Faridah Ismail', username: 'faridah.ismail', role: 'client', active: true },
+      { id: 'a5', orgId: 'o1', name: 'Rashid Omar', username: 'rashid.omar', role: 'client', active: true },
+      { id: 'a6', orgId: 'o1', name: 'Kamarul Ariffin', username: 'kamarul.ariffin', role: 'client', active: true },
+      { id: 'a8', orgId: 'o2', name: 'Priya Nair', username: 'priya.nair', role: 'inspector', active: true },
+      { id: 'a9', orgId: 'o2', name: 'Tan Mei Ling', username: 'tan.meiling', role: 'client', active: true },
+    ],
+    signatories: { o1: { checked_by: 'a3', agreed_by: 'a4', approved_by: 'a5', acknowledgement: 'a6' }, o2: {} },
+    templates: clone(TEMPLATES),
+    inspections: [],
+  };
+  const admin = s.staff[0];
+  const A = (id) => getAccount(s, id);
+  // A completed record, produced through the same workflow functions.
+  const done = createInspection(s, admin, { orgId: 'o1', inspectorId: 'a1', templateId: 't-medium-bus', plate: 'BKL 4821', registrationNo: '', modRegistrationNo: 'MOD 77215' }, '2026-11-16T01:15:00.000Z');
+  const w = emptyWorking();
+  allItems(done.template).forEach((i) => { w.marks[i.key] = 'ok'; });
+  saveDraft(s, A('a1'), done.id, w, '2026-11-17T02:05:00.000Z');
+  submitInspection(s, A('a1'), done.id, w, '2026-11-17T03:40:00.000Z');
+  signStage(s, A('a3'), done.id, 'checked_by', 1, 'Azman Yusof', '2026-11-17T05:10:00.000Z');
+  verifyInspection(s, A('a2'), done.id, 1, '2026-11-18T01:30:00.000Z');
+  signStage(s, A('a4'), done.id, 'agreed_by', 1, 'Faridah Ismail', '2026-11-18T03:00:00.000Z');
+  signStage(s, A('a5'), done.id, 'approved_by', 1, 'Rashid Omar', '2026-11-18T06:20:00.000Z');
+  // Another organisation's work, to show the per-company scoping.
+  createInspection(s, admin, { orgId: 'o2', inspectorId: 'a8', templateId: 't-large-bus', plate: 'JQT 9073', registrationNo: '', modRegistrationNo: '' }, '2026-11-19T00:45:00.000Z');
+  return s;
+}
+
+const Engine = {
+  VEHICLE_TYPES, STATUSES, STATUS, EDITABLE, SUBMITTED, STAGES, STAGE_LABELS, ROLE_LABELS, EVENT_LABELS, LEGEND, CAPTIONS, QUEUES,
+  WorkflowError, clone, emptyWorking, allItems, missingMarks, hasRemarks, vehicleTitle, normalizePersonName,
+  getInspection, getAccount, getOrg, getRevision, currentRevision, stagesFor, assigneeOf,
+  createInspection, updateInspection, saveDraft, submitInspection, requestRecheck, verifyInspection, stageOpen, signStage,
+  portalCanView, viewerFor, pendingSignoffs, queueList, seedState,
+};
+if (typeof globalThis !== 'undefined') globalThis.MashhorEngine = Engine;
+</script>
+
+<!-- ===================================================================================
+     USER INTERFACE
+     =================================================================================== -->
+<script id="ui">
+(function () {
+  const E = window.MashhorEngine;
+  const STORE = 'mashhor-inspection-prototype-v1';
+  const app = document.getElementById('app');
+
+  // ---------- persistence (browser-local; falls back to memory) ----------
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORE);
+      if (raw) { const d = JSON.parse(raw); if (d && d.state && d.state.version === 1) return d; }
+    } catch (e) { /* storage unavailable */ }
+    return null;
+  }
+  function persist() {
+    try { localStorage.setItem(STORE, JSON.stringify({ state, persona: ui.persona, view: ui.view })); } catch (e) { /* ignore */ }
+  }
+  const saved = load();
+  let state = saved ? saved.state : E.seedState();
+  const ui = {
+    persona: saved ? saved.persona : 'admin',
+    view: saved ? saved.view : { name: 'a-inspections' },
+    notice: '', error: '', modal: null, creating: false, createErrors: {}, createValues: {},
+    filter: '', edit: null, missing: null, resetArmed: false,
+  };
+
+  // ---------- helpers ----------
+  const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const fmt = (iso) => { if (!iso) return '—'; const d = new Date(iso); return d.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }); };
+  const initials = (n) => n.split(/\s+/).map((p) => p[0]).slice(0, 2).join('').toUpperCase();
+  const badge = (status) => { const s = E.STATUS[status]; return `<span class="badge ${s.tone}" title="Backend status: ${status}">${esc(s.label)}</span>`; };
+  const persona = () => (ui.persona === 'admin' ? { type: 'staff', ...state.staff[0] } : E.getAccount(state, ui.persona.slice(4)));
+  const isAdmin = () => ui.persona === 'admin';
+  const stageCaption = (stage) => (E.CAPTIONS[stage] ? `${E.STAGE_LABELS[stage]} (${E.CAPTIONS[stage]})` : E.STAGE_LABELS[stage]);
+  function personaLabel(acct) {
+    const stages = E.stagesFor(state, acct);
+    const what = stages.length ? stages.map((st) => (E.CAPTIONS[st] ? `${E.STAGE_LABELS[st]} — ${E.CAPTIONS[st]}` : E.STAGE_LABELS[st])).join(', ') : E.ROLE_LABELS[acct.role];
+    return `${acct.name} · ${what}`;
+  }
+  function personaKeyFor(stageOrRole, orgId) {
+    if (stageOrRole === 'admin') return 'admin';
+    const a = E.assigneeOf(state, orgId, stageOrRole);
+    return a ? `acc:${a.id}` : null;
+  }
+
+  // ---------- navigation ----------
+  function go(view) {
+    ui.view = view; ui.notice = ''; ui.error = ''; ui.missing = null; ui.modal = null;
+    persist(); render(); window.scrollTo(0, 0);
+  }
+  function defaultViewFor(key) {
+    if (key === 'admin') return { name: 'a-inspections' };
+    const acct = E.getAccount(state, key.slice(4));
+    return { name: 'p-inspections', queue: E.stagesFor(state, acct).length ? 'signoffs' : E.QUEUES[acct.role][0].key };
+  }
+  function switchPersona(key) {
+    const id = ui.view.id;
+    ui.persona = key; ui.edit = null; ui.creating = false;
+    let view = defaultViewFor(key);
+    // Stay on the same inspection when the new account may open it.
+    if (id && /inspection|print/.test(ui.view.name)) {
+      const insp = E.getInspection(state, id);
+      if (key === 'admin') view = { name: ui.view.name.endsWith('print') ? 'a-print' : 'a-inspection', id, rev: ui.view.rev };
+      else if (insp && E.portalCanView(state, insp, persona())) view = { name: ui.view.name.endsWith('print') ? 'p-print' : 'p-inspection', id, rev: ui.view.rev };
+    }
+    go(view);
+  }
+  function act(fn, okMessage) {
+    try {
+      fn();
+      ui.error = ''; ui.notice = okMessage || ''; ui.modal = null;
+      persist(); render();
+      return true;
+    } catch (err) {
+      if (!(err instanceof E.WorkflowError)) throw err;
+      if (ui.modal && err.code === 'FIELD') { ui.modal.error = err.message; render(); return false; }
+      ui.modal = null; ui.error = err.message; render(); window.scrollTo(0, 0);
+      return false;
+    }
+  }
+
+  // ---------- top demo bar ----------
+  function demoBar() {
+    const orgGroups = state.orgs.map((o) => {
+      const accts = state.accounts.filter((a) => a.orgId === o.id && a.active);
+      return `<optgroup label="Portal website — ${esc(o.name)}">${accts.map((a) => `<option value="acc:${a.id}" ${ui.persona === `acc:${a.id}` ? 'selected' : ''}>${esc(personaLabel(a))}</option>`).join('')}</optgroup>`;
+    }).join('');
+    return `<header class="demo-bar"><div class="demo-bar-inner gutter">
+      <div class="demo-title"><strong>Mashhor Inspection System — Prototype</strong><span>Sample records and account confirmations are simulated and stored only in this browser.</span></div>
+      <span class="sim-chip">Simulated</span>
+      <div class="demo-controls">
+        <label for="persona">Viewing as</label>
+        <select id="persona" data-change="persona">
+          <optgroup label="Admin website"><option value="admin" ${isAdmin() ? 'selected' : ''}>${esc(state.staff[0].name)} · Mashhor staff</option></optgroup>
+          ${orgGroups}
+        </select>
+        <button type="button" class="btn btn-sm ${ui.resetArmed ? 'armed' : ''}" data-action="reset">${ui.resetArmed ? 'Click again to reset' : 'Reset demo'}</button>
+      </div>
+    </div></header>`;
+  }
+
+  // ---------- shared pieces ----------
+  function pageHeader({ title, badgeHtml = '', desc = '', back = null, actions = '' }) {
+    return `<div class="page-header"><div class="titles">
+      ${back ? `<button type="button" class="btn-link back" data-nav='${esc(JSON.stringify(back.view))}'>← ${esc(back.label)}</button>` : ''}
+      <div class="title-row"><h1>${esc(title)}</h1>${badgeHtml}</div>
+      ${desc ? `<p class="desc">${desc}</p>` : ''}
+    </div>${actions ? `<div class="form-actions">${actions}</div>` : ''}</div>`;
+  }
+  function flash() {
+    return (ui.error ? `<div class="alert danger" role="alert">${esc(ui.error)}</div>` : '') + (ui.notice ? `<div class="alert success" role="status">${esc(ui.notice)}</div>` : '');
+  }
+  function navBtn(view, label, cls = 'btn-link') { return `<button type="button" class="${cls}" data-nav='${esc(JSON.stringify(view))}'>${label}</button>`; }
+
+  function statusFlow(status) {
+    const steps = ['assigned', 'draft', 'pending_verification', 'pending_approval', 'approved'];
+    const parts = steps.map((st) => `<span class="badge ${st === status ? `${E.STATUS[st].tone} current` : 'outline'}">${esc(E.STATUS[st].label)}</span>`);
+    const ret = `<span class="badge ${status === 'returned' ? 'danger current' : 'outline'}">↺ ${esc(E.STATUS.returned.label)}</span>`;
+    return `<div class="flow" aria-label="Status flow">${parts.join('<span class="arrow">→</span>')}<span class="subtle">· branch:</span>${ret}</div>`;
+  }
+
+  function nextSteps(insp) {
+    const rev = E.currentRevision(insp);
+    const inspector = E.getAccount(state, insp.inspectorId);
+    const client = state.accounts.find((a) => a.orgId === insp.orgId && a.role === 'client' && !E.stagesFor(state, a).length);
+    const items = [];
+    const sw = (key, label) => (key && key !== ui.persona ? ` <button type="button" class="btn btn-sm" data-action="persona" data-key="${key}">View as ${esc(label)}</button>` : '');
+    const signed = (st) => rev && rev.signoffs.some((x) => x.stage === st);
+    const stageStep = (st) => {
+      const a = E.assigneeOf(state, insp.orgId, st);
+      if (!a) return `<li><span class="who-tag">${esc(stageCaption(st))}</span>: no account assigned (Admin → Vendors → Inspection sign-offs).</li>`;
+      if (signed(st)) return `<li><span class="who-tag">${esc(stageCaption(st))}</span>: confirmed by ${esc(a.name)} ✓</li>`;
+      return `<li><span class="who-tag">${esc(stageCaption(st))}</span>: ${esc(a.name)} can confirm now.${sw(`acc:${a.id}`, a.name)}</li>`;
+    };
+    if (insp.status === 'assigned' || insp.status === 'draft') items.push(`<li><span class="who-tag">Inspector</span>: ${esc(inspector.name)} completes the checklist, saves a draft and submits revision ${insp.currentRevision + 1}.${sw(`acc:${inspector.id}`, inspector.name)}</li>`);
+    if (insp.status === 'returned') items.push(`<li><span class="who-tag">Inspector</span>: ${esc(inspector.name)} reads the client’s reason, corrects the checklist and resubmits. This creates revision ${insp.currentRevision + 1}; revision ${insp.currentRevision} stays unchanged.${sw(`acc:${inspector.id}`, inspector.name)}</li>`);
+    if (insp.status === 'pending_verification') {
+      items.push(`<li><span class="who-tag">Client</span>: verifies revision ${insp.currentRevision} (Submit to HOO Approval) or requests a re-check.${client ? sw(`acc:${client.id}`, client.name) : ''}</li>`);
+      items.push(stageStep('checked_by'), stageStep('agreed_by'));
+      items.push(`<li><span class="who-tag">${esc(stageCaption('approved_by'))}</span>: opens after client verification and both sign-offs.</li>`);
+    }
+    if (insp.status === 'pending_approval') {
+      items.push(stageStep('checked_by'), stageStep('agreed_by'));
+      const a = E.assigneeOf(state, insp.orgId, 'approved_by');
+      const blocked = rev && E.stageOpen(state, insp, rev, 'approved_by');
+      items.push(blocked ? `<li><span class="who-tag">${esc(stageCaption('approved_by'))}</span>: waiting — ${esc(blocked)}</li>` : `<li><span class="who-tag">${esc(stageCaption('approved_by'))}</span>: ${a ? `${esc(a.name)} can give final approval now.${sw(`acc:${a.id}`, a.name)}` : 'no account assigned.'}</li>`);
+    }
+    if (insp.status === 'approved') items.push(`<li><span class="who-tag">Completed</span>: approved ${esc(fmt(insp.approvedAt))}. History, revisions and the print view remain available.</li>`);
+    if (rev && rev.acknowledgement === 'pending') {
+      const a = E.assigneeOf(state, insp.orgId, 'acknowledgement');
+      items.push(`<li><span class="who-tag">Acknowledgement</span> (separate from approval): revision ${rev.revision} has remarks, so ${a ? esc(a.name) : 'the assigned acknowledger'} must acknowledge it.${E.getOrg(state, insp.orgId).ackBlocksApproval ? ' This company requires it before approval.' : ' It does not block approval.'}${a ? sw(`acc:${a.id}`, a.name) : ''}</li>`);
+    }
+    return `<section class="card next" aria-labelledby="next-title"><div class="card-head"><div><h2 id="next-title">What happens next</h2><p>Presenter guide — not part of the production screens.</p></div></div>
+      <div class="card-body">${statusFlow(insp.status)}<ol>${items.join('')}</ol></div></section>`;
+  }
+
+  // Damage diagram: a generic top-down vehicle outline.
+  function diagram(markers, editable) {
+    const dots = markers.map((m, i) => `<g><circle cx="${m.x}" cy="${m.y}" r="9" fill="#b42318"></circle><text x="${m.x}" y="${m.y + 4}" text-anchor="middle" font-size="10" font-weight="700" fill="#ffffff">${i + 1}</text></g>`).join('');
+    return `<svg class="diagram ${editable ? 'editable' : ''}" viewBox="0 0 200 400" role="img" aria-label="Vehicle damage diagram, top view, front at the top${markers.length ? `, ${markers.length} marked` : ''}" ${editable ? 'data-action="diagram"' : ''}>
+      <rect x="45" y="20" width="110" height="360" rx="26" fill="#ffffff" stroke="#857d71" stroke-width="2"></rect>
+      <rect x="58" y="40" width="84" height="70" rx="10" fill="#efebe4" stroke="#cec6b8"></rect>
+      <rect x="58" y="300" width="84" height="55" rx="8" fill="#efebe4" stroke="#cec6b8"></rect>
+      <rect x="33" y="70" width="12" height="44" rx="4" fill="#635c52"></rect><rect x="155" y="70" width="12" height="44" rx="4" fill="#635c52"></rect>
+      <rect x="33" y="282" width="12" height="44" rx="4" fill="#635c52"></rect><rect x="155" y="282" width="12" height="44" rx="4" fill="#635c52"></rect>
+      <text x="100" y="14" text-anchor="middle" font-size="10" fill="#857d71">FRONT</text><text x="100" y="396" text-anchor="middle" font-size="10" fill="#857d71">REAR</text>
+      ${dots}</svg>`;
+  }
+
+  function markCell(value) {
+    if (!value) return '<span class="mark-blank">blank</span>';
+    const l = E.LEGEND.find((x) => x.value === value);
+    return `<span class="mark-ro ${value}" title="${esc(l.label)}">${esc(l.symbol)}</span>`;
+  }
+
+  // Read-only checklist of a revision snapshot or working copy.
+  function checklistReadOnly(template, working) {
+    const rows = template.sections.map((s, si) => `<div class="ck-section"><h3>${si + 1}. ${esc(s.title)}</h3><div class="table-wrap"><table><thead><tr><th>No.</th><th>Item</th><th>Mark</th><th>Remark</th></tr></thead><tbody>
+      ${s.items.map((it, ii) => `<tr class="ck-row"><td class="no num">${si + 1}.${ii + 1}</td><td>${esc(it.label)}</td><td>${markCell(working.marks[it.key])}</td><td class="prewrap">${esc(working.itemRemarks[it.key] || '') || '<span class="subtle">—</span>'}</td></tr>`).join('')}
+      </tbody></table></div></div>`).join('');
+    const m = working.damage.markers;
+    return `<section class="card" aria-label="Inspection checklist">
+      <div class="card-head"><div><h2>${esc(template.name)} <span class="subtle">· v${template.version}</span></h2><p>${legendHtml()}</p></div></div>
+      ${rows}
+      <div class="ck-section card-body"><h3>Remarks / comments</h3><p class="prewrap">${esc(working.comments) || '<span class="subtle">No comments.</span>'}</p></div>
+      <div class="ck-section card-body"><h3>Damage assessment</h3><div class="damage">${diagram(m, false)}
+        <div class="stack" style="gap:.6rem">${m.length ? `<ul class="marker-list">${m.map((x, i) => `<li><span class="marker-dot">${i + 1}</span><span>${esc(x.note) || '<span class="subtle">No note</span>'}</span><span></span></li>`).join('')}</ul>` : '<p class="subtle">No damage marked.</p>'}
+        ${working.damage.notes ? `<p class="prewrap"><strong>Damage notes:</strong> ${esc(working.damage.notes)}</p>` : ''}</div></div></div>
+    </section>`;
+  }
+  function legendHtml() { return `<span class="legend">${E.LEGEND.map((l) => `<span><b>${esc(l.symbol)}</b> ${esc(l.label)}</span>`).join('')}</span>`; }
+
+  // The inspector's editable form.
+  function checklistEditor(insp) {
+    const w = ui.edit.working;
+    const missing = new Set(ui.missing || []);
+    const sections = insp.template.sections.map((s, si) => `<div class="ck-section"><h3>${si + 1}. ${esc(s.title)}</h3><div class="table-wrap"><table><thead><tr><th>No.</th><th>Item</th><th>Mark</th><th>Remark <span class="subtle">(optional)</span></th></tr></thead><tbody>
+      ${s.items.map((it, ii) => `<tr class="ck-row ${missing.has(it.key) ? 'missing' : ''}" data-row="${it.key}"><td class="no num">${si + 1}.${ii + 1}</td><td>${esc(it.label)}${missing.has(it.key) ? '<span class="cell-sub" style="color:var(--danger)">Choose a mark.</span>' : ''}</td>
+        <td><span class="marks" role="radiogroup" aria-label="Mark for ${esc(it.label)}">${E.LEGEND.map((l) => `<label title="${esc(l.label)}"><input type="radio" id="mark-${it.key}-${l.value}" name="mark-${it.key}" value="${l.value}" data-mark="${it.key}" ${w.marks[it.key] === l.value ? 'checked' : ''}><span>${esc(l.symbol)}</span></label>`).join('')}</span></td>
+        <td><input class="input remark-input" id="remark-${it.key}" data-remark="${it.key}" value="${esc(w.itemRemarks[it.key] || '')}" maxlength="300" aria-label="Remark for ${esc(it.label)}"></td></tr>`).join('')}
+      </tbody></table></div></div>`).join('');
+    const m = w.damage.markers;
+    return `<section class="card" aria-label="Inspection checklist">
+      <div class="card-head"><div><h2>${esc(insp.template.name)} <span class="subtle">· v${insp.template.version}</span></h2><p>${legendHtml()}</p></div><span class="badge info">Working copy — editable</span></div>
+      ${sections}
+      <div class="ck-section card-body"><label class="field"><span>Remarks / comments <span class="opt">(optional)</span></span>
+        <textarea class="textarea" id="comments" data-field="comments" maxlength="2000">${esc(w.comments)}</textarea>
+        <span class="hint">Any remark here, on an item, or on the damage page makes acknowledgement pending after submission.</span></label></div>
+      <div class="ck-section card-body"><h3>Damage assessment</h3><p class="subtle" style="font-size:.85rem">Click the diagram to mark damage, then describe each mark.</p>
+        <div class="damage">${diagram(m, true)}<div class="stack" style="gap:.75rem">
+          ${m.length ? `<ul class="marker-list">${m.map((x, i) => `<li><span class="marker-dot">${i + 1}</span><input class="input" id="marker-note-${i}" data-marker-note="${i}" value="${esc(x.note)}" placeholder="e.g. Dent on rear bumper" aria-label="Note for damage mark ${i + 1}"><button type="button" class="btn btn-sm" data-action="remove-marker" data-index="${i}" aria-label="Remove mark ${i + 1}">Remove</button></li>`).join('')}</ul>` : '<p class="subtle">No damage marked.</p>'}
+          <label class="field"><span>Damage notes <span class="opt">(optional)</span></span><textarea class="textarea" id="damage-notes" data-field="damage-notes" maxlength="2000">${esc(w.damage.notes)}</textarea></label>
+        </div></div></div>
+    </section>
+    <div class="sticky-actions"><span class="grow" id="edit-status">${editStatus(insp)}</span>
+      <button type="button" class="btn" data-action="save-draft">Save draft</button>
+      <button type="button" class="btn btn-primary" data-action="start-submit">${insp.currentRevision ? 'Resubmit for verification' : 'Submit for verification'}</button></div>`;
+  }
+  function editStatus(insp) {
+    const total = E.allItems(insp.template).length;
+    const done = total - E.missingMarks(insp.template, ui.edit.working).length;
+    return `<span class="num">${done} / ${total}</span> items marked · ${ui.edit.dirty ? 'unsaved changes' : 'all changes saved'}`;
+  }
+
+  function signoffPanel(insp, rev, viewer) {
+    const row = (stage) => {
+      const a = E.assigneeOf(state, insp.orgId, stage);
+      const s = rev && rev.signoffs.find((x) => x.stage === stage);
+      let right;
+      if (stage === 'acknowledgement' && rev && rev.acknowledgement === 'auto') right = '<span class="badge info">Auto-acknowledged — no remarks</span>';
+      else if (s) right = `<span class="badge success">✓ ${esc(s.name)}</span><span class="subtle num">${esc(fmt(s.at))}</span>`;
+      else if (!rev) right = '<span class="subtle">Not submitted yet</span>';
+      else {
+        const mine = viewer && viewer.stages.find((x) => x.stage === stage);
+        if (mine && !mine.signed && !mine.blockedReason) right = `<span class="badge warning">Waiting for you</span><button type="button" class="btn btn-sm btn-primary" data-action="open-sign" data-stage="${stage}">Confirm ${esc(E.STAGE_LABELS[stage])}</button>`;
+        else if (mine && mine.blockedReason) right = `<span class="subtle">${esc(mine.blockedReason)}</span>`;
+        else if (stage === 'acknowledgement') right = '<span class="badge warning">Acknowledgement pending</span>';
+        else { const r = E.stageOpen(state, insp, rev, stage); right = r ? `<span class="subtle">${esc(r)}</span>` : '<span class="badge outline">Awaiting confirmation</span>'; }
+      }
+      return `<div class="signoff"><div><strong>${esc(stageCaption(stage))}</strong><div class="who">${a ? `Assigned: ${esc(a.name)}` : 'No account assigned'}</div></div><div class="state">${right}</div></div>`;
+    };
+    return `<section class="card" aria-labelledby="signoff-title">
+      <div class="card-head"><div><h2 id="signoff-title">Sign-offs${rev ? ` · revision ${rev.revision}` : ''}</h2><p>Each assigned account confirms its own stage by re-entering its full name. A new revision starts every stage again.</p></div></div>
+      <div class="signoffs">${['checked_by', 'agreed_by', 'approved_by'].map(row).join('')}</div>
+      <div class="ack-box">${row('acknowledgement')}<p class="ack-note">Acknowledgement is not approval. It only records that the remarks were read.${E.getOrg(state, insp.orgId).ackBlocksApproval ? ' This company requires it before final approval.' : ' Default setting: a pending acknowledgement does not block final approval.'}</p></div>
+    </section>`;
+  }
+
+  function timeline(insp) {
+    const cls = (a) => (a === 'recheck_requested' ? 'ret' : a.startsWith('signed') || a === 'submitted_for_approval' ? 'done' : a.startsWith('acknowledgement') ? 'sys' : '');
+    return `<ol class="timeline">${insp.events.slice().reverse().map((e) => `<li><span class="dot ${cls(e.action)}"></span><div><div><strong>${esc(E.EVENT_LABELS[e.action] || e.action)}</strong>${e.revision ? ` <span class="badge outline">rev ${e.revision}</span>` : ''}</div>
+      <div class="meta">${esc(e.actorType === 'system' ? 'System' : e.actorName)}${e.actorType === 'staff' ? ' (Mashhor staff)' : ''} · <span class="num">${esc(fmt(e.at))}</span></div>${e.detail && e.action !== 'acknowledgement.auto' ? `<div class="detail">${esc(e.detail)}</div>` : ''}</div></li>`).join('')}</ol>`;
+  }
+  function historyCard(insp, printView) {
+    const revs = insp.revisions.slice().reverse();
+    return `<section class="card" aria-labelledby="history-title"><div class="card-head"><div><h2 id="history-title">History</h2><p>Assigned to ${esc(E.getAccount(state, insp.inspectorId).name)} · ${esc(E.getOrg(state, insp.orgId).name)}</p></div></div>
+      ${revs.length ? `<div class="card-body" style="border-bottom:1px solid var(--border)"><h3>Submitted revisions</h3><ul class="rev-list">${revs.map((r) => `<li><span class="badge ${r.revision === insp.currentRevision ? 'accent' : 'outline'}">Revision ${r.revision}${r.revision === insp.currentRevision ? ' · current' : ' · frozen'}</span>
+        <span class="subtle num">${esc(fmt(r.submittedAt))}</span>${navBtn({ name: printView, id: insp.id, rev: r.revision }, `View revision ${r.revision}`)}</li>`).join('')}</ul></div>` : ''}
+      ${timeline(insp)}</section>`;
+  }
+  function vehicleCard(insp) {
+    const v = insp.vehicle;
+    return `<section class="card"><div class="card-head"><h2>Vehicle and assignment</h2></div><div class="card-body"><dl class="kv">
+      <dt>Vehicle type</dt><dd>${esc(v.type)}</dd><dt>Plate</dt><dd>${esc(v.plate) || '—'}</dd><dt>Registration no.</dt><dd>${esc(v.registrationNo) || '—'}</dd><dt>MOD registration no.</dt><dd>${esc(v.modRegistrationNo) || '—'}</dd>
+      <dt>Company</dt><dd>${esc(E.getOrg(state, insp.orgId).name)}</dd><dt>Inspector</dt><dd>${esc(E.getAccount(state, insp.inspectorId).name)}</dd>
+      <dt>Template</dt><dd>${esc(insp.template.name)} (v${insp.template.version})</dd><dt>Created</dt><dd class="num">${esc(fmt(insp.createdAt))}</dd></dl></div></section>`;
+  }
+
+  // =====================================================================
+  // ADMIN WEBSITE
+  // =====================================================================
+  const ADMIN_NAV = [
+    { name: 'a-inspections', label: 'Inspections', match: /^a-(inspection|print)/ },
+    { name: 'a-vendors', label: 'Vendors', match: /^a-vendor/ },
+    { name: 'a-templates', label: 'Checklist templates', match: /^a-template/ },
+  ];
+  function adminShell(content) {
+    const me = state.staff[0];
+    return `<div class="admin-shell"><aside class="sidebar" aria-label="Admin">
+      <div class="brand"><span class="site-pill admin">Admin website</span><strong>Mashhor</strong><span>Admin · staff only</span></div>
+      <nav class="nav" aria-label="Main"><span class="nav-label">Manage</span>
+        ${ADMIN_NAV.map((n) => `<button type="button" class="nav-link ${n.match.test(ui.view.name) ? 'active' : ''}" data-nav='${JSON.stringify({ name: n.name })}'>${esc(n.label)}</button>`).join('')}
+      </nav>
+      <div class="sidebar-foot"><div class="user-chip"><span class="avatar">${initials(me.name)}</span><span class="user-chip-text"><strong>${esc(me.name)}</strong><span>${esc(me.email)}</span></span></div>
+        <p class="subtle" style="font-size:.78rem">Dashboard, categories and catalog listings exist in the production admin but are outside this prototype.</p></div>
+    </aside><main class="admin-main" id="main"><div class="page gutter">${content}</div></main></div>`;
+  }
+
+  function aInspections() {
+    const list = state.inspections.filter((i) => !ui.filter || i.status === ui.filter).slice().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id - a.id);
+    return pageHeader({ title: 'Inspections', desc: 'Vehicle checklists assigned to vendor inspectors, and where each one is in verification and approval.', actions: `<button type="button" class="btn btn-primary" data-action="new-inspection">+ New inspection</button>` })
+      + flash() + (ui.creating ? createForm() : '')
+      + `<section class="card" aria-label="Inspections"><div class="chips" role="group" aria-label="Filter by status">
+        <button type="button" class="chip ${!ui.filter ? 'active' : ''}" data-action="filter" data-status="">All <span class="num">(${state.inspections.length})</span></button>
+        ${E.STATUSES.map((st) => `<button type="button" class="chip ${ui.filter === st ? 'active' : ''}" data-action="filter" data-status="${st}">${esc(E.STATUS[st].label)} <span class="num">(${state.inspections.filter((i) => i.status === st).length})</span></button>`).join('')}</div>
+        ${list.length ? `<div class="table-wrap"><table><thead><tr><th>Vehicle</th><th>Company</th><th>Inspector</th><th>Status</th><th>Revision</th><th>Updated</th></tr></thead><tbody>
+          ${list.map((i) => `<tr><td>${navBtn({ name: 'a-inspection', id: i.id }, `<span class="cell-title">${esc(E.vehicleTitle(i.vehicle))}</span>`, 'btn-link')}<span class="cell-sub">#${i.id} · ${esc(i.template.name)} v${i.template.version}</span></td>
+            <td>${esc(E.getOrg(state, i.orgId).name)}</td><td>${esc(E.getAccount(state, i.inspectorId).name)}</td><td>${badge(i.status)}</td><td class="num">${i.currentRevision || '—'}</td><td class="num subtle">${esc(fmt(i.updatedAt))}</td></tr>`).join('')}
+        </tbody></table></div>` : `<div class="empty">No inspections match this filter.</div>`}</section>`;
+  }
+
+  function createForm() {
+    const v = ui.createValues, er = ui.createErrors;
+    const orgId = v.orgId || '';
+    const inspectors = state.accounts.filter((a) => a.orgId === orgId && a.role === 'inspector' && a.active);
+    const tpl = state.templates.find((t) => t.id === v.templateId);
+    const err = (k) => (er[k] ? `<span class="err">${esc(er[k])}</span>` : '');
+    return `<section class="card" aria-labelledby="new-title"><div class="card-head"><div><h2 id="new-title">New inspection</h2><p>Assign a vehicle checklist to an inspector of the vendor company.</p></div></div>
+      <form class="card-body" data-form="create" novalidate>
+        <h3>Assignment</h3>
+        <div class="form-grid">
+          <label class="field"><span>Vendor / company</span><select class="select ${er.orgId ? 'invalid' : ''}" id="c-org" name="orgId" data-change="create-org">
+            <option value="">Choose…</option>${state.orgs.map((o) => `<option value="${o.id}" ${orgId === o.id ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}</select>${err('orgId')}</label>
+          <label class="field"><span>Inspector</span><select class="select ${er.inspectorId ? 'invalid' : ''}" id="c-inspector" name="inspectorId" ${orgId ? '' : 'disabled'}>
+            <option value="">${orgId ? 'Choose…' : 'Choose a company first'}</option>${inspectors.map((a) => `<option value="${a.id}" ${v.inspectorId === a.id ? 'selected' : ''}>${esc(a.name)} — ${esc(a.username)}</option>`).join('')}</select>
+            <span class="hint">Active Inspector accounts of the chosen company.</span>${err('inspectorId')}</label>
+        </div>
+        <h3>Vehicle</h3>
+        <div class="form-grid">
+          <label class="field"><span>Checklist template</span><select class="select ${er.templateId ? 'invalid' : ''}" id="c-template" name="templateId" data-change="create-template">
+            <option value="">Choose…</option>${state.templates.map((t) => `<option value="${t.id}" ${v.templateId === t.id ? 'selected' : ''}>${esc(t.vehicleType)} — ${esc(t.name)}</option>`).join('')}</select>
+            ${tpl ? `<span class="hint">Vehicle type: ${esc(tpl.vehicleType)} · version ${tpl.version} · ${E.allItems(tpl).length} items</span>` : ''}${err('templateId')}</label>
+          <label class="field"><span>Vehicle plate <span class="opt">(optional)</span></span><input class="input ${er.plate ? 'invalid' : ''}" id="c-plate" name="plate" value="${esc(v.plate || '')}" maxlength="60">${err('plate')}</label>
+          <label class="field"><span>Vehicle registration no. <span class="opt">(optional)</span></span><input class="input" id="c-reg" name="registrationNo" value="${esc(v.registrationNo || '')}" maxlength="60"></label>
+          <label class="field"><span>MOD registration no. <span class="opt">(optional)</span></span><input class="input" id="c-mod" name="modRegistrationNo" value="${esc(v.modRegistrationNo || '')}" maxlength="60"></label>
+        </div>
+        <p class="subtle" style="font-size:.85rem">Enter at least one vehicle identifier. The vehicle type comes from the template.</p>
+        <div class="form-actions"><button type="button" class="btn" data-action="cancel-create">Cancel</button><button type="submit" class="btn btn-primary">Create inspection</button></div>
+      </form></section>`;
+  }
+
+  function aInspection() {
+    const insp = E.getInspection(state, ui.view.id);
+    if (!insp) return pageHeader({ title: 'Inspection not found', back: { label: 'Inspections', view: { name: 'a-inspections' } } });
+    const cur = E.currentRevision(insp);
+    const editable = E.EDITABLE.includes(insp.status);
+    const inspectors = state.accounts.filter((a) => a.orgId === insp.orgId && a.role === 'inspector' && a.active);
+    const shown = cur ? cur.snapshot.working : insp.working;
+    return pageHeader({
+      title: E.vehicleTitle(insp.vehicle), badgeHtml: badge(insp.status), back: { label: 'Inspections', view: { name: 'a-inspections' } },
+      desc: `${esc(E.getOrg(state, insp.orgId).name)} · ${esc(insp.template.name)} (template v${insp.template.version})${insp.currentRevision ? ` · revision ${insp.currentRevision}` : ''}`,
+      actions: navBtn({ name: 'a-print', id: insp.id }, 'Print view', 'btn'),
+    }) + flash()
+      + (insp.recheckReason ? `<div class="alert warning"><strong>Re-check requested</strong><span class="prewrap">${esc(insp.recheckReason)}</span></div>` : '')
+      + `<div class="split"><div class="stack">
+        ${nextSteps(insp)}
+        <div class="alert info">${cur ? `Revision ${cur.revision}, exactly as ${esc(cur.submittedBy.name)} submitted it. Staff can view it but cannot change, verify or sign it.` : 'Not submitted yet — this is the inspector’s current draft and may still change.'}</div>
+        ${checklistReadOnly(insp.template, shown)}
+        ${signoffPanel(insp, cur, null)}
+      </div><div class="stack">
+        ${vehicleCard(insp)}
+        ${editable ? `<section class="card" aria-labelledby="assign-title"><div class="card-head"><div><h2 id="assign-title">Assignment</h2><p>Can be changed while the checklist is with the inspector.</p></div></div>
+          <form class="card-body" data-form="update" novalidate>
+            <label class="field"><span>Inspector</span><select class="select" id="u-inspector" name="inspectorId">${inspectors.map((a) => `<option value="${a.id}" ${a.id === insp.inspectorId ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></label>
+            <label class="field"><span>Vehicle plate <span class="opt">(optional)</span></span><input class="input" id="u-plate" name="plate" value="${esc(insp.vehicle.plate)}"></label>
+            <label class="field"><span>Vehicle registration no. <span class="opt">(optional)</span></span><input class="input" id="u-reg" name="registrationNo" value="${esc(insp.vehicle.registrationNo)}"></label>
+            <label class="field"><span>MOD registration no. <span class="opt">(optional)</span></span><input class="input" id="u-mod" name="modRegistrationNo" value="${esc(insp.vehicle.modRegistrationNo)}"></label>
+            <div class="form-actions"><button type="submit" class="btn btn-primary">Save assignment</button></div></form></section>` : ''}
+        ${historyCard(insp, 'a-print')}
+      </div></div>`;
+  }
+
+  function aVendors() {
+    return pageHeader({ title: 'Vendors', desc: 'Vendor / client organisations, their portal login accounts and their inspection sign-off assignments.' }) + flash()
+      + `<section class="card"><div class="table-wrap"><table><thead><tr><th>Organisation</th><th>Login accounts</th><th>Inspections</th><th>Status</th></tr></thead><tbody>
+        ${state.orgs.map((o) => `<tr><td>${navBtn({ name: 'a-vendor', id: o.id }, `<span class="cell-title">${esc(o.name)}</span>`)}</td><td class="num">${state.accounts.filter((a) => a.orgId === o.id).length}</td><td class="num">${state.inspections.filter((i) => i.orgId === o.id).length}</td><td><span class="badge success">Active</span></td></tr>`).join('')}
+      </tbody></table></div></section>
+      <p class="subtle" style="font-size:.85rem">Creating vendors, adding accounts, resetting passwords and category access exist in production; this prototype shows the sample organisations only.</p>`;
+  }
+
+  function aVendor() {
+    const org = E.getOrg(state, ui.view.id);
+    if (!org) return pageHeader({ title: 'Vendor not found', back: { label: 'Vendors', view: { name: 'a-vendors' } } });
+    const accts = state.accounts.filter((a) => a.orgId === org.id);
+    const sig = state.signatories[org.id] || {};
+    return pageHeader({ title: org.name, back: { label: 'Vendors', view: { name: 'a-vendors' } }, badgeHtml: '<span class="badge success">Active</span>', desc: 'Portal login accounts and who may confirm each inspection sign-off stage.' }) + flash()
+      + `<section class="card" aria-labelledby="accounts-title"><div class="card-head"><div><h2 id="accounts-title">Login accounts</h2><p>These accounts sign in to the Portal website. Role decides the portal layout; sign-off stages are assigned separately below.</p></div></div>
+        <div class="table-wrap"><table><thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Sign-off stages</th><th>Status</th></tr></thead><tbody>
+        ${accts.map((a) => `<tr><td class="cell-title">${esc(a.name)}</td><td class="mono">${esc(a.username)}</td><td>${esc(E.ROLE_LABELS[a.role])}</td><td>${E.stagesFor(state, a).map((st) => `<span class="badge accent">${esc(stageCaption(st))}</span>`).join(' ') || '<span class="subtle">—</span>'}</td><td><span class="badge success">Active</span></td></tr>`).join('')}
+        </tbody></table></div></section>
+      <section class="card" aria-labelledby="signoff-cfg"><div class="card-head"><div><h2 id="signoff-cfg">Inspection sign-offs</h2><p>Who may confirm each stage for ${esc(org.name)}’s vehicle inspections. Each person confirms from their own portal account by re-entering their full name.</p></div></div>
+        <form class="card-body" data-form="signatories" novalidate><div class="form-grid">
+          ${E.STAGES.map((st) => `<label class="field"><span>${esc(stageCaption(st))}</span><select class="select" id="sig-${st}" name="${st}"><option value="">Not assigned</option>
+            ${accts.filter((a) => a.active).map((a) => `<option value="${a.id}" ${sig[st] === a.id ? 'selected' : ''}>${esc(a.name)} — ${esc(a.username)}</option>`).join('')}</select>
+            <span class="hint">${esc({ checked_by: 'Confirms the submitted checklist as checked.', agreed_by: 'Confirms agreement with the submitted checklist.', approved_by: 'Head of Operations — gives final approval after client verification.', acknowledgement: 'Acknowledges checklists that contain remarks.' }[st])}</span></label>`).join('')}
+        </div>
+        <label class="check"><input type="checkbox" id="ack-blocks" name="ackBlocksApproval" ${org.ackBlocksApproval ? 'checked' : ''}> Head of Operations can approve only after a pending acknowledgement is completed <span class="subtle">(off by default)</span></label>
+        <div class="form-actions" style="justify-content:flex-start"><button type="submit" class="btn btn-primary">Save sign-off assignments</button></div></form></section>`;
+  }
+
+  function aTemplates() {
+    return pageHeader({ title: 'Checklist templates', desc: 'One checklist per vehicle type. New inspections use the latest published version; existing inspections keep the version they started with.' }) + flash()
+      + `<section class="card"><div class="table-wrap"><table><thead><tr><th>Vehicle type</th><th>Template</th><th>Published</th><th>Items</th><th>Used by</th></tr></thead><tbody>
+      ${state.templates.map((t) => `<tr><td>${esc(t.vehicleType)}</td><td>${navBtn({ name: 'a-template', id: t.id }, `<span class="cell-title">${esc(t.name)}</span>`)}</td><td><span class="badge success">v${t.version}</span></td><td class="num">${E.allItems(t).length}</td><td class="num">${state.inspections.filter((i) => i.template.id === t.id).length}</td></tr>`).join('')}
+      </tbody></table></div></section>
+      <p class="subtle" style="font-size:.85rem">Production also has the template editor (draft → preview → publish). The prototype shows sample published versions only.</p>`;
+  }
+  function aTemplate() {
+    const t = state.templates.find((x) => x.id === ui.view.id);
+    if (!t) return pageHeader({ title: 'Template not found', back: { label: 'Checklist templates', view: { name: 'a-templates' } } });
+    return pageHeader({ title: t.name, badgeHtml: `<span class="badge success">Published v${t.version}</span>`, back: { label: 'Checklist templates', view: { name: 'a-templates' } }, desc: `Vehicle type: ${esc(t.vehicleType)} · Preview — the published form as inspectors see it, with every mark blank.` })
+      + checklistReadOnly(t, E.emptyWorking());
+  }
+
+  // =====================================================================
+  // PORTAL WEBSITE
+  // =====================================================================
+  function portalShell(content) {
+    const me = persona();
+    const org = E.getOrg(state, me.orgId);
+    const isInspector = me.role === 'inspector';
+    const counts = waitingCount(me);
+    return `<header class="portal-header"><div class="portal-header-inner gutter">
+      <div class="brand"><span class="site-pill portal">Portal website</span><strong>Mashhor</strong><span>${isInspector ? 'Inspector Portal' : 'Vendor Portal'}</span></div>
+      <nav class="portal-nav" aria-label="Main">
+        <button type="button" class="nav-link ${/^p-(inspection|print)/.test(ui.view.name) ? 'active' : ''}" data-nav='${JSON.stringify(defaultViewFor(ui.persona))}'>Inspections ${counts ? `<span class="count" aria-label="${counts} waiting for you">${counts}</span>` : ''}</button>
+        <button type="button" class="nav-link ${ui.view.name === 'p-settings' ? 'active' : ''}" data-nav='{"name":"p-settings"}'>Settings</button>
+      </nav>
+      <div class="user-chip"><span class="avatar">${initials(me.name)}</span><span class="user-chip-text"><strong>${esc(me.name)}</strong><span>${esc(org.name)} · ${esc(E.ROLE_LABELS[me.role])}</span></span></div>
+    </div></header><main id="main"><div class="page gutter">${content}</div></main>`;
+  }
+  function waitingCount(me) {
+    const q = (k) => E.queueList(state, me, k).length;
+    return (me.role === 'inspector' ? q('returned') + q('assigned') : q('pending_verification')) + E.pendingSignoffs(state, me).length;
+  }
+
+  function pInspections() {
+    const me = persona();
+    const stages = E.stagesFor(state, me);
+    const queues = [...E.QUEUES[me.role], ...(stages.length ? [{ key: 'signoffs', label: 'My sign-offs', empty: 'Nothing is waiting for your sign-off.' }] : [])];
+    const active = queues.find((q) => q.key === ui.view.queue) || queues[0];
+    const list = E.queueList(state, me, active.key).slice().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    const org = E.getOrg(state, me.orgId);
+    return pageHeader({ title: 'Inspections', desc: me.role === 'inspector' ? 'Vehicle checklists assigned to you. Save drafts as you go and submit them for client verification.' : `Vehicle inspections for ${esc(org.name)}: verify submitted checklists and follow them to Head of Operations approval.` })
+      + flash()
+      + (stages.length ? `<div class="alert info">Your account is assigned: ${stages.map((st) => `<strong>${esc(stageCaption(st))}</strong>`).join(', ')}. Open <em>My sign-offs</em> for inspections waiting on you.</div>` : '')
+      + `<section class="card" aria-label="Inspection lists"><nav class="tabs" aria-label="Inspection lists">
+        ${queues.map((q) => `<button type="button" class="tab ${q.key === active.key ? 'active' : ''}" data-nav='${JSON.stringify({ name: 'p-inspections', queue: q.key })}'>${esc(q.label)} <span class="count num">${E.queueList(state, me, q.key).length}</span></button>`).join('')}</nav>
+        ${list.length ? `<div class="table-wrap"><table><thead><tr><th>Vehicle</th><th>Template</th>${me.role === 'client' ? '<th>Inspector</th>' : ''}<th>Status</th><th>Revision</th><th>Updated</th></tr></thead><tbody>
+          ${list.map((i) => `<tr><td>${navBtn({ name: 'p-inspection', id: i.id }, `<span class="cell-title">${esc(E.vehicleTitle(i.vehicle))}</span>`)}<span class="cell-sub">#${i.id}</span>${i.status === 'returned' && i.recheckReason ? `<span class="cell-sub" style="color:var(--danger)">Re-check: ${esc(i.recheckReason.slice(0, 80))}</span>` : ''}</td>
+          <td>${esc(i.template.name)}</td>${me.role === 'client' ? `<td>${esc(E.getAccount(state, i.inspectorId).name)}</td>` : ''}<td>${badge(i.status)}</td><td class="num">${i.currentRevision || '—'}</td><td class="num subtle">${esc(fmt(i.updatedAt))}</td></tr>`).join('')}
+          </tbody></table></div>` : `<div class="empty">${esc(active.empty)}</div>`}
+      </section>`;
+  }
+
+  function pInspection() {
+    const me = persona();
+    const insp = E.getInspection(state, ui.view.id);
+    const back = { label: 'Inspections', view: defaultViewFor(ui.persona) };
+    if (!insp || !E.portalCanView(state, insp, me)) return pageHeader({ title: 'This inspection isn’t available', back, desc: 'Your account can’t open this inspection. It belongs to another company, or it isn’t assigned to you.' });
+    const viewer = E.viewerFor(state, insp, me);
+    const cur = E.currentRevision(insp);
+    if (viewer.canEdit && (!ui.edit || ui.edit.id !== insp.id)) ui.edit = { id: insp.id, working: E.clone(insp.working), dirty: false };
+    if (!viewer.canEdit) ui.edit = null;
+    let main;
+    if (viewer.canEdit) main = checklistEditor(insp);
+    else if (cur) main = `<div class="alert info">Revision ${cur.revision} as submitted by ${esc(cur.submittedBy.name)}. Nothing on it can be changed; a re-check creates a new revision.</div>${checklistReadOnly(cur.snapshot.template, cur.snapshot.working)}`;
+    else main = `<section class="card"><div class="empty"><strong>Not submitted yet</strong><br>It appears here once ${esc(E.getAccount(state, insp.inspectorId).name)} submits it for verification.</div></section>`;
+    const decision = viewer.canVerify && cur ? `<section class="card" aria-labelledby="verify-title"><div class="card-head"><div><h2 id="verify-title">Client verification</h2><p>Review revision ${cur.revision}. Ask the inspector to re-check it, or send it on for Head of Operations approval.</p></div></div>
+      <div class="card-body"><div class="form-actions" style="justify-content:flex-start"><button type="button" class="btn btn-danger-outline" data-action="open-recheck">↺ Request Re-check</button><button type="button" class="btn btn-primary" data-action="open-forward">Submit to HOO Approval →</button></div></div></section>` : '';
+    return pageHeader({
+      title: E.vehicleTitle(insp.vehicle), badgeHtml: badge(insp.status), back,
+      desc: `${esc(insp.template.name)} (v${insp.template.version}) · ${esc(E.getOrg(state, insp.orgId).name)}${insp.currentRevision ? ` · revision ${insp.currentRevision}` : ''}`,
+      actions: cur || viewer.canEdit ? navBtn({ name: 'p-print', id: insp.id }, 'Print view', 'btn') : '',
+    }) + flash()
+      + (insp.status === 'returned' && insp.recheckReason ? `<div class="alert warning"><strong>Re-check requested by the client</strong><span class="prewrap">${esc(insp.recheckReason)}</span>${viewer.canEdit ? '<span>Correct the checklist below and resubmit it for verification. Your earlier revision stays on record unchanged.</span>' : ''}</div>` : '')
+      + `<div class="split"><div class="stack">${main}${decision}${signoffPanel(insp, cur, viewer)}</div>
+        <div class="stack">${nextSteps(insp)}${historyCard(insp, 'p-print')}</div></div>`;
+  }
+
+  function pSettings() {
+    const me = persona();
+    const stages = E.stagesFor(state, me);
+    return pageHeader({ title: 'Settings', desc: 'Your portal account. Password changes exist in production and are not simulated here.' })
+      + `<section class="card"><div class="card-head"><h2>Account</h2></div><div class="card-body"><dl class="kv">
+        <dt>Full name</dt><dd>${esc(me.name)}</dd><dt>Username</dt><dd class="mono">${esc(me.username)}</dd><dt>Company</dt><dd>${esc(E.getOrg(state, me.orgId).name)}</dd>
+        <dt>Role</dt><dd>${esc(E.ROLE_LABELS[me.role])}</dd><dt>Sign-off stages</dt><dd>${stages.map((st) => esc(stageCaption(st))).join(', ') || 'None'}</dd></dl>
+        <p class="subtle" style="font-size:.85rem">Sign-off stages are assigned by Mashhor staff on the Admin website (Vendors → Inspection sign-offs).</p></div></section>`;
+  }
+
+  // =====================================================================
+  // A4 PRINT VIEW (both sites)
+  // =====================================================================
+  function printView(site) {
+    const insp = E.getInspection(state, ui.view.id);
+    const back = { name: site === 'admin' ? 'a-inspection' : 'p-inspection', id: ui.view.id };
+    if (!insp || (site === 'portal' && !E.portalCanView(state, insp, persona()))) return pageHeader({ title: 'Nothing to print', back: { label: 'Back to inspection', view: back } });
+    const viewer = site === 'portal' ? E.viewerFor(state, insp, persona()) : null;
+    const draftAllowed = site === 'admin' || (viewer && viewer.canEdit);
+    const revNum = Number(ui.view.rev) || insp.currentRevision;
+    const rev = revNum ? E.getRevision(insp, revNum) : null;
+    const isDraft = !rev;
+    if (isDraft && !draftAllowed) return pageHeader({ title: 'Nothing to print', back: { label: 'Back to inspection', view: back }, desc: 'There is no submitted revision yet.' });
+    const tpl = rev ? rev.snapshot.template : insp.template;
+    const w = rev ? rev.snapshot.working : (ui.edit && ui.edit.id === insp.id ? ui.edit.working : insp.working);
+    const v = rev ? rev.snapshot.vehicle : insp.vehicle;
+    const framed = (() => { try { return window.self !== window.top; } catch (e) { return true; } })();
+    const options = insp.revisions.slice().reverse().map((r) => `<option value="${r.revision}" ${rev && r.revision === rev.revision ? 'selected' : ''}>Revision ${r.revision}${r.revision === insp.currentRevision ? ' (current)' : ' (earlier)'} — ${esc(fmt(r.submittedAt))}</option>`).join('');
+    const sigBox = (stage) => {
+      const s = rev && rev.signoffs.find((x) => x.stage === stage);
+      return `<div class="sig"><div><strong>${esc(E.STAGE_LABELS[stage])}</strong>${E.CAPTIONS[stage] ? `<br><span>(${esc(E.CAPTIONS[stage])})</span>` : ''}</div><div class="line">${s ? `${esc(s.name)}<br><span class="num">${esc(fmt(s.at))}</span>` : '<span style="color:#888">Not confirmed</span>'}</div></div>`;
+    };
+    const ack = !rev ? 'Not submitted' : rev.acknowledgement === 'auto' ? 'Auto-acknowledged — no remarks' : rev.acknowledgement === 'pending' ? 'Pending' : (() => { const s = rev.signoffs.find((x) => x.stage === 'acknowledgement'); return `Acknowledged by ${esc(s.name)}, ${esc(fmt(s.at))}`; })();
+    return `<div class="print-toolbar no-print">${navBtn(back, '← Back to inspection', 'btn')}
+        <label class="field" style="min-width:min(100%,320px)"><span>Revision</span><select class="select" id="print-rev" data-change="print-rev">${options}${draftAllowed && E.EDITABLE.includes(insp.status) ? `<option value="0" ${isDraft ? 'selected' : ''}>Working draft (not submitted)</option>` : ''}</select></label>
+        <span class="grow subtle" style="font-size:.85rem">A4 layout.${framed ? ' Open the prototype in its own browser tab to print or save as PDF.' : ' Use Print to print or save as PDF.'}</span>
+        ${framed ? '' : '<button type="button" class="btn btn-primary" data-action="print">Print</button>'}</div>
+      <div class="sheet-wrap"><article class="a4" aria-label="Print view">
+        ${isDraft ? '<div class="watermark">DRAFT</div>' : ''}
+        <div class="doc-head"><div><h1>${esc(tpl.name)}</h1><div>${esc(E.getOrg(state, insp.orgId).name)} · Vehicle inspection record</div></div>
+          <div style="text-align:right"><strong>Inspection #${insp.id}</strong><br>${isDraft ? 'Working draft' : `Revision ${rev.revision}${rev.revision === insp.currentRevision ? '' : ' (superseded)'}`}<br>Template v${tpl.version}</div></div>
+        <dl class="kv"><dt>Vehicle type</dt><dd>${esc(v.type)}</dd><dt>Plate</dt><dd>${esc(v.plate) || '—'}</dd><dt>Registration no.</dt><dd>${esc(v.registrationNo) || '—'}</dd><dt>MOD registration no.</dt><dd>${esc(v.modRegistrationNo) || '—'}</dd>
+          <dt>Inspector</dt><dd>${esc(rev ? rev.submittedBy.name : E.getAccount(state, insp.inspectorId).name)}</dd><dt>Submitted</dt><dd>${rev ? esc(fmt(rev.submittedAt)) : '—'}</dd>
+          <dt>Client verification</dt><dd>${rev && rev.verifiedBy ? `${esc(rev.verifiedBy.name)}, ${esc(fmt(rev.verifiedBy.at))}` : 'Not verified'}</dd></dl>
+        <table><thead><tr><th style="width:12mm">No.</th><th>Item</th><th style="width:16mm">Mark</th><th>Remark</th></tr></thead><tbody>
+          ${tpl.sections.map((s, si) => `<tr><td colspan="4" class="sec">${si + 1}. ${esc(s.title)}</td></tr>${s.items.map((it, ii) => `<tr><td>${si + 1}.${ii + 1}</td><td>${esc(it.label)}</td><td style="text-align:center">${w.marks[it.key] ? esc(E.LEGEND.find((l) => l.value === w.marks[it.key]).symbol) : ''}</td><td>${esc(w.itemRemarks[it.key] || '')}</td></tr>`).join('')}`).join('')}
+        </tbody></table>
+        <div style="font-size:8.5pt">${E.LEGEND.map((l) => `${esc(l.symbol)} = ${esc(l.label)}`).join(' · ')}</div>
+        <div><strong>Remarks / comments</strong><p class="prewrap">${esc(w.comments) || '—'}</p></div>
+        <div style="display:grid;grid-template-columns:40mm 1fr;gap:5mm;align-items:start"><div>${diagram(w.damage.markers, false)}</div>
+          <div><strong>Damage assessment</strong>${w.damage.markers.length ? `<ol style="margin:1mm 0;padding-left:5mm">${w.damage.markers.map((m) => `<li>${esc(m.note) || '—'}</li>`).join('')}</ol>` : '<p>No damage marked.</p>'}${w.damage.notes ? `<p class="prewrap">${esc(w.damage.notes)}</p>` : ''}</div></div>
+        <div class="sig-grid">${['checked_by', 'agreed_by', 'approved_by'].map(sigBox).join('')}</div>
+        <div><strong>Acknowledgement</strong> (not an approval): ${ack}</div>
+        <div class="sim-foot">Prototype print view — sample data; name confirmations are simulated. Generated ${esc(fmt(new Date().toISOString()))}.</div>
+      </article></div>`;
+  }
+
+  // ---------- modal ----------
+  function modalHtml() {
+    const m = ui.modal;
+    if (!m) return '';
+    let body = '';
+    if (m.kind === 'recheck') body = `<label class="field"><span>What needs to be re-checked?</span><textarea class="textarea ${m.error ? 'invalid' : ''}" id="modal-input" rows="5" maxlength="2000">${esc(m.value || '')}</textarea>${m.error ? `<span class="err">${esc(m.error)}</span>` : ''}</label>`;
+    if (m.kind === 'sign') {
+      const me = persona();
+      body = `<div class="demo-hint">Demo account full name: <strong>${esc(me.name)}</strong>. In production the person types their own name; spacing and capital letters don’t matter.</div>
+        <label class="field"><span>Your full name</span><input class="input ${m.error ? 'invalid' : ''}" id="modal-input" value="${esc(m.value || '')}" autocomplete="off">${m.error ? `<span class="err">${esc(m.error)}</span>` : ''}</label>`;
+    }
+    return `<div class="scrim" data-action="modal-scrim"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title">
+      <form data-form="modal" novalidate><div class="dialog-head"><h2 id="dlg-title">${esc(m.title)}</h2><p>${esc(m.description)}</p></div>
+      ${body ? `<div class="dialog-body">${body}</div>` : ''}
+      <div class="dialog-foot"><button type="button" class="btn" data-action="close-modal">Cancel</button><button type="submit" class="btn btn-primary">${esc(m.confirm)}</button></div></form></div></div>`;
+  }
+
+  // ---------- render ----------
+  function render() {
+    let content;
+    if (isAdmin()) {
+      const page = { 'a-inspections': aInspections, 'a-inspection': aInspection, 'a-print': () => printView('admin'), 'a-vendors': aVendors, 'a-vendor': aVendor, 'a-templates': aTemplates, 'a-template': aTemplate }[ui.view.name] || aInspections;
+      content = adminShell(page());
+    } else {
+      if (!persona()) { ui.persona = 'admin'; ui.view = { name: 'a-inspections' }; return render(); }
+      const page = { 'p-inspections': pInspections, 'p-inspection': pInspection, 'p-print': () => printView('portal'), 'p-settings': pSettings }[ui.view.name] || pInspections;
+      content = portalShell(page());
+    }
+    app.innerHTML = demoBar() + content + modalHtml();
+    const focus = app.querySelector('#modal-input');
+    if (focus) focus.focus();
+  }
+
+  // ---------- events ----------
+  function readForm(form) { return Object.fromEntries(new FormData(form).entries()); }
+  function captureCreate() { const f = app.querySelector('form[data-form="create"]'); if (f) ui.createValues = { ...ui.createValues, ...readForm(f) }; }
+
+  app.addEventListener('click', (ev) => {
+    const nav = ev.target.closest('[data-nav]');
+    if (nav) {
+      ev.preventDefault();
+      const target = JSON.parse(nav.dataset.nav);
+      // Unsaved checklist edits survive a trip to the print view (it shows them as a draft); anything else asks first.
+      const keepsEdits = target.name.endsWith('print') || ui.view.name.endsWith('print');
+      if (ui.edit && ui.edit.dirty && !keepsEdits && !confirmLeave()) return;
+      go(target); return;
+    }
+    const el = ev.target.closest('[data-action]');
+    if (!el) return;
+    const a = el.dataset.action;
+    const insp = ui.view.id ? E.getInspection(state, ui.view.id) : null;
+    if (a === 'modal-scrim') { if (ev.target === el) { ui.modal = null; render(); } return; }
+    if (a === 'close-modal') { ui.modal = null; render(); return; }
+    if (a === 'reset') {
+      if (!ui.resetArmed) { ui.resetArmed = true; render(); setTimeout(() => { if (ui.resetArmed) { ui.resetArmed = false; render(); } }, 4000); return; }
+      state = E.seedState(); ui.resetArmed = false; ui.edit = null; ui.creating = false; ui.createValues = {}; ui.createErrors = {}; ui.filter = '';
+      ui.persona = 'admin'; go({ name: 'a-inspections' }); ui.notice = 'Demo reset to the sample data.'; render(); return;
+    }
+    if (a === 'persona') { switchPersona(el.dataset.key); return; }
+    if (a === 'filter') { ui.filter = el.dataset.status; render(); return; }
+    if (a === 'new-inspection') { ui.creating = true; ui.createErrors = {}; ui.createValues = {}; render(); app.querySelector('#c-org')?.focus(); return; }
+    if (a === 'cancel-create') { ui.creating = false; render(); return; }
+    if (a === 'print') { window.print(); return; }
+    if (a === 'diagram' && ui.edit) {
+      const svg = el.closest('svg'); const r = svg.getBoundingClientRect();
+      const x = r.width ? Math.round(((ev.clientX - r.left) / r.width) * 200) : 100;
+      const y = r.height ? Math.round(((ev.clientY - r.top) / r.height) * 400) : 200;
+      ui.edit.working.damage.markers.push({ x: Math.min(190, Math.max(10, x)), y: Math.min(390, Math.max(10, y)), note: '' });
+      ui.edit.dirty = true; render();
+      app.querySelector(`#marker-note-${ui.edit.working.damage.markers.length - 1}`)?.focus();
+      return;
+    }
+    if (a === 'remove-marker' && ui.edit) { ui.edit.working.damage.markers.splice(Number(el.dataset.index), 1); ui.edit.dirty = true; render(); return; }
+    if (a === 'save-draft' && insp) {
+      act(() => { E.saveDraft(state, persona(), insp.id, ui.edit.working); ui.edit.dirty = false; ui.missing = null; },
+        insp.status === 'returned' ? 'Draft saved. The inspection stays “Re-check requested” until you resubmit it.' : 'Draft saved.');
+      return;
+    }
+    if (a === 'start-submit' && insp) {
+      const missing = E.missingMarks(insp.template, ui.edit.working);
+      if (missing.length) { ui.missing = missing; ui.error = `Complete the checklist before submitting (${missing.length} missing).`; ui.notice = ''; render(); app.querySelector(`[data-row="${missing[0]}"]`)?.scrollIntoView({ block: 'center' }); return; }
+      const remarks = E.hasRemarks(ui.edit.working);
+      ui.modal = { kind: 'submit', title: `Submit revision ${insp.currentRevision + 1}?`, confirm: 'Submit for verification',
+        description: `The checklist is locked while the client reviews it. ${remarks ? 'It has remarks, so acknowledgement will be pending.' : 'It has no remarks, so it will be auto-acknowledged (this is not an approval).'}${insp.currentRevision ? ` Revision ${insp.currentRevision} stays on record unchanged.` : ''}` };
+      render(); return;
+    }
+    if (a === 'open-recheck') { ui.modal = { kind: 'recheck', title: 'Request Re-check', confirm: 'Request Re-check', description: 'The inspector is asked to inspect again and correct the checklist. Say which items are missing or incorrect.' }; render(); return; }
+    if (a === 'open-forward') { ui.modal = { kind: 'forward', title: 'Submit to HOO Approval?', confirm: 'Submit to HOO Approval', description: `You confirm revision ${insp.currentRevision} as verified. It goes to the Head of Operations for approval and can no longer be returned from here.` }; render(); return; }
+    if (a === 'open-sign') { const st = el.dataset.stage; ui.modal = { kind: 'sign', stage: st, title: `Confirm: ${stageCaption(st)}`, confirm: 'Confirm', description: `You confirm revision ${insp.currentRevision} of ${E.vehicleTitle(insp.vehicle)} as ${stageCaption(st)}.` }; render(); return; }
+  });
+  function confirmLeave() {
+    ui.error = 'You have unsaved changes. Save the draft first, or click again to leave without saving.';
+    if (ui.leaveArmed) { ui.leaveArmed = false; ui.edit = null; return true; }
+    ui.leaveArmed = true; render(); setTimeout(() => { ui.leaveArmed = false; }, 5000); return false;
+  }
+
+  app.addEventListener('submit', (ev) => {
+    const form = ev.target.closest('form[data-form]');
+    if (!form) return;
+    ev.preventDefault();
+    const kind = form.dataset.form;
+    const insp = ui.view.id ? E.getInspection(state, ui.view.id) : null;
+    if (kind === 'create') {
+      captureCreate();
+      try {
+        const created = E.createInspection(state, persona(), ui.createValues);
+        ui.creating = false; ui.createValues = {}; ui.createErrors = {}; ui.filter = '';
+        ui.notice = `Inspection #${created.id} created and assigned to ${E.getAccount(state, created.inspectorId).name}.`; ui.error = '';
+        persist(); render();
+      } catch (err) {
+        if (!(err instanceof E.WorkflowError)) throw err;
+        ui.createErrors = { [err.extra.field || 'orgId']: err.message }; render();
+      }
+      return;
+    }
+    if (kind === 'update' && insp) { const f = readForm(form); act(() => E.updateInspection(state, persona(), insp.id, f), 'Assignment saved.'); return; }
+    if (kind === 'signatories') {
+      const org = E.getOrg(state, ui.view.id); const f = readForm(form);
+      act(() => { state.signatories[org.id] = Object.fromEntries(E.STAGES.filter((st) => f[st]).map((st) => [st, f[st]])); org.ackBlocksApproval = f.ackBlocksApproval === 'on'; }, 'Inspection sign-off assignments saved.');
+      return;
+    }
+    if (kind === 'modal' && insp && ui.modal) {
+      const m = ui.modal; const input = app.querySelector('#modal-input'); m.value = input ? input.value : '';
+      const me = persona();
+      if (m.kind === 'submit') act(() => { E.submitInspection(state, me, insp.id, ui.edit.working); ui.edit = null; ui.missing = null; }, `Revision ${insp.currentRevision + 1} submitted for client verification.`);
+      if (m.kind === 'recheck') act(() => E.requestRecheck(state, me, insp.id, insp.currentRevision, m.value), 'Returned to the inspector for re-check.');
+      if (m.kind === 'forward') act(() => E.verifyInspection(state, me, insp.id, insp.currentRevision), `Revision ${insp.currentRevision} submitted to HOO approval.`);
+      if (m.kind === 'sign') act(() => E.signStage(state, me, insp.id, m.stage, insp.currentRevision, m.value), `${stageCaption(m.stage)} confirmed for revision ${insp.currentRevision}.`);
+    }
+  });
+
+  app.addEventListener('change', (ev) => {
+    const t = ev.target;
+    if (t.dataset.change === 'persona') { switchPersona(t.value); return; }
+    if (t.dataset.change === 'create-org') { captureCreate(); ui.createValues.inspectorId = ''; render(); app.querySelector('#c-inspector')?.focus(); return; }
+    if (t.dataset.change === 'create-template') { captureCreate(); render(); app.querySelector('#c-template')?.focus(); return; }
+    if (t.dataset.change === 'print-rev') { ui.view = { ...ui.view, rev: Number(t.value) || null }; if (!Number(t.value)) ui.view.rev = -1; persist(); render(); return; }
+    if (t.dataset.mark && ui.edit) {
+      ui.edit.working.marks[t.dataset.mark] = t.value; ui.edit.dirty = true;
+      if (ui.missing) { ui.missing = ui.missing.filter((k) => k !== t.dataset.mark); const row = app.querySelector(`[data-row="${t.dataset.mark}"]`); row?.classList.remove('missing'); row?.querySelector('.cell-sub')?.remove(); }
+      updateEditStatus();
+    }
+  });
+  app.addEventListener('input', (ev) => {
+    const t = ev.target;
+    if (!ui.edit) return;
+    const w = ui.edit.working;
+    if (t.dataset.remark) w.itemRemarks[t.dataset.remark] = t.value;
+    else if (t.dataset.field === 'comments') w.comments = t.value;
+    else if (t.dataset.field === 'damage-notes') w.damage.notes = t.value;
+    else if (t.dataset.markerNote !== undefined) w.damage.markers[Number(t.dataset.markerNote)].note = t.value;
+    else return;
+    ui.edit.dirty = true; updateEditStatus();
+  });
+  function updateEditStatus() { const insp = E.getInspection(state, ui.view.id); const el = app.querySelector('#edit-status'); if (el && insp) el.innerHTML = editStatus(insp); }
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && ui.modal) { ui.modal = null; render(); } });
+
+  render();
+  window.__prototype = { get state() { return state; }, ui };
+})();
+</script>
+</body>
+</html>

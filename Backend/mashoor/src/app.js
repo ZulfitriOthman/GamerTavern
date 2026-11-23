@@ -1,5 +1,5 @@
 import express from 'express'
-import { originCheck } from './auth/middleware.js'
+import { originCheck, requireStaff, requireVendor } from './auth/middleware.js'
 import { createLoginLimiter } from './auth/loginLimiter.js'
 import { MASHOOR_API_PREFIX } from './config.js'
 import { createImageStore } from './images.js'
@@ -15,7 +15,7 @@ import { portalRouter } from './routes/portal.js'
  * handler, so it neither relies on nor interferes with the host Backend's
  * middleware.
  */
-export function createMashoorRouter({ db, config, limiter = createLoginLimiter() }) {
+export function createMashoorRouter({ db, config, limiter = createLoginLimiter(), realtime = null }) {
   const router = express.Router()
   const images = createImageStore(config.storageDir)
   const diagrams = createDiagramStore(config.storageDir)
@@ -28,6 +28,14 @@ export function createMashoorRouter({ db, config, limiter = createLoginLimiter()
     next()
   })
   router.use(originCheck(config.allowedOrigins))
+
+  // Live updates (./realtime.js): notify sockets after successful writes, and
+  // issue single-use socket tickets to signed-in staff / portal sessions.
+  if (realtime) {
+    router.use(realtime.changeHook())
+    router.post('/admin/realtime/ticket', requireStaff(db), (req, res) => res.json(realtime.issueTicket('staff', req.sessionToken)))
+    router.post('/portal/realtime/ticket', requireVendor(db), (req, res) => res.json(realtime.issueTicket('vendor', req.sessionToken)))
+  }
 
   router.get('/health', (req, res) => res.json({ ok: true }))
   router.use('/admin', adminRouter({ db, config, limiter, images, diagrams }))
@@ -48,10 +56,10 @@ export function createMashoorRouter({ db, config, limiter = createLoginLimiter()
 }
 
 /** Minimal standalone app (used by the tests); production runs inside the Backend via embed.js. */
-export function createApp({ db, config, limiter }) {
+export function createApp({ db, config, limiter, realtime }) {
   const app = express()
   app.disable('x-powered-by')
   app.set('trust proxy', config.trustProxy)
-  app.use(MASHOOR_API_PREFIX, createMashoorRouter({ db, config, limiter }))
+  app.use(MASHOOR_API_PREFIX, createMashoorRouter({ db, config, limiter, realtime }))
   return app
 }

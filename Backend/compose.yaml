@@ -2,6 +2,10 @@ services:
   backend:
     image: node:24-bookworm-slim
     working_dir: /workspace/Backend
+    environment:
+      # Mashoor CSRF origin allow-list (comma-separated, exact origins). Not set
+      # in .env.dev; the first two are the module's former defaults.
+      MASHOOR_ALLOWED_ORIGINS: "http://localhost:5301,http://localhost:5302,https://portalmashoor.nanashicollectibles.com"
     ports:
       - "127.0.0.1:3002:3002"
     volumes:

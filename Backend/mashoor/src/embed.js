@@ -8,14 +8,20 @@
 // The module keeps its own SQLite database (Backend/mashoor/data/mashoor.db by
 // default, node:sqlite — Node 24+), its own cookie sessions and CSRF origin
 // check. Settings are read from MASHOOR_* variables only (see config.js).
+//
+// Live inspection updates (optional): pass the host's Socket.IO server to
+//   mashoor.attachRealtime(io)                       // → namespace /mashoor
+// See realtime.js.
 import { createMashoorRouter } from './app.js'
 import { deleteExpiredSessions } from './auth/sessions.js'
 import { loadConfig, MASHOOR_API_PREFIX } from './config.js'
 import { openDatabase } from './db.js'
+import { createRealtime } from './realtime.js'
 
 export async function createMashoorModule({ env = process.env } = {}) {
   const config = loadConfig(env)
   const db = openDatabase(config.dbPath)
+  const realtime = createRealtime({ db, config })
 
   // Never let a cleanup failure throw out of a timer: inside the shared
   // Backend that would take every other API down with it.
@@ -33,11 +39,14 @@ export async function createMashoorModule({ env = process.env } = {}) {
   console.log(`[mashoor-api] mounted at ${MASHOOR_API_PREFIX} (db: ${config.dbPath})`)
   return {
     prefix: MASHOOR_API_PREFIX,
-    router: createMashoorRouter({ db, config }),
+    router: createMashoorRouter({ db, config, realtime }),
     /** Origins the Mashoor frontends are served from (its CSRF allowlist). */
     allowedOrigins: config.allowedOrigins,
+    /** Registers the /mashoor namespace on the host's Socket.IO server. */
+    attachRealtime: (io) => realtime.attach(io),
     close() {
       clearInterval(timer)
+      realtime.close()
       db.close()
     },
   }

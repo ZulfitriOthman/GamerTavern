@@ -1,0 +1,106 @@
+/* Prototype additions on top of the shared Mashoor styles
+   (Listing-Sample/Mashoor/packages/shared/src/styles.css). */
+
+.proto-tag {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.05rem 0.45rem;
+  border: 1px dashed var(--accent);
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: 0.7rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.proto-revision-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.proto-revision-pick .select {
+  width: auto;
+}
+
+/* Superseded revision: banner printed inside the first sheet, placed in the
+   sheet's 12mm top margin so the page still fits on one A4 page. */
+.proto-superseded .print-doc > .sheet:first-child {
+  position: relative;
+}
+.proto-superseded .print-doc > .sheet:first-child::before {
+  content: var(--proto-banner);
+  position: absolute;
+  top: 3.5mm;
+  left: 13mm;
+  right: 13mm;
+  padding: 0.6mm 3mm;
+  border: 1.2px dashed #b42318;
+  color: #b42318;
+  font-size: 8pt;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+}
+
+/* Revision record sheet */
+.proto-record .proto-record-state {
+  margin-bottom: 3mm;
+  font-weight: 700;
+}
+.proto-record .proto-record-table th {
+  width: 26%;
+}
+.proto-record .proto-record-table td {
+  width: auto;
+  font-weight: 400;
+}
+.proto-record-h3 {
+  font-size: 10.5pt;
+  margin: 4mm 0 1.5mm;
+}
+
+/* Stale-revision notice: message plus a reload button. */
+.proto-alert-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+@media print {
+  .proto-tag {
+    display: none;
+  }
+}
+
+/* Live-updates indicator (shared/src/live.jsx). */
+.proto-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.proto-live-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: #98a2b3;
+}
+.proto-live-live .proto-live-dot {
+  background: #12b76a;
+  box-shadow: 0 0 0 3px rgb(18 183 106 / 0.18);
+}
+.proto-live-offline .proto-live-dot {
+  background: #f79009;
+}
+@media print {
+  .proto-live {
+    display: none;
+  }
+}

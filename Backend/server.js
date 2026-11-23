@@ -276,6 +276,15 @@ if (process.env.MASHOOR_MODULE !== "off") {
     const { createMashoorModule } = await import("./mashoor/src/embed.js");
     const mashoor = await createMashoorModule();
     app.use(mashoor.prefix, mashoor.router);
+    // Live inspection updates on this Socket.IO server: namespace /mashoor,
+    // notify-only, ticket-authenticated (see mashoor/src/realtime.js). Guarded
+    // separately so a problem there leaves the REST API and other sockets alone.
+    try {
+      const live = mashoor.attachRealtime(io);
+      console.log(`[mashoor-api] realtime on namespace ${live.namespace} (path ${live.path})`);
+    } catch (error) {
+      console.error("[mashoor] realtime not attached:", error.message);
+    }
   } catch (error) {
     console.error("[mashoor] module not loaded — /api/mashoor disabled:", error.message);
   }
