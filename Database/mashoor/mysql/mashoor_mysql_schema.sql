@@ -4,9 +4,9 @@
 -- File: Database/mashoor/mysql/mashoor_mysql_schema.sql
 --
 -- Equals the MySQL migrations in Database/mashoor/mysql/migrations
--- (0001–0007) applied in order (an automated test checks that both produce the
+-- (0001–0008) applied in order (an automated test checks that both produce the
 -- same tables, columns, indexes, foreign keys, checks and triggers) and
--- records versions 1–7 in mashoor_schema_migrations, so the backend will not
+-- records versions 1–8 in mashoor_schema_migrations, so the backend will not
 -- apply them again.
 --
 -- Run this ONLY on a database that has no mashoor_ tables yet. On a database
@@ -445,7 +445,7 @@ END$$
 
 DELIMITER ;
 
--- ---- Recorded as migrations 0001–0007 ---------------------------------------
+-- ---- Recorded as migrations 0001–0008 (0008 only adds what this file already has) ---------------------------------------
 
 INSERT INTO mashoor_schema_migrations (version, name) VALUES
   (1, '0001_initial_schema'),
@@ -454,4 +454,5 @@ INSERT INTO mashoor_schema_migrations (version, name) VALUES
   (4, '0004_optional_vendor_password_change'),
   (5, '0005_inspector_role_and_vehicle_inspections'),
   (6, '0006_checklist_form_templates'),
-  (7, '0007_staff_username_login');
+  (7, '0007_staff_username_login'),
+  (8, '0008_schema_migrations_and_history_triggers');

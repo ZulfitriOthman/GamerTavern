@@ -122,7 +122,7 @@ describe('vendor account lifecycle (username + password, optional password chang
     const detail = await staff.get(`/api/mashoor/admin/vendors/${vendorId}`)
     assert.deepEqual(detail.body.users.map((u) => [u.username, u.active]), [['leevendor', false]])
     assert.deepEqual(detail.body.categories.map((c) => c.id), [chairs])
-    assert.equal(server.db.prepare('SELECT COUNT(*) AS n FROM sessions WHERE user_type = ? AND user_id = ?').get('vendor', userId).n, 0)
+    assert.equal((await server.db.prepare('SELECT COUNT(*) AS n FROM mashoor_sessions WHERE user_type = ? AND user_id = ?').get('vendor', userId)).n, 0)
   })
 
   it('an admin password reset does not reactivate an inactive account', async () => {
@@ -202,14 +202,14 @@ describe('vendor account lifecycle (username + password, optional password chang
       (await staff.get(`/api/mashoor/admin/vendors/${vendorId}`)).body,
     ])
     assert.equal(/password_hash|scrypt\$|must_change/.test(all), false)
-    const audit = JSON.stringify(server.db.prepare('SELECT * FROM audit_log').all())
+    const audit = JSON.stringify((await server.db.prepare('SELECT * FROM mashoor_audit_log').all()))
     for (const secret of [INITIAL, OWN, REACTIVATION, RESET, 'Forgotten-Reset-77']) {
       assert.equal(audit.includes(secret), false, 'no password in the audit log')
     }
   })
 
   it('a leftover must-change flag (from before migration 0004) no longer restricts anything', async () => {
-    server.db.prepare('UPDATE vendor_users SET must_change_password = 1 WHERE id = ?').run(userId)
+    await server.db.prepare('UPDATE mashoor_vendor_users SET must_change_password = 1 WHERE id = ?').run(userId)
     const client = new Client(server.baseUrl)
     assert.equal((await login(client, 'leevendor', 'Forgotten-Reset-77')).status, 200)
     assert.deepEqual(await catalogStatuses(client), [200, 200, 200, 200])
@@ -217,9 +217,9 @@ describe('vendor account lifecycle (username + password, optional password chang
 
   it('an account without a username (created before migration 0003) can only sign in once staff set one', async () => {
     const legacyId = Number(
-      server.db
-        .prepare("INSERT INTO vendor_users (company_id, email, name, password_hash) VALUES (?, 'old@example.test', 'Old', ?)")
-        .run(vendorId, await hashPassword('Legacy-Pass-2026')).lastInsertRowid,
+      (await server.db
+        .prepare("INSERT INTO mashoor_vendor_users (company_id, email, name, password_hash) VALUES (?, 'old@example.test', 'Old', ?)")
+        .run(vendorId, await hashPassword('Legacy-Pass-2026'))).lastInsertRowid,
     )
     assert.equal((await login(new Client(server.baseUrl), 'old@example.test', 'Legacy-Pass-2026')).status, 401)
     assert.equal((await staff.patch(`/api/mashoor/admin/vendor-users/${legacyId}`, { username: 'LeeVendor' })).status, 409)

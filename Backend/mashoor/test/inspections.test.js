@@ -278,7 +278,7 @@ describe('vehicle inspections', () => {
     for (const a of ['created', 'started', 'submitted', 'signed.checked_by', 'recheck_requested', 'resubmitted', 'acknowledgement.auto', 'submitted_for_approval', 'signed.agreed_by', 'signed.approved_by']) {
       assert.ok(actions.includes(a), a)
     }
-    const audit = server.db.prepare("SELECT action FROM audit_log WHERE target_type = 'inspection' AND target_id = ?").all(insp.id).map((r) => r.action)
+    const audit = (await server.db.prepare("SELECT action FROM mashoor_audit_log WHERE target_type = 'inspection' AND target_id = ?").all(insp.id)).map((r) => r.action)
     for (const a of ['inspection.submitted', 'inspection.recheck_requested', 'inspection.resubmitted', 'inspection.acknowledgement_auto', 'inspection.verified', 'inspection.signed.approved_by']) {
       assert.ok(audit.includes(a), a)
     }

@@ -199,11 +199,17 @@ function isAllowedOrigin(origin) {
 }
 
 /* ------------------------------ Socket.IO ------------------------------ */
+// Origins of the Mashoor admin/portal frontends (MASHOOR_ALLOWED_ORIGINS),
+// filled in once the Mashoor module has loaded. Accepted for the Socket.IO
+// transport only (its /mashoor namespace re-checks them and requires a
+// session ticket); the HTTP CORS allowlist above is not widened.
+const mashoorSocketOrigins = new Set();
+
 const io = new Server(httpServer, {
   cors: {
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
-      if (isAllowedOrigin(origin)) return cb(null, true);
+      if (isAllowedOrigin(origin) || mashoorSocketOrigins.has(origin)) return cb(null, true);
       return cb(new Error(`Not allowed by CORS (socket.io): ${origin}`));
     },
     methods: ["GET", "POST"],
@@ -281,7 +287,8 @@ if (process.env.MASHOOR_MODULE !== "off") {
     // separately so a problem there leaves the REST API and other sockets alone.
     try {
       const live = mashoor.attachRealtime(io);
-      console.log(`[mashoor-api] realtime on namespace ${live.namespace} (path ${live.path})`);
+      for (const origin of mashoor.allowedOrigins) mashoorSocketOrigins.add(origin);
+      console.log(`[mashoor-api] realtime on namespace ${live.namespace} (path ${live.path}); origins: ${mashoor.allowedOrigins.join(", ")}`);
     } catch (error) {
       console.error("[mashoor] realtime not attached:", error.message);
     }

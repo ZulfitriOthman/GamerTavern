@@ -234,14 +234,14 @@ describe('checklist form templates (client PDF) and structured inspections', () 
     changed.details.find((d) => d.key === 'divProject').default = 'TEST changed project'
     assert.equal((await adm('PUT', `/checklist-templates/${t.id}/draft`, { definition: changed })).status, 200)
     assert.equal((await adm('POST', `/checklist-templates/${t.id}/publish`)).status, 200)
-    const counts = () => [
-      server.db.prepare('SELECT COUNT(*) AS n FROM checklist_templates').get().n,
-      server.db.prepare('SELECT COUNT(*) AS n FROM checklist_template_versions').get().n,
-      server.db.prepare('SELECT COUNT(*) AS n FROM checklist_diagrams').get().n,
+    const counts = async () => [
+      (await server.db.prepare('SELECT COUNT(*) AS n FROM mashoor_checklist_templates').get()).n,
+      (await server.db.prepare('SELECT COUNT(*) AS n FROM mashoor_checklist_template_versions').get()).n,
+      (await server.db.prepare('SELECT COUNT(*) AS n FROM mashoor_checklist_diagrams').get()).n,
     ]
-    const beforeCounts = counts()
-    const report = runChecklistImport(server.db)
-    assert.deepEqual(counts(), beforeCounts)
+    const beforeCounts = await counts()
+    const report = await runChecklistImport(server.db)
+    assert.deepEqual(await counts(), beforeCounts)
     assert.equal(report.created.length, 0)
     assert.equal(report.unchanged.length, 4)
     const current = (await adm('GET', `/checklist-templates/${t.id}`)).body.current
@@ -255,9 +255,9 @@ describe('checklist form templates (client PDF) and structured inspections', () 
 
   it('published versions are frozen; drafts can be saved, discarded and published', async () => {
     const t = await templateFor('MEDIUM BUS')
-    const v1 = server.db.prepare("SELECT id FROM checklist_template_versions WHERE template_id = ? AND version = 1").get(t.id)
-    assert.throws(() => server.db.prepare("UPDATE checklist_template_versions SET definition = '{}' WHERE id = ?").run(v1.id), /cannot be changed/)
-    assert.throws(() => server.db.prepare('DELETE FROM checklist_template_versions WHERE id = ?').run(v1.id), /cannot be deleted/)
+    const v1 = (await server.db.prepare("SELECT id FROM mashoor_checklist_template_versions WHERE template_id = ? AND version = 1").get(t.id))
+    await assert.rejects(async () => (await server.db.prepare("UPDATE mashoor_checklist_template_versions SET definition = '{}' WHERE id = ?").run(v1.id)), /cannot be changed/)
+    await assert.rejects(async () => (await server.db.prepare('DELETE FROM mashoor_checklist_template_versions WHERE id = ?').run(v1.id)), /cannot be deleted/)
     const full = (await adm('GET', `/checklist-templates/${t.id}`)).body
     const def = structuredClone(full.current.definition)
     def.sections[0].items[0].label = 'TEST relabelled'
@@ -374,9 +374,9 @@ describe('checklist form templates (client PDF) and structured inspections', () 
     assert.equal(rev.snapshot.vehicle.modRegistrationNo, 'MOD TEST-1')
     assert.deepEqual(rev.summary, [], 'no item remarks/actions → empty summary')
     // The revision cannot be altered in the database either.
-    const row = server.db.prepare('SELECT id FROM inspection_revisions WHERE inspection_id = ? AND revision = 1').get(id)
-    assert.throws(() => server.db.prepare("UPDATE inspection_revisions SET snapshot = '{}' WHERE id = ?").run(row.id), /cannot be changed/)
-    assert.throws(() => server.db.prepare('DELETE FROM inspection_revisions WHERE id = ?').run(row.id), /cannot be deleted/)
+    const row = (await server.db.prepare('SELECT id FROM mashoor_inspection_revisions WHERE inspection_id = ? AND revision = 1').get(id))
+    await assert.rejects(async () => (await server.db.prepare("UPDATE mashoor_inspection_revisions SET snapshot = '{}' WHERE id = ?").run(row.id)), /cannot be changed/)
+    await assert.rejects(async () => (await server.db.prepare('DELETE FROM mashoor_inspection_revisions WHERE id = ?').run(row.id)), /cannot be deleted/)
   })
 
   it('re-check → corrected resubmission keeps revision 1 exactly as reviewed', async () => {
@@ -461,20 +461,20 @@ describe('checklist form templates (client PDF) and structured inspections', () 
     const db = server.db
     // A template and an inspection exactly as 0005 stored them.
     const tId = Number(
-      db.prepare("INSERT INTO checklist_templates (vehicle_type, name, status_options) VALUES ('MEDIUM BUS', 'TEST legacy', ?)").run(JSON.stringify(['Good', 'Bad']))
+      (await db.prepare("INSERT INTO mashoor_checklist_templates (vehicle_type, name, status_options) VALUES ('MEDIUM BUS', 'TEST legacy', ?)").run(JSON.stringify(['Good', 'Bad'])))
         .lastInsertRowid,
     )
-    db.prepare("INSERT INTO checklist_template_items (template_id, position, section, label) VALUES (?, 1, 'TEST S', 'TEST legacy item 1'), (?, 2, 'TEST S', 'TEST legacy item 2')").run(tId, tId)
+    await db.prepare("INSERT INTO mashoor_checklist_template_items (template_id, position, section, label) VALUES (?, 1, 'TEST S', 'TEST legacy item 1'), (?, 2, 'TEST S', 'TEST legacy item 2')").run(tId, tId)
     const iId = Number(
-      db
+      (await db
         .prepare(
-          `INSERT INTO inspections (company_id, inspector_id, template_id, template_name, status_options, vehicle_type, vehicle_plate, status)
+          `INSERT INTO mashoor_inspections (company_id, inspector_id, template_id, template_name, status_options, vehicle_type, vehicle_plate, status)
            VALUES (?, ?, ?, 'TEST legacy', ?, 'MEDIUM BUS', 'LEG 1', 'draft')`,
         )
-        .run(ids.companyA, ids.inspector, tId, JSON.stringify(['Good', 'Bad'])).lastInsertRowid,
+        .run(ids.companyA, ids.inspector, tId, JSON.stringify(['Good', 'Bad']))).lastInsertRowid,
     )
-    db.prepare("INSERT INTO inspection_items (inspection_id, position, section, label, status, remark) VALUES (?, 1, 'TEST S', 'TEST legacy item 1', 'Good', 'TEST old remark'), (?, 2, 'TEST S', 'TEST legacy item 2', NULL, NULL)").run(iId, iId)
-    const itemIds = db.prepare('SELECT id FROM inspection_items WHERE inspection_id = ? ORDER BY position').all(iId).map((r) => r.id)
+    await db.prepare("INSERT INTO mashoor_inspection_items (inspection_id, position, section, label, status, remark) VALUES (?, 1, 'TEST S', 'TEST legacy item 1', 'Good', 'TEST old remark'), (?, 2, 'TEST S', 'TEST legacy item 2', NULL, NULL)").run(iId, iId)
+    const itemIds = (await db.prepare('SELECT id FROM mashoor_inspection_items WHERE inspection_id = ? ORDER BY position').all(iId)).map((r) => r.id)
 
     const before = (await api(as.insp, 'GET', `/inspections/${iId}`)).body.inspection
     assert.equal(before.working.definition.legacy, true)
@@ -486,7 +486,7 @@ describe('checklist form templates (client PDF) and structured inspections', () 
     assert.equal(rev.acknowledgement, 'pending')
     assert.equal(rev.summary[0].remark, 'TEST old remark')
     // Old item rows are left exactly as they were.
-    assert.equal(db.prepare('SELECT status FROM inspection_items WHERE id = ?').get(itemIds[1]).status, null)
+    assert.equal((await db.prepare('SELECT status FROM mashoor_inspection_items WHERE id = ?').get(itemIds[1])).status, null)
 
     // A 0005-format revision snapshot is still readable.
     const legacySnapshot = JSON.stringify({
@@ -495,7 +495,7 @@ describe('checklist form templates (client PDF) and structured inspections', () 
       statusOptions: ['Good', 'Bad'],
       items: [{ id: 77, position: 1, section: 'TEST S', label: 'TEST frozen item', status: 'Bad', remark: 'TEST frozen remark', action: '' }],
     })
-    db.prepare("INSERT INTO inspection_revisions (inspection_id, revision, snapshot, has_remarks, acknowledgement, submitted_by) VALUES (?, 2, ?, 1, 'pending', ?)").run(
+    await db.prepare("INSERT INTO mashoor_inspection_revisions (inspection_id, revision, snapshot, has_remarks, acknowledgement, submitted_by) VALUES (?, 2, ?, 1, 'pending', ?)").run(
       iId,
       legacySnapshot,
       ids.inspector,
@@ -505,7 +505,7 @@ describe('checklist form templates (client PDF) and structured inspections', () 
     assert.deepEqual(old.snapshot.answers.items['legacy-77'], { status: 'Bad', remark: 'TEST frozen remark' })
 
     // The import step turns the legacy template into a published version 1.
-    const report = runChecklistImport(db)
+    const report = await runChecklistImport(db)
     assert.deepEqual(report.upgraded, ['TEST legacy'])
     const t = (await adm('GET', `/checklist-templates/${tId}`)).body
     assert.equal(t.current.version, 1)

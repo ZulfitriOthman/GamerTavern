@@ -1,10 +1,12 @@
 // Fictional demo data for the Mashhor inspection prototype (Mashhor-Prototype/).
 //
-//   npm run mashoor:seed-demo        (from Backend/, normally via Mashhor-Prototype: npm run demo:setup)
+//   MASHOOR_DEMO_DATABASE=<database name> npm run mashoor:seed-demo   (from Backend/)
 //
-// Safety: refuses NODE_ENV=production, and refuses unless MASHOOR_DB_PATH is set
-// explicitly to a file whose name contains "demo" and which is not the default
-// development database. Never point it at a live database.
+// Safety: refuses NODE_ENV=production, and refuses unless MASHOOR_DEMO_DATABASE
+// names exactly the MySQL database it is connected to — a deliberate
+// confirmation, because by default Mashoor uses the Backend's own (possibly
+// live) database. It creates two organisations, 13 accounts and six
+// inspections. Never run it against a live database without approval.
 //
 // The staff account comes from the existing terminal-only setup
 // (npm run mashoor:create-staff); this script signs in with it
@@ -12,8 +14,6 @@
 // the real admin and portal API, so every rule, history event and audit entry
 // is the same as when a person does it on screen. Safe to re-run: it stops if
 // the demo organisations already exist.
-import { basename, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { createApp } from '../src/app.js'
 import { loadConfig } from '../src/config.js'
 import { openDatabase } from '../src/db.js'
@@ -26,10 +26,9 @@ const fail = (message) => {
 
 const config = loadConfig()
 if (config.production) fail('Refusing to seed demo data when NODE_ENV=production.')
-const defaultDb = resolve(join(fileURLToPath(new URL('..', import.meta.url)), 'data', 'mashoor.db'))
-if (!process.env.MASHOOR_DB_PATH) fail('Set MASHOOR_DB_PATH to the separate demo database first.')
-if (resolve(config.dbPath) === defaultDb) fail('MASHOOR_DB_PATH points at the default development database; use a separate demo file.')
-if (!/demo/i.test(basename(config.dbPath))) fail(`The demo database file name must contain "demo" (got ${basename(config.dbPath)}).`)
+if (!process.env.MASHOOR_DEMO_DATABASE || process.env.MASHOOR_DEMO_DATABASE !== config.mysql.database) {
+  fail(`Set MASHOOR_DEMO_DATABASE to the name of the database to fill (configured: ${config.mysql.database || 'none'}) to confirm it.`)
+}
 const STAFF = { email: process.env.DEMO_STAFF_EMAIL, password: process.env.DEMO_STAFF_PASSWORD }
 if (!STAFF.email || !STAFF.password) fail('Set DEMO_STAFF_EMAIL and DEMO_STAFF_PASSWORD (create the account with mashoor:create-staff first).')
 
@@ -70,10 +69,10 @@ const ORGS = [
   },
 ]
 
-const db = openDatabase(config.dbPath)
-if (db.prepare('SELECT 1 FROM vendor_companies WHERE name = ?').get(ORGS[0].name)) {
-  console.log(`[seed-demo] Demo data already present in ${config.dbPath} — nothing to do. (Use npm run demo:reset in Mashhor-Prototype to start over.)`)
-  db.close()
+const db = await openDatabase(config.mysql)
+if (await db.prepare('SELECT 1 FROM mashoor_vendor_companies WHERE name = ?').get(ORGS[0].name)) {
+  console.log(`[seed-demo] Demo data already present in ${db.info.where} — nothing to do.`)
+  await db.close()
   process.exit(0)
 }
 
@@ -224,7 +223,7 @@ try {
   // B2 — assigned in organisation B (never visible to organisation A accounts).
   await create('B', 'b.inspector', 'FORKLIFT', { vehiclePlate: 'DEMO 7007', modRegistrationNo: 'MOD-D-7007' })
 
-  console.log(`[seed-demo] Seeded ${config.dbPath}
+  console.log(`[seed-demo] Seeded ${db.info.where}
   Staff (admin site, email)   : ${STAFF.email} / (DEMO_STAFF_PASSWORD)
   Portal accounts (username)  : ${ORGS.flatMap((o) => o.accounts.map((a) => a.username)).join(', ')}
   Portal password (all)       : ${PASSWORD}
@@ -236,5 +235,5 @@ try {
 } finally {
   server.closeAllConnections()
   server.close()
-  db.close()
+  await db.close()
 }

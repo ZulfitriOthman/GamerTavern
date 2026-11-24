@@ -12,8 +12,8 @@ Backend's configured server). The SQL also runs on MySQL 8.0.16+.
 Database/mashoor/
 ├── mysql/
 │   ├── mashoor_mysql_schema.sql   ← fresh install: run this in MySQL Workbench
-│   └── migrations/                ← MySQL migration path (applied by the backend)
-│       ├── 0001_initial_schema.sql … 0007_staff_username_login.sql
+│   └── migrations/                ← MySQL migration path (checked by the backend, applied by you)
+│       ├── 0001_initial_schema.sql … 0008_schema_migrations_and_history_triggers.sql
 └── migrations/                    ← HISTORICAL SQLite migrations — do NOT run in MySQL
 ```
 
@@ -21,9 +21,10 @@ Database/mashoor/
 
 | Situation | Run |
 |---|---|
-| New, empty MySQL database (no `mashoor_` tables) | `mysql/mashoor_mysql_schema.sql` once. It equals `mysql/migrations/0001…0007` applied in order (checked by a test). The backend never creates the tables in an empty database by itself unless `MASHOOR_MYSQL_AUTO_INSTALL=true` (tests / local development only). |
+| New, empty MySQL database (no `mashoor_` tables) | `mysql/mashoor_mysql_schema.sql` once, then `mysql/migrations/0008_…` (a no-op apart from recording version 8). Or, from `Backend/`: `npm run mashoor:migrate -- --apply` (applies 0001–0008). The backend never creates or changes tables by itself. |
 | Moving the existing SQLite data to MySQL | 1. `mysql/mashoor_mysql_schema.sql` 2. the generated import file (see below) 3. start the backend. In that order — start the backend only after the import. |
-| MySQL database that already has some `mashoor_` migrations | Nothing by hand: the backend applies the missing `mysql/migrations` files in order at start-up. (Or run exactly the missing files in Workbench, in order — each records itself.) |
+| MySQL database that already has some `mashoor_` migrations | The missing `mysql/migrations` files, in order — in Workbench, or `npm run mashoor:migrate -- --apply`. Each file records itself. |
+| Tables created by hand but **no `mashoor_schema_migrations`** (the state `nanashi_collectibles` was in on 2026-11-23: all tables, checks and keys of 0001–0007, but no ledger and no triggers) | `mysql/migrations/0008_schema_migrations_and_history_triggers.sql` only — or `npm run mashoor:migrate -- --apply --from 8`. Applied to `nanashi_collectibles` on 2026-11-23. |
 
 In MySQL Workbench: double-click the target schema to make it the default,
 open the file, and run the **whole script** (lightning-bolt icon). The files
@@ -34,9 +35,12 @@ use `DELIMITER` around trigger bodies, which Workbench supports.
 `mashoor_schema_migrations (version, name, applied_at)` records every applied
 MySQL migration (it replaces SQLite's `PRAGMA user_version`). Each migration
 file ends by inserting its own row, so a file run by hand in Workbench counts
-as applied. At start-up the backend takes a named lock (`GET_LOCK`), applies
-only the files without a row, and refuses to start if the history has gaps or
-names a file it does not have. Restarting never re-applies anything.
+as applied. At start-up the backend only **checks** the highest recorded
+version: if it is not exactly the number of bundled files, `/api/mashoor`
+does not start and the log says which files are missing (or that the database
+is newer). It never applies DDL and never falls back to another database.
+`npm run mashoor:migrate` (from `Backend/`) prints the status without changing
+anything; `-- --apply` applies the pending files.
 
 - Append new files with the next number; never edit or renumber a file that
   has shipped. MySQL commits DDL immediately, so a migration that fails half
@@ -52,19 +56,27 @@ names a file it does not have. Restarting never re-applies anything.
 | `0005_inspector_role_and_vehicle_inspections.sql` | Account role, checklist templates, signatories, inspections, revisions, sign-offs, events |
 | `0006_checklist_form_templates.sql` | Versioned form templates (one draft per template), damage diagrams, form copy + answers on inspections; triggers freeze published versions, submitted revisions, sign-offs and history; history foreign keys become RESTRICT |
 | `0007_staff_username_login.sql` | MySQL only (no SQLite counterpart): admin accounts get a username (unique case-insensitively, stored lower-case); email becomes optional; each account keeps at least one of the two |
+| `0008_schema_migrations_and_history_triggers.sql` | MySQL only, additive and idempotent: creates `mashoor_schema_migrations` if missing, records 1–7, and creates the 8 frozen-history triggers if missing (for a schema built by hand without them) |
 
 ## Creating an admin account from the terminal
 
 From `Backend/` (PowerShell or any shell):
 
 ```
-npm run mashoor:create-staff -- --username <username> --name "<display name>" [--email <email>]
+npm run mashoor:create-staff -- --email <email> --name "<display name>"
 ```
 
-The password is asked for twice with hidden input (never an argument or an
-environment variable). The account is created active with role admin and
-signs in on the Admin website with the username (or the email, if given).
-An existing username or email is refused and nothing is changed.
+The password is typed at a hidden prompt (nothing is echoed) and asked twice;
+it is never a command argument or an environment variable. When stdin is piped,
+the first two lines are read instead. The account is written to
+`mashoor_staff_users` with role `admin`, active, and the same scrypt hash the
+staff sign-in verifies; it signs in on the Admin website with the email. An
+existing email (any letter case) is refused before the password is asked for,
+and nothing is changed. Staff sign-in by username (column added by 0007) is not
+implemented in the backend yet.
+
+In Docker, run it where the Backend runs:
+`docker exec -it -w /workspace/Backend backend-backend-1 npm run --silent mashoor:create-staff -- --email … --name "…"`
 
 ## SQLite → MySQL conversion notes
 
@@ -84,6 +96,11 @@ An existing username or email is refused and nothing is changed.
 All tables: InnoDB, `utf8mb4` / `utf8mb4_unicode_ci`, explicit named foreign keys.
 
 ## Moving existing SQLite data (one time)
+
+> **Not available in this checkout:** `Backend/mashoor/scripts/sqlite-to-mysql.js`
+> does not exist (checked 2026-11-23). The old SQLite file
+> `Backend/mashoor/data/mashoor.db` is kept untouched; the backend no longer
+> reads it. The plan below is kept for reference.
 
 From `Backend/` (host, Node 24+):
 

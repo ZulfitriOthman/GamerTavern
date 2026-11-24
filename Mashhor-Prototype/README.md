@@ -10,7 +10,7 @@ Two React + Vite apps for the **Mashhor Vehicle Inspection and Approval System**
 Both talk to the **existing** Backend service and its Mashoor module (`Backend/mashoor`, `/api/mashoor`) through
 same-origin Vite proxies. The prototype has no backend logic of its own. Organisation scoping, roles,
 assignment, status transitions, revision checks and sign-off rules are all enforced by the existing API, and
-history protection is enforced by the database triggers in `Database/mashoor/migrations`.
+history protection is enforced by the database triggers (`Database/mashoor/mysql/migrations`, 0006 and 0008).
 
 ## What is reused
 
@@ -68,132 +68,77 @@ The existing remotely-managed Cloudflare tunnel (Windows service `Cloudflared`) 
 | `portal-mashhor.nanashicollectibles.com` | `http://localhost:5302` (portal) |
 
 The Vite dev or preview server on each port serves the app (SPA fallback) and proxies `/api/mashoor` and
-`/socket.io` (WebSocket upgrades included) to the demo Backend, so the browser only talks to its own
-hostname and no extra path rules are needed in Cloudflare. Both hostnames are in `allowedHosts`
-(`config/vite-backend.js`) and in the demo origin lists (`config/demo-backend.dotenv`). Optional path rules,
-only if you ever want Cloudflare to bypass Vite for the API: on each hostname, `/api/mashoor*` and
-`/socket.io*` → `http://localhost:3012`, listed above the catch-all.
+`/socket.io` (WebSocket upgrades included) to the Backend, so the browser only talks to its own hostname.
+Both hostnames are in `allowedHosts` (`config/vite-backend.js`).
 
-## Demo backend and data (isolated)
+Vite listens on `127.0.0.1` only (`LISTEN_HOST` in `config/vite-backend.js`), so the tunnel can target
+`http://127.0.0.1:5301` / `:5302` (or `localhost`). The tunnel is dashboard-managed; its live ingress (read from
+cloudflared's local `/config`, version 33 on 2026-11-23) maps the two hostnames to `http://localhost:5301` and
+`http://localhost:5302`, which also works.
 
-`npm run dev:api` starts the real `Backend/server.js` through its `DOTENV_FILE` hook with
-`config/demo-backend.dotenv`, **instead of** `Backend/.env.dev`:
+The Backend allows both HTTPS origins: `MASHOOR_ALLOWED_ORIGINS` in `Backend/compose.yaml` (sign-in, writes and
+the `/mashoor` socket namespace), and `Backend/server.js` accepts exactly those origins for the Socket.IO
+transport too (the marketplace HTTP CORS list is not widened).
 
-- Port **3012**. Port 3002 is the **live** Backend container (`Backend/compose.yaml`, production MySQL,
-  serves nanashicollectibles.com); the demo never uses it. That container runs the same code, so it has the
-  `/mashoor` namespace too, but its env and Mashoor database are unchanged.
-- A separate SQLite database `Backend/mashoor/data/demo/mashhor-demo.db` and storage folder
-  `Backend/mashoor/data/demo/storage`. Both are git-ignored.
-- The marketplace's MySQL settings point at a closed local port, so the demo can never reach a real or live
-  MySQL database. The Backend logs `[DB] ping failed` and the ticketing sweep warnings; the inspection API is
-  unaffected.
-- `MASHOOR_ALLOWED_ORIGINS` and `EXTRA_ORIGINS` (the Backend's Socket.IO polling CORS check) list the two
-  local Vite origins and the two HTTPS hostnames. The existing `Listing-Sample/Mashoor` apps use the same
-  ports, so they cannot run at the same time as the prototype.
+## Backend and database
 
-`npm run demo:setup` does two things:
+- **Backend:** the existing Backend service in Docker (`Backend/compose.yaml`, container `backend-backend-1`),
+  published on `127.0.0.1:3002`. Both Vite proxies target `http://127.0.0.1:3002` (IPv4 on purpose: the port is
+  published on IPv4 only, and `localhost` may resolve to `::1` first, which gives `ECONNREFUSED`). Override with
+  `API_URL`.
+- **Database:** MySQL / MariaDB. The Mashoor module uses its own mysql2 pool with the Backend's established pool
+  settings; `MASHOOR_MYSQL_*` in `Backend/.env.dev`, falling back to `MYSQL_*`. Verified 2026-11-23 from inside
+  the container: `SELECT DATABASE(), VERSION()` → `nanashi_collectibles`, `10.6.28-MariaDB` on
+  `s1319.sgp1.mysecurecloudhost.com:3306` — **the same database the live marketplace uses**. Tables are
+  `mashoor_*`; schema version 8 (`Database/mashoor/mysql/migrations`).
+- **No fallback:** if MySQL is unreachable, not configured, or the schema is not at version 8, `/api/mashoor`
+  does not start and the Backend log says why (host and database name, never credentials). The marketplace keeps
+  running. The old SQLite file `Backend/mashoor/data/mashoor.db` is kept but no longer read.
+- **Migrations are never applied automatically.** From `Backend/`: `npm run mashoor:migrate` shows the status;
+  `-- --apply` applies pending files.
+- **Tests** use a disposable local MariaDB 10.6.28 (`mashoor-mysql-test`, `127.0.0.1:3310`), one throwaway
+  `mashoor_test_*` database per test file (`Backend/.env.test`, git-ignored). They never touch the Backend's
+  database.
 
-1. Creates the staff account with the Backend's **terminal-only** `npm run mashoor:create-staff`.
-2. Runs `npm run mashoor:seed-demo` (`Backend/mashoor/scripts/seed-demo.js`). This creates fictional
-   organisations, accounts, sign-off assignments and inspections through the real API.
+## Accounts (fictional, in the live database)
 
-The seed refuses `NODE_ENV=production`, the default database, and any file name without "demo".
-`npm run demo:reset` deletes only the demo database and storage, then sets them up again.
+Created 2026-11-23 with your approval. Passwords are in `Mashhor-Prototype/demo-credentials.local` (git-ignored).
 
-No schema change was needed. The checkout uses SQLite through `node:sqlite` with migrations 0001–0006, as the
-handover describes. The demo database is at `user_version` 6.
-
-## Accounts (all fictional)
-
-The staff account is `staff@mashhor-demo.test` / `Demo-Staff-2026!`. Every portal account uses the password
-`Demo-Pass-2026!`. Signatories confirm by typing the full name shown below.
-
-| Organisation | Username | Full name | Role | Sign-off stage |
-| --- | --- | --- | --- | --- |
-| Demo Fleet Contract A (approval **not** blocked by acknowledgement) | `a.inspector` | Adam Inspector | Inspector | — |
-| | `a.inspector2` | Aisyah Inspector | Inspector | — |
-| | `a.client` | Clara Client | Vendor / Client | — |
-| | `a.checker` | Chong Checker | Inspector | Checked by (MGCSB, Inspector) |
-| | `a.agreer` | Aminah Agreer | Vendor / Client | Agreed by (MINDEF) |
-| | `a.hoo` | Harun Operations Head | Inspector | Approved by (Head of Operations) |
-| | `a.ack` | Aziz Acknowledger | Vendor / Client | Acknowledgement |
-| Demo Fleet Contract B (approval **blocked** until acknowledged) | `b.inspector`, `b.client`, `b.checker`, `b.agreer`, `b.hoo`, `b.ack` | Bakar Inspector, Bella Client, Ben Checker, Bunga Agreer, Badrul Operations Head, Batrisya Acknowledger | same pattern | same pattern |
-
-The seeded inspections are:
-
-| Inspection | Organisation and vehicle | State |
+| Where | Sign-in | Who |
 | --- | --- | --- |
-| A1 | A, Forklift DEMO 1001 | Assigned |
-| A2 | A, Medium Bus DEMO 2002 | Draft |
-| A3 | A, Large Bus DEMO 3003 | Pending verification; no remarks, so auto-acknowledged |
-| A4 | A, Double Cab DEMO 4004 | Approved with acknowledgement still pending (handover C4) |
-| B1 | B, Double Cab DEMO 6006 | Pending approval; the HOO is blocked because the damage-marker note needs acknowledgement |
-| B2 | B, Forklift DEMO 7007 | Assigned |
+| Admin | `staff@mashhor-demo.test` | Demo Staff (created with the terminal-only `mashoor:create-staff`) |
+| Portal | `a.inspector` | Adam Inspector, Inspector of **Demo Fleet Contract A** (`DEMO-ORG-A`) |
 
-## Run it (Windows, from the repository root)
+Also imported at Backend start-up: the 4 bundled checklist templates (Forklift, Double Cab Hilux, Medium Bus,
+Large Bus) and their damage diagrams. Test inspection: **id 1**, vehicle plate `QA-MSH-20261123-0942`.
+
+`npm run mashoor:seed-dev` / `mashoor:seed-demo` (in `Backend/`) refuse to run unless the target database is
+confirmed by name (`MASHOOR_SEED_DEV_DATABASE` / `MASHOOR_DEMO_DATABASE`). Do not run them against
+`nanashi_collectibles` without approval.
+
+## Run it (Windows PowerShell)
+
+The Backend container must be running (`docker ps` shows `backend-backend-1` on `127.0.0.1:3002`).
 
 ```powershell
 cd D:\Github\GamerTavern\Mashhor-Prototype
-npm install
-npm run install:all
-npm run demo:reset      # or demo:setup the first time; stop `npm run dev` before resetting
-npm run dev             # API :3012 + admin :5301 + portal :5302 (development)
+npm install; npm run install:all     # once
+npm run dev                          # admin :5301 + portal :5302 (Vite dev, proxies to :3002)
+# or, production builds:
+npm run build; npm run preview
 ```
 
-For the client demo, serve the production builds instead (stop `npm run dev` first):
-
-```powershell
-npm run build
-npm run preview         # API :3012 + built admin :5301 + built portal :5302
-```
-
-Use one browser profile for the admin site and a **private window** (or another browser) for the portal, so
-you can switch portal accounts without losing the staff session.
-
-## Walkthrough
-
-1. **Admin** (http://localhost:5301): sign in as staff.
-   1. Go to **Vendors → Demo Fleet Contract A** to show the portal accounts and the **Inspection sign-offs**
-      card, which holds the stages and the acknowledgement-blocking option.
-   2. Go to **Checklist templates** and open the Double Cab to preview the form and the A4 print.
-   3. Go to **Inspections → New inspection**. Choose Demo Fleet Contract A, Adam Inspector and Double Cab
-      (Hilux), and enter plate `DEMO 5005`.
-   4. On the inspection, correct a field or reassign the inspector. This is allowed while the checklist is with
-      the inspector.
-2. **Portal** (http://localhost:5302): sign in as `a.inspector` and open DEMO 5005. No mark is pre-selected.
-   1. Mark a few items and click **Save draft**.
-   2. Click **Submit**. The submission is refused and lists the unanswered items.
-   3. Mark every item and add a remark on one item. Enter tyre measurements, tap the diagram to place a damage
-      marker with a note, and choose an extent of damage. Then **Submit** to create revision 1.
-3. Sign in as `a.client`. Open the inspection and choose **Request Re-check** with a reason.
-4. Sign in as `a.inspector`. The re-check reason is shown. Remove the remarks and **Resubmit** to create
-   revision 2, which is auto-acknowledged.
-5. Sign in as `a.client` and choose **Submit to HOO Approval**.
-6. Sign in as `a.checker`, then `a.agreer`. Each one **Confirms** by typing their full name; the order does
-   not matter.
-7. Sign in as `a.hoo` and confirm **Approved by** to approve the inspection.
-8. Print: on the admin inspection page, click **Print view** and choose **Revision 1 (superseded)** in the
-   picker. It shows the SUPERSEDED banner, revision 1's own checklist and confirmations, and a
-   submission-record sheet with its re-check reason and history. Press Ctrl+P for the A4 preview.
-
-Other things to show:
-
-- Organisation B: as `b.hoo`, approving B1 is refused until `b.ack` acknowledges. In organisation A, A4 was
-  approved while its acknowledgement was still pending.
-- Stale revision: open an inspection pending verification as `a.client`. Return and resubmit it in another
-  session, then forward it from the first page. The action is refused with **Reload inspection**.
-- Isolation: `b.client` cannot open organisation A inspections; the API answers 404.
+Then open http://localhost:5301 (staff) and, in a private window, http://localhost:5302 (portal).
 
 ## Commands
 
 | Command | What |
 | --- | --- |
-| `npm run dev` | Demo API and both dev servers |
+| `npm run dev` | Both dev servers (the Backend runs in Docker) |
 | `npm run build` | Production builds in `admin/dist` and `portal/dist` |
-| `npm run preview` | Demo API and the built apps on the same ports |
+| `npm run preview` | The built apps on the same ports and proxies |
 | `npm run lint` | oxlint over the prototype sources |
-| `npm test` | The Mashhor backend tests, including `realtime.test.js` (`Backend: npm run mashoor:test`) |
-| `npm run demo:setup` / `demo:reset` | Create, or recreate, the isolated demo data |
+| `npm test` | Backend `npm run mashoor:test` (needs the `mashoor-mysql-test` container) |
 
 ## Limitations still visible in the demo
 
@@ -204,4 +149,4 @@ Other things to show:
 - There is no cancel or delete for inspections (C5), no notifications (C9), no reports or exports (C10) and no
   vehicle register (C14). Staff accounts can only be created from the terminal (C6).
 - Times are stored in UTC and shown in the viewer's local time.
-- The Backend console shows marketplace MySQL errors because the demo deliberately runs without MySQL.
+- Staff sign in by email; the `username` column for staff (migration 0007) is not used by the backend yet.

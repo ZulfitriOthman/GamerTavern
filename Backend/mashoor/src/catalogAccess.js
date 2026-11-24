@@ -14,10 +14,10 @@
 // (catalog_assignments from migration 0001 is superseded and grants nothing.)
 
 const VISIBLE_FROM = `
-  FROM catalogs cat
-  JOIN categories cg ON cg.id = cat.category_id AND cg.active = 1
-  JOIN vendor_company_categories vcc ON vcc.category_id = cat.category_id AND vcc.company_id = ?
-  JOIN vendor_companies vc ON vc.id = vcc.company_id AND vc.status = 'active'
+  FROM mashoor_catalogs cat
+  JOIN mashoor_categories cg ON cg.id = cat.category_id AND cg.active = 1
+  JOIN mashoor_vendor_company_categories vcc ON vcc.category_id = cat.category_id AND vcc.company_id = ?
+  JOIN mashoor_vendor_companies vc ON vc.id = vcc.company_id AND vc.status = 'active'
   WHERE cat.status = 'published'`
 
 const COLUMNS = `cat.id, cat.title, cat.description, cat.published_at, cat.updated_at, cat.price_cents, cat.currency,
@@ -29,7 +29,8 @@ function filters({ search, categoryId } = {}) {
   const term = typeof search === 'string' ? search.trim() : ''
   if (term) {
     const pattern = `%${term.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`
-    sql += ` AND (cat.title LIKE ? ESCAPE '\\' OR cat.description LIKE ? ESCAPE '\\')`
+    // Backslash is MySQL's default LIKE escape character.
+    sql += ' AND (cat.title LIKE ? OR cat.description LIKE ?)'
     params.push(pattern, pattern)
   }
   if (categoryId != null) {
@@ -39,16 +40,18 @@ function filters({ search, categoryId } = {}) {
   return { sql, params }
 }
 
+// limit < 0: no limit.
 export function listVisibleCatalogs(db, companyId, { search, categoryId, limit = -1, offset = 0 } = {}) {
   const f = filters({ search, categoryId })
+  const page = limit >= 0 ? ' LIMIT ? OFFSET ?' : ''
   return db
-    .prepare(`SELECT ${COLUMNS} ${VISIBLE_FROM} ${f.sql} ORDER BY cat.published_at DESC, cat.id DESC LIMIT ? OFFSET ?`)
-    .all(companyId, ...f.params, limit, offset)
+    .prepare(`SELECT ${COLUMNS} ${VISIBLE_FROM} ${f.sql} ORDER BY cat.published_at DESC, cat.id DESC${page}`)
+    .all(companyId, ...f.params, ...(limit >= 0 ? [limit, offset] : []))
 }
 
-export function countVisibleCatalogs(db, companyId, { search, categoryId } = {}) {
+export async function countVisibleCatalogs(db, companyId, { search, categoryId } = {}) {
   const f = filters({ search, categoryId })
-  return db.prepare(`SELECT COUNT(*) AS n ${VISIBLE_FROM} ${f.sql}`).get(companyId, ...f.params).n
+  return (await db.prepare(`SELECT COUNT(*) AS n ${VISIBLE_FROM} ${f.sql}`).get(companyId, ...f.params)).n
 }
 
 export function getVisibleCatalog(db, companyId, catalogId) {
@@ -61,12 +64,12 @@ export function listVisibleCategories(db, companyId) {
   return db
     .prepare(
       `SELECT cg.id, cg.name, cg.description,
-              (SELECT COUNT(*) FROM catalogs cat WHERE cat.category_id = cg.id AND cat.status = 'published') AS listing_count
-         FROM vendor_company_categories vcc
-         JOIN categories cg ON cg.id = vcc.category_id AND cg.active = 1
-         JOIN vendor_companies vc ON vc.id = vcc.company_id AND vc.status = 'active'
+              (SELECT COUNT(*) FROM mashoor_catalogs cat WHERE cat.category_id = cg.id AND cat.status = 'published') AS listing_count
+         FROM mashoor_vendor_company_categories vcc
+         JOIN mashoor_categories cg ON cg.id = vcc.category_id AND cg.active = 1
+         JOIN mashoor_vendor_companies vc ON vc.id = vcc.company_id AND vc.status = 'active'
         WHERE vcc.company_id = ?
-        ORDER BY cg.name COLLATE NOCASE`,
+        ORDER BY cg.name`,
     )
     .all(companyId)
 }

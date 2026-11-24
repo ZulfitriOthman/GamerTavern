@@ -7,16 +7,27 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import express from 'express'
 import { createMashoorModule } from '../src/embed.js'
-import { APP_ORIGIN } from './helpers.js'
+import { loadMigrations } from '../src/migrations.js'
+import { APP_ORIGIN, createTestDatabase } from './helpers.js'
+
+const mysqlEnv = (c) => ({
+  MASHOOR_MYSQL_HOST: c.host,
+  MASHOOR_MYSQL_PORT: String(c.port),
+  MASHOOR_MYSQL_USER: c.user,
+  MASHOOR_MYSQL_PASSWORD: c.password,
+  MASHOOR_MYSQL_DATABASE: c.database,
+})
 
 describe('embedded in the shared Backend', () => {
   let server
   let mashoor
   let baseUrl
+  let testDb
 
   before(async () => {
+    testDb = await createTestDatabase()
     mashoor = await createMashoorModule({ env: {
-      MASHOOR_DB_PATH: ':memory:',
+      ...mysqlEnv(testDb.mysqlConfig),
       MASHOOR_STORAGE_DIR: mkdtempSync(join(tmpdir(), 'mashoor-test-')),
       MASHOOR_ALLOWED_ORIGINS: APP_ORIGIN,
     } })
@@ -33,7 +44,33 @@ describe('embedded in the shared Backend', () => {
   after(async () => {
     server.closeAllConnections()
     await new Promise((resolve) => server.close(resolve))
-    mashoor.close()
+    await mashoor.close()
+    await testDb.drop()
+  })
+
+  it('reports the connected database without credentials', () => {
+    assert.equal(mashoor.database.database, testDb.mysqlConfig.database)
+    assert.match(mashoor.database.version, /MariaDB|^\d/)
+    assert.ok(!JSON.stringify(mashoor.database).includes(testDb.mysqlConfig.password))
+  })
+
+  it('fails clearly, without falling back, when MySQL is unreachable', async () => {
+    const env = { ...mysqlEnv({ ...testDb.mysqlConfig, port: 1 }), MASHOOR_MYSQL_PASSWORD: 'Secret-Never-Logged-1', MASHOOR_MYSQL_CONNECT_TIMEOUT: '3000' }
+    await assert.rejects(createMashoorModule({ env }), (error) => {
+      assert.match(error.message, /^Mashoor database mysql:\/\/.+:1\/mashoor_test_\w+ unavailable/)
+      assert.ok(!error.message.includes('Secret-Never-Logged-1'), 'no password in the message')
+      return true
+    })
+    await assert.rejects(createMashoorModule({ env: {} }), /not configured: set MASHOOR_MYSQL_USER/)
+  })
+
+  it('refuses to start on a schema that is not at the bundled version', async () => {
+    const older = await createTestDatabase({ migrations: loadMigrations().slice(0, 7) })
+    try {
+      await assert.rejects(createMashoorModule({ env: mysqlEnv(older.mysqlConfig) }), /schema is at version 7; 8 is required\. Apply 0008_/)
+    } finally {
+      await older.drop()
+    }
   })
 
   it('serves Mashoor under /api/mashoor without X-Powered-By', async () => {

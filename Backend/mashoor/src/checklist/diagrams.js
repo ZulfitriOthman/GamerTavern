@@ -26,7 +26,7 @@ export function createDiagramStore(storageDir) {
 }
 
 export function getDiagram(db, id) {
-  return db.prepare('SELECT * FROM checklist_diagrams WHERE id = ?').get(id)
+  return db.prepare('SELECT * FROM mashoor_checklist_diagrams WHERE id = ?').get(id)
 }
 
 export const toDiagram = (row, urlBase) => ({

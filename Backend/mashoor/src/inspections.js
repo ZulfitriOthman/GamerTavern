@@ -35,25 +35,28 @@ export function normalizePersonName(value) {
   return value.normalize('NFKC').replace(/\s+/g, ' ').trim().toLocaleLowerCase('en-US')
 }
 
-export function getInspection(db, id) {
-  return db.prepare('SELECT * FROM inspections WHERE id = ?').get(id)
+// With { forUpdate: true } inside a transaction the row stays locked until
+// commit, so two concurrent workflow steps on one inspection run one after
+// the other (SQLite serialised all writes; InnoDB locks rows).
+export function getInspection(db, id, { forUpdate = false } = {}) {
+  return db.prepare(`SELECT * FROM mashoor_inspections WHERE id = ?${forUpdate ? ' FOR UPDATE' : ''}`).get(id)
 }
 
 export function inspectionItems(db, inspectionId) {
-  return db.prepare('SELECT * FROM inspection_items WHERE inspection_id = ? ORDER BY position, id').all(inspectionId)
+  return db.prepare('SELECT * FROM mashoor_inspection_items WHERE inspection_id = ? ORDER BY position, id').all(inspectionId)
 }
 
-export function getRevision(db, inspectionId, revision) {
+export async function getRevision(db, inspectionId, revision) {
   return revision > 0
-    ? db.prepare('SELECT * FROM inspection_revisions WHERE inspection_id = ? AND revision = ?').get(inspectionId, revision)
+    ? db.prepare('SELECT * FROM mashoor_inspection_revisions WHERE inspection_id = ? AND revision = ?').get(inspectionId, revision)
     : undefined
 }
 
-export function signatoriesFor(db, companyId) {
-  const rows = db
+export async function signatoriesFor(db, companyId) {
+  const rows = await db
     .prepare(
       `SELECT s.stage, s.user_id, u.name, u.username, u.active
-         FROM inspection_signatories s JOIN vendor_users u ON u.id = s.user_id
+         FROM mashoor_inspection_signatories s JOIN mashoor_vendor_users u ON u.id = s.user_id
         WHERE s.company_id = ?`,
     )
     .all(companyId)
@@ -68,11 +71,9 @@ export function signatoriesFor(db, companyId) {
   })
 }
 
-export function stagesAssignedTo(db, companyId, userId) {
-  return db
-    .prepare('SELECT stage FROM inspection_signatories WHERE company_id = ? AND user_id = ?')
-    .all(companyId, userId)
-    .map((r) => r.stage)
+export async function stagesAssignedTo(db, companyId, userId) {
+  const rows = await db.prepare('SELECT stage FROM mashoor_inspection_signatories WHERE company_id = ? AND user_id = ?').all(companyId, userId)
+  return rows.map((r) => r.stage)
 }
 
 export function vehicleOf(inspection) {
@@ -85,14 +86,14 @@ export function vehicleOf(inspection) {
 }
 
 /** The inspection's form definition and working answers (0005 inspections converted on read). */
-export function formOf(db, inspection) {
+export async function formOf(db, inspection) {
   if (inspection.form_definition) {
     return {
       definition: JSON.parse(inspection.form_definition),
       answers: inspection.form_answers ? JSON.parse(inspection.form_answers) : legacyAnswers([]),
     }
   }
-  const rows = inspectionItems(db, inspection.id)
+  const rows = await inspectionItems(db, inspection.id)
   return { definition: legacyDefinition(JSON.parse(inspection.status_options), rows), answers: legacyAnswers(rows) }
 }
 
@@ -127,38 +128,42 @@ export function revisionHasRemarks(answers) {
   return hasRemarks(answers)
 }
 
-export function recordEvent(db, { inspectionId, revision = null, actorType, actorId = null, actorName = null, action, detail = null }) {
-  db.prepare(
-    `INSERT INTO inspection_events (inspection_id, revision, actor_type, actor_id, actor_name, action, detail)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(inspectionId, revision, actorType, actorId, actorName, action, detail)
+export async function recordEvent(db, { inspectionId, revision = null, actorType, actorId = null, actorName = null, action, detail = null }) {
+  await db
+    .prepare(
+      `INSERT INTO mashoor_inspection_events (inspection_id, revision, actor_type, actor_id, actor_name, action, detail)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(inspectionId, revision, actorType, actorId, actorName, action, detail)
 }
 
 // Who may open an inspection in the portal (beyond being in the same company):
 // its assigned inspector, any client of the company, or a signatory of the company.
-export function portalCanView(db, inspection, vendor) {
+export async function portalCanView(db, inspection, vendor) {
   if (!inspection || inspection.company_id !== vendor.companyId) return false
   if (vendor.role === 'client') return true
   if (inspection.inspector_id === vendor.id) return true
-  return stagesAssignedTo(db, vendor.companyId, vendor.id).length > 0
+  return (await stagesAssignedTo(db, vendor.companyId, vendor.id)).length > 0
 }
 
 /** Diagram ids an inspection refers to (its own form and every submitted revision). */
-export function diagramIdsOf(db, inspection) {
+export async function diagramIdsOf(db, inspection) {
   const ids = new Set()
   const add = (definition) => definition?.damage?.enabled && definition.damage.diagramId && ids.add(definition.damage.diagramId)
   if (inspection.form_definition) add(JSON.parse(inspection.form_definition))
-  for (const r of db.prepare('SELECT snapshot FROM inspection_revisions WHERE inspection_id = ?').all(inspection.id)) add(readSnapshot(r.snapshot).definition)
+  for (const r of await db.prepare('SELECT snapshot FROM mashoor_inspection_revisions WHERE inspection_id = ?').all(inspection.id)) add(readSnapshot(r.snapshot).definition)
   return ids
 }
 
-function revisionView(db, revisionRow, { current, withForm }) {
-  const signoffs = db
-    .prepare('SELECT * FROM inspection_signoffs WHERE revision_id = ? ORDER BY signed_at, id')
-    .all(revisionRow.id)
-    .map((s) => ({ stage: s.stage, userId: s.user_id, name: s.name_snapshot, signedAt: s.signed_at }))
-  const verifier = revisionRow.verified_by ? db.prepare('SELECT name FROM vendor_users WHERE id = ?').get(revisionRow.verified_by) : null
-  const submitter = db.prepare('SELECT name FROM vendor_users WHERE id = ?').get(revisionRow.submitted_by)
+async function revisionView(db, revisionRow, { current, withForm }) {
+  const signoffs = (await db.prepare('SELECT * FROM mashoor_inspection_signoffs WHERE revision_id = ? ORDER BY signed_at, id').all(revisionRow.id)).map((s) => ({
+    stage: s.stage,
+    userId: s.user_id,
+    name: s.name_snapshot,
+    signedAt: s.signed_at,
+  }))
+  const verifier = revisionRow.verified_by ? await db.prepare('SELECT name FROM mashoor_vendor_users WHERE id = ?').get(revisionRow.verified_by) : null
+  const submitter = await db.prepare('SELECT name FROM mashoor_vendor_users WHERE id = ?').get(revisionRow.submitted_by)
   const view = {
     revision: revisionRow.revision,
     current,
@@ -178,27 +183,22 @@ function revisionView(db, revisionRow, { current, withForm }) {
 }
 
 /** One revision with its frozen form (for history / print of an earlier revision). */
-export function serializeRevision(db, inspection, revisionNumber) {
-  const row = getRevision(db, inspection.id, revisionNumber)
+export async function serializeRevision(db, inspection, revisionNumber) {
+  const row = await getRevision(db, inspection.id, revisionNumber)
   return row ? revisionView(db, row, { current: row.revision === inspection.current_revision, withForm: true }) : null
 }
 
 // Full inspection for display. The working copy (definition + answers being
 // edited) is included only when `includeWorking` (the assigned inspector, or staff).
-export function serializeInspection(db, inspection, { includeWorking = false } = {}) {
-  const company = db.prepare('SELECT id, name, inspection_ack_blocks_approval FROM vendor_companies WHERE id = ?').get(inspection.company_id)
-  const inspector = db.prepare('SELECT id, name, username, active, role FROM vendor_users WHERE id = ?').get(inspection.inspector_id)
-  const revisions = db
-    .prepare('SELECT * FROM inspection_revisions WHERE inspection_id = ? ORDER BY revision DESC')
-    .all(inspection.id)
-    .map((r) => {
-      const current = r.revision === inspection.current_revision
-      return revisionView(db, r, { current, withForm: current })
-    })
-  const events = db
-    .prepare('SELECT * FROM inspection_events WHERE inspection_id = ? ORDER BY id')
-    .all(inspection.id)
-    .map((e) => ({ revision: e.revision, actorType: e.actor_type, actorName: e.actor_name, action: e.action, detail: e.detail, at: e.created_at }))
+export async function serializeInspection(db, inspection, { includeWorking = false } = {}) {
+  const company = await db.prepare('SELECT id, name, inspection_ack_blocks_approval FROM mashoor_vendor_companies WHERE id = ?').get(inspection.company_id)
+  const inspector = await db.prepare('SELECT id, name, username, active, role FROM mashoor_vendor_users WHERE id = ?').get(inspection.inspector_id)
+  const revisions = []
+  for (const r of await db.prepare('SELECT * FROM mashoor_inspection_revisions WHERE inspection_id = ? ORDER BY revision DESC').all(inspection.id)) {
+    const current = r.revision === inspection.current_revision
+    revisions.push(await revisionView(db, r, { current, withForm: current }))
+  }
+  const events = (await db.prepare('SELECT * FROM mashoor_inspection_events WHERE inspection_id = ? ORDER BY id').all(inspection.id)).map((e) => ({ revision: e.revision, actorType: e.actor_type, actorName: e.actor_name, action: e.action, detail: e.detail, at: e.created_at }))
   const result = {
     id: inspection.id,
     company: { id: company.id, name: company.name },
@@ -213,19 +213,19 @@ export function serializeInspection(db, inspection, { includeWorking = false } =
     createdAt: inspection.created_at,
     updatedAt: inspection.updated_at,
     approvedAt: inspection.approved_at,
-    signatories: signatoriesFor(db, inspection.company_id),
+    signatories: await signatoriesFor(db, inspection.company_id),
     revisions,
     events,
   }
   if (includeWorking) {
-    const { definition, answers } = formOf(db, inspection)
+    const { definition, answers } = await formOf(db, inspection)
     result.working = { definition, answers, summary: buildSummary(vehicleOf(inspection), definition, answers) }
   }
   return result
 }
 
-export function listRow(db, row) {
-  const inspector = db.prepare('SELECT name, username FROM vendor_users WHERE id = ?').get(row.inspector_id)
+export async function listRow(db, row) {
+  const inspector = await db.prepare('SELECT name, username FROM mashoor_vendor_users WHERE id = ?').get(row.inspector_id)
   return {
     id: row.id,
     companyId: row.company_id,

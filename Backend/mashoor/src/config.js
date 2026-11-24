@@ -9,11 +9,26 @@ const moduleRoot = fileURLToPath(new URL('..', import.meta.url))
 
 // Every setting is namespaced MASHOOR_* because this module shares process.env
 // with the rest of the Backend (PORT, DB settings, origins, ... belong to it).
+//
+// Database: MySQL / MariaDB (tables prefixed mashoor_). Each MASHOOR_MYSQL_*
+// falls back to the Backend's own MYSQL_* value, so by default Mashoor uses the
+// Backend's database; set MASHOOR_MYSQL_* to keep it in a database of its own.
+// There is no SQLite fallback: openDatabase() fails clearly when these are
+// missing or the server is unreachable.
 export function loadConfig(env = process.env) {
   const production = env.NODE_ENV === 'production'
+  const mysqlSetting = (name) => env[`MASHOOR_MYSQL_${name}`] || env[`MYSQL_${name}`] || ''
   return {
     production,
-    dbPath: env.MASHOOR_DB_PATH || join(moduleRoot, 'data', 'mashoor.db'),
+    mysql: {
+      host: mysqlSetting('HOST') || '127.0.0.1',
+      port: Number(mysqlSetting('PORT') || 3306),
+      user: mysqlSetting('USER'),
+      password: mysqlSetting('PASSWORD'),
+      database: mysqlSetting('DATABASE'),
+      connectionLimit: Number(env.MASHOOR_MYSQL_CONN_LIMIT || 5),
+      connectTimeout: Number(env.MASHOOR_MYSQL_CONNECT_TIMEOUT || env.MYSQL_CONNECT_TIMEOUT || 15000),
+    },
     // Private file storage (listing images). Never inside Backend/public:
     // files are served only through access-checked API routes.
     storageDir: env.MASHOOR_STORAGE_DIR || join(moduleRoot, 'storage'),
@@ -29,3 +44,6 @@ export function loadConfig(env = process.env) {
     trustProxy: false,
   }
 }
+
+/** Where the database is, for logs and reports — never the credentials. */
+export const describeDatabase = (mysql) => `mysql://${mysql.host}:${mysql.port}/${mysql.database}`

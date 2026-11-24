@@ -3,9 +3,11 @@ services:
     image: node:24-bookworm-slim
     working_dir: /workspace/Backend
     environment:
-      # Mashoor CSRF origin allow-list (comma-separated, exact origins). Not set
-      # in .env.dev; the first two are the module's former defaults.
-      MASHOOR_ALLOWED_ORIGINS: "http://localhost:5301,http://localhost:5302,https://portalmashoor.nanashicollectibles.com"
+      # Mashoor CSRF + Socket.IO origin allow-list (comma-separated, exact
+      # origins). Not set in .env.dev. Local Vite apps, the older portal
+      # hostname, and the Mashhor Admin / Portal public hostnames (Cloudflare
+      # tunnel → Vite on 127.0.0.1:5301 / :5302, which proxies here).
+      MASHOOR_ALLOWED_ORIGINS: "http://localhost:5301,http://localhost:5302,https://portalmashoor.nanashicollectibles.com,https://mashhor.nanashicollectibles.com,https://portal-mashhor.nanashicollectibles.com"
     ports:
       - "127.0.0.1:3002:3002"
     volumes:

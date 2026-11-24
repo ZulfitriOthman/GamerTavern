@@ -2,7 +2,7 @@ import { fileURLToPath } from 'node:url'
 import react, { reactCompilerPreset } from '@vitejs/plugin-react'
 import babel from '@rolldown/plugin-babel'
 import { defineConfig, loadEnv } from 'vite'
-import { backendProxy, backendTarget, PUBLIC_HOSTS } from '../config/vite-backend.js'
+import { backendProxy, backendTarget, LISTEN_HOST, PUBLIC_HOSTS } from '../config/vite-backend.js'
 
 // Reused code, imported in place (not copied):
 //   @mashoor/shared/*  — the existing shared frontend package
@@ -33,12 +33,13 @@ export default defineConfig(({ mode }) => {
       dedupe: ['react', 'react-dom', 'react-router', 'socket.io-client'],
     },
     server: {
+      host: LISTEN_HOST,
       port,
       strictPort: true,
       proxy,
       allowedHosts,
       fs: { allow: ['.', sharedSrc, legacyPortal, prototypeShared] },
     },
-    preview: { port, strictPort: true, proxy, allowedHosts },
+    preview: { host: LISTEN_HOST, port, strictPort: true, proxy, allowedHosts },
   }
 })

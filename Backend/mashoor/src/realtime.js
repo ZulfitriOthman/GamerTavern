@@ -66,51 +66,53 @@ export function createRealtime({ db, config }) {
 
   // Who the session belongs to right now, or null. Re-read from the database
   // every time, exactly like requireStaff / requireVendor.
-  function identify(userType, token) {
-    const session = getSession(db, userType, token)
+  async function identify(userType, token) {
+    const session = await getSession(db, userType, token)
     if (!session) return null
     if (userType === 'staff') {
-      const staff = loadStaff(session.userId)
+      const staff = await loadStaff(session.userId)
       return staff && { type: 'staff', id: staff.id }
     }
-    const vendor = loadVendor(session.userId)
+    const vendor = await loadVendor(session.userId)
     return vendor && { type: 'vendor', ...vendor }
   }
 
   // Each live socket in a room, with its current identity; sockets whose
   // session no longer holds are disconnected and skipped.
-  function* members(room) {
+  async function members(room) {
     const ids = nsp?.adapter.rooms.get(room)
-    if (!ids) return
+    if (!ids) return []
+    const list = []
     for (const socketId of [...ids]) {
       const socket = nsp.sockets.get(socketId)
       if (!socket) continue
-      const who = identify(socket.data.mashoor.userType, socket.data.mashoor.token)
+      const who = await identify(socket.data.mashoor.userType, socket.data.mashoor.token)
       if (!who) {
         socket.disconnect(true)
         continue
       }
-      yield { socket, who }
+      list.push({ socket, who })
     }
+    return list
   }
 
-  function sweep() {
+  async function sweep() {
     if (!nsp) return
     for (const socket of [...nsp.sockets.values()]) {
       const { userType, token } = socket.data.mashoor
-      if (!identify(userType, token)) socket.disconnect(true)
+      if (!(await identify(userType, token))) socket.disconnect(true)
     }
   }
 
-  function notifyInspection({ before, after, action, actor }) {
+  async function notifyInspection({ before, after, action, actor }) {
     if (!nsp) return
     const payload = { inspectionId: after.id, action, status: after.status }
     const isSelf = (who) => Boolean(actor) && actor.type === who.type && actor.id === who.id
-    for (const { socket, who } of members('staff')) socket.emit('inspection:changed', { ...payload, self: isSelf(who) })
+    for (const { socket, who } of await members('staff')) socket.emit('inspection:changed', { ...payload, self: isSelf(who) })
     const companies = new Set([after.company_id, before?.company_id].filter(Boolean))
     for (const companyId of companies) {
-      for (const { socket, who } of members(`company:${companyId}`)) {
-        const allowed = portalCanView(db, after, who) || (before ? portalCanView(db, before, who) : false)
+      for (const { socket, who } of await members(`company:${companyId}`)) {
+        const allowed = (await portalCanView(db, after, who)) || (before ? await portalCanView(db, before, who) : false)
         if (allowed) socket.emit('inspection:changed', { ...payload, self: isSelf(who) })
       }
     }
@@ -118,40 +120,45 @@ export function createRealtime({ db, config }) {
 
   // Access settings changed for a company (sign-off stages, accounts, status):
   // its portal sockets and staff refetch; revoked sessions are dropped first.
-  function notifyCompany(companyId) {
-    sweep()
+  async function notifyCompany(companyId) {
+    await sweep()
     if (!nsp) return
-    for (const { socket } of members(`company:${companyId}`)) socket.emit('access:changed', {})
-    for (const { socket } of members('staff')) socket.emit('access:changed', {})
+    for (const { socket } of await members(`company:${companyId}`)) socket.emit('access:changed', {})
+    for (const { socket } of await members('staff')) socket.emit('access:changed', {})
   }
 
   // Express middleware (inside the Mashoor router): after a successful write,
-  // once the response has been sent — node:sqlite commits synchronously before
-  // the handler answers — tell the affected sockets.
+  // once the response has been sent — every handler commits its transaction
+  // before it answers — tell the affected sockets.
   function changeHook() {
-    return (req, res, next) => {
+    return async (req, res, next) => {
       if (SAFE_METHODS.has(req.method) || !nsp) return next()
       const path = req.path
       if (path.endsWith('/realtime/ticket') || path.endsWith('/auth/login')) return next()
       const match = INSPECTION_PATH.exec(path)
-      const before = match?.[2] ? getInspection(db, Number(match[2])) : null
+      let before = null
+      try {
+        before = match?.[2] ? await getInspection(db, Number(match[2])) : null
+      } catch (error) {
+        console.error('[mashoor-realtime] read before change failed:', error.message)
+      }
       let body
       const json = res.json.bind(res)
       res.json = (value) => {
         body = value
         return json(value)
       }
-      res.on('finish', () => {
+      res.on('finish', async () => {
         if (res.statusCode < 200 || res.statusCode >= 300) return
         try {
           if (match) {
             const id = match[2] ? Number(match[2]) : body?.inspection?.id
-            const after = id && getInspection(db, id)
+            const after = id && (await getInspection(db, id))
             if (!after) return
             let action = match[1] === 'admin' ? (match[2] ? 'updated' : 'created') : (PORTAL_ACTIONS[match[3]] ?? 'updated')
             if (action === 'signed' && after.status === 'approved' && before?.status !== 'approved') action = 'approved'
             const actor = req.staff ? { type: 'staff', id: req.staff.id } : req.vendor ? { type: 'vendor', id: req.vendor.id } : null
-            notifyInspection({ before, after, action, actor })
+            await notifyInspection({ before, after, action, actor })
             return
           }
           const company = COMPANY_PATH.exec(path)
@@ -159,10 +166,10 @@ export function createRealtime({ db, config }) {
           const companyId = company
             ? Number(company[1])
             : vendorUser
-              ? db.prepare('SELECT company_id FROM vendor_users WHERE id = ?').get(Number(vendorUser[1]))?.company_id
+              ? (await db.prepare('SELECT company_id FROM mashoor_vendor_users WHERE id = ?').get(Number(vendorUser[1])))?.company_id
               : null
-          if (companyId) notifyCompany(companyId)
-          else sweep() // logout, password change, …: drop sockets whose session ended
+          if (companyId) await notifyCompany(companyId)
+          else await sweep() // logout, password change, …: drop sockets whose session ended
         } catch (error) {
           console.error('[mashoor-realtime] notify failed:', error.message)
         }
@@ -178,14 +185,19 @@ export function createRealtime({ db, config }) {
     if (nsp) throw new Error('Mashoor realtime is already attached.')
     const allowed = new Set(config.allowedOrigins)
     nsp = io.of(MASHOOR_SOCKET_NAMESPACE)
-    nsp.use((socket, next) => {
+    nsp.use(async (socket, next) => {
       // Same rule as originCheck: an Origin, when sent, must be a Mashoor
       // frontend. (A same-origin polling handshake may carry no Origin; the
       // ticket can only be obtained by an origin-checked, cookie-authenticated POST.)
       const origin = socket.handshake.headers.origin
       if (origin && !allowed.has(origin)) return next(new Error('Origin not allowed.'))
       const entry = redeemTicket(socket.handshake.auth?.ticket)
-      const who = entry && identify(entry.userType, entry.token)
+      let who = null
+      try {
+        who = entry && (await identify(entry.userType, entry.token))
+      } catch (error) {
+        console.error('[mashoor-realtime] handshake check failed:', error.message)
+      }
       if (!who) return next(new Error('Not signed in.'))
       socket.data.mashoor = {
         userType: entry.userType,
@@ -199,12 +211,8 @@ export function createRealtime({ db, config }) {
       socket.emit('ready', {})
     })
     sweepTimer = setInterval(() => {
-      try {
-        pruneTickets()
-        sweep()
-      } catch (error) {
-        console.error('[mashoor-realtime] sweep failed:', error.message)
-      }
+      pruneTickets()
+      sweep().catch((error) => console.error('[mashoor-realtime] sweep failed:', error.message))
     }, SWEEP_MS)
     sweepTimer.unref()
     return { namespace: MASHOOR_SOCKET_NAMESPACE, path: io.path() }

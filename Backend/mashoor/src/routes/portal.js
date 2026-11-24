@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { paginationMeta, parsePagination } from '../../../modules/pagination.module.js'
-import { audit, transaction } from '../db.js'
+import { audit, isDuplicate, transaction } from '../db.js'
 import { requireRole, requireVendor } from '../auth/middleware.js'
 import { hashPassword, MAX_PASSWORD_LENGTH, passwordProblem, verifyPassword } from '../auth/passwords.js'
 import {
@@ -40,10 +40,10 @@ const INVALID_LOGIN = 'Invalid username or password.'
 
 // role: 'client' (Vendor / Client) or 'inspector' — decides the portal layout.
 // signatoryStages: inspection sign-off stages assigned to this account.
-const toMe = (db, vendor) => ({
+const toMe = async (db, vendor) => ({
   user: { id: vendor.id, username: vendor.username, name: vendor.name, role: vendor.role },
   company: { id: vendor.companyId, name: vendor.companyName },
-  signatoryStages: stagesAssignedTo(db, vendor.companyId, vendor.id),
+  signatoryStages: await stagesAssignedTo(db, vendor.companyId, vendor.id),
 })
 
 // What a vendor may see of a listing: read-only, no internal fields.
@@ -59,6 +59,12 @@ const toListing = (row) => ({
   publishedAt: row.published_at,
   updatedAt: row.updated_at,
 })
+
+const mapAsync = async (rows, fn) => {
+  const out = []
+  for (const row of rows) out.push(await fn(row))
+  return out
+}
 
 // Every catalog route is read-only and goes through ../catalogAccess.js using
 // req.vendor.companyId from the session. Ids from the client are only ever
@@ -76,10 +82,10 @@ export function portalRouter({ db, config, limiter, images, diagrams }) {
     const key = `vendor:${req.ip}:${username}`
     if (limiter.isBlocked(key)) return res.status(429).json({ error: 'Too many attempts. Try again later.' })
 
-    const user = db
+    const user = await db
       .prepare(
         `SELECT vu.*, c.name AS company_name, c.status AS company_status
-           FROM vendor_users vu JOIN vendor_companies c ON c.id = vu.company_id
+           FROM mashoor_vendor_users vu JOIN mashoor_vendor_companies c ON c.id = vu.company_id
           WHERE vu.username = ?`,
       )
       .get(username)
@@ -90,11 +96,11 @@ export function portalRouter({ db, config, limiter, images, diagrams }) {
       return res.status(401).json({ error: INVALID_LOGIN })
     }
     limiter.reset(key)
-    db.prepare('UPDATE vendor_users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?').run(user.id)
-    setSessionCookie(res, VENDOR_COOKIE, createSession(db, 'vendor', user.id, config.sessionTtlMs), config)
-    audit(db, { actorType: 'vendor', actorId: user.id, action: 'vendor.login' })
+    await db.prepare('UPDATE mashoor_vendor_users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?').run(user.id)
+    setSessionCookie(res, VENDOR_COOKIE, await createSession(db, 'vendor', user.id, config.sessionTtlMs), config)
+    await audit(db, { actorType: 'vendor', actorId: user.id, action: 'vendor.login' })
     res.json(
-      toMe(db, {
+      await toMe(db, {
         id: user.id,
         username: user.username,
         name: user.name,
@@ -105,8 +111,8 @@ export function portalRouter({ db, config, limiter, images, diagrams }) {
     )
   })
 
-  router.post('/auth/logout', (req, res) => {
-    deleteSession(db, readCookie(req, VENDOR_COOKIE.name))
+  router.post('/auth/logout', async (req, res) => {
+    await deleteSession(db, readCookie(req, VENDOR_COOKIE.name))
     clearSessionCookie(res, VENDOR_COOKIE, config)
     res.status(204).end()
   })
@@ -115,14 +121,14 @@ export function portalRouter({ db, config, limiter, images, diagrams }) {
 
   router.use(requireVendor(db))
 
-  router.get('/auth/me', (req, res) => res.json(toMe(db, req.vendor)))
+  router.get('/auth/me', async (req, res) => res.json(await toMe(db, req.vendor)))
 
   router.post('/auth/change-password', async (req, res) => {
     const { currentPassword, newPassword } = req.body ?? {}
     // Same brute-force guard as sign-in, so a stolen session can't be used to guess the password.
     const key = `vendor-change:${req.vendor.id}`
     if (limiter.isBlocked(key)) return res.status(429).json({ error: 'Too many attempts. Try again later.' })
-    const row = db.prepare('SELECT password_hash FROM vendor_users WHERE id = ?').get(req.vendor.id)
+    const row = await db.prepare('SELECT password_hash FROM mashoor_vendor_users WHERE id = ?').get(req.vendor.id)
     const tooLong = typeof currentPassword === 'string' && currentPassword.length > MAX_PASSWORD_LENGTH
     if (tooLong || !(await verifyPassword(currentPassword, row.password_hash))) {
       limiter.recordFailure(key)
@@ -132,13 +138,13 @@ export function portalRouter({ db, config, limiter, images, diagrams }) {
     const problem = passwordProblem(newPassword)
     if (problem) return badRequest(res, problem)
     if (newPassword === currentPassword) return badRequest(res, 'Choose a password different from the current one.')
-    db.prepare('UPDATE vendor_users SET password_hash = ? WHERE id = ?').run(await hashPassword(newPassword), req.vendor.id)
+    await db.prepare('UPDATE mashoor_vendor_users SET password_hash = ? WHERE id = ?').run(await hashPassword(newPassword), req.vendor.id)
     // Every existing session of the account ends (other devices are signed out)
     // and this browser gets a brand-new session token, so no token issued under
     // the old password survives the change.
-    deleteUserSessions(db, 'vendor', req.vendor.id)
-    setSessionCookie(res, VENDOR_COOKIE, createSession(db, 'vendor', req.vendor.id, config.sessionTtlMs), config)
-    audit(db, { actorType: 'vendor', actorId: req.vendor.id, action: 'vendor.change_password' })
+    await deleteUserSessions(db, 'vendor', req.vendor.id)
+    setSessionCookie(res, VENDOR_COOKIE, await createSession(db, 'vendor', req.vendor.id, config.sessionTtlMs), config)
+    await audit(db, { actorType: 'vendor', actorId: req.vendor.id, action: 'vendor.change_password' })
     res.status(204).end()
   })
 
@@ -175,16 +181,22 @@ export function portalRouter({ db, config, limiter, images, diagrams }) {
       this.extra = extra
     }
   }
-  function run(res, fn) {
+
+  // One workflow step in one transaction. The inspection is read again with
+  // FOR UPDATE inside it, and every check runs against that locked row, so a
+  // concurrent step on the same inspection waits and then sees the result
+  // (exactly what SQLite's single writer gave). fn(lockedInspection).
+  async function run(res, inspectionId, fn) {
     try {
-      transaction(db, fn)
+      await transaction(db, async () => fn(await getInspection(db, inspectionId, { forUpdate: true })))
       return true
     } catch (error) {
       if (error instanceof Refusal) {
         res.status(error.status).json({ error: error.message, ...(error.code && { code: error.code }), ...error.extra })
         return false
       }
-      if (/UNIQUE constraint failed/i.test(error.message)) {
+      // The only unique key such a step can hit: one sign-off per stage and revision.
+      if (isDuplicate(error)) {
         res.status(409).json({ error: 'This stage is already confirmed for this revision.' })
         return false
       }
@@ -202,11 +214,11 @@ export function portalRouter({ db, config, limiter, images, diagrams }) {
     return { where, params }
   }
 
-  const signedStages = (revisionId) =>
-    new Set(db.prepare('SELECT stage FROM inspection_signoffs WHERE revision_id = ?').all(revisionId).map((s) => s.stage))
+  const signedStages = async (revisionId) =>
+    new Set((await db.prepare('SELECT stage FROM mashoor_inspection_signoffs WHERE revision_id = ?').all(revisionId)).map((s) => s.stage))
 
   // null when the stage may be signed now, otherwise the reason it can't.
-  function stageOpen(stage, inspection, rev, signed) {
+  async function stageOpen(stage, inspection, rev, signed) {
     if (stage === 'acknowledgement') {
       if (!SUBMITTED.includes(inspection.status)) return 'This inspection is not submitted.'
       if (rev.acknowledgement !== 'pending') return 'Acknowledgement is not pending for this revision.'
@@ -220,7 +232,7 @@ export function portalRouter({ db, config, limiter, images, diagrams }) {
     if (!signed.has('checked_by') || !signed.has('agreed_by')) {
       return 'Checked by and Agreed by must be confirmed on this revision first.'
     }
-    const company = db.prepare('SELECT inspection_ack_blocks_approval FROM vendor_companies WHERE id = ?').get(inspection.company_id)
+    const company = await db.prepare('SELECT inspection_ack_blocks_approval FROM mashoor_vendor_companies WHERE id = ?').get(inspection.company_id)
     if (company.inspection_ack_blocks_approval === 1 && rev.acknowledgement === 'pending') {
       return 'The acknowledgement must be completed before approval.'
     }
@@ -228,28 +240,35 @@ export function portalRouter({ db, config, limiter, images, diagrams }) {
   }
 
   // Inspections waiting on a stage this account is assigned to sign.
-  function pendingSignoffs(req) {
-    const stages = stagesAssignedTo(db, req.vendor.companyId, req.vendor.id)
+  async function pendingSignoffs(req) {
+    const stages = await stagesAssignedTo(db, req.vendor.companyId, req.vendor.id)
     if (!stages.length) return []
-    const rows = db
+    const rows = await db
       .prepare(
-        `SELECT i.*, c.name AS company_name FROM inspections i JOIN vendor_companies c ON c.id = i.company_id
+        `SELECT i.*, c.name AS company_name FROM mashoor_inspections i JOIN mashoor_vendor_companies c ON c.id = i.company_id
           WHERE i.company_id = ? AND i.status IN ('pending_verification', 'pending_approval', 'approved')
           ORDER BY i.updated_at DESC`,
       )
       .all(req.vendor.companyId)
-    return rows.filter((row) => {
-      const rev = getRevision(db, row.id, row.current_revision)
-      if (!rev) return false
-      const signed = signedStages(rev.id)
-      return stages.some((stage) => !signed.has(stage) && stageOpen(stage, row, rev, signed) === null)
-    })
+    const waiting = []
+    for (const row of rows) {
+      const rev = await getRevision(db, row.id, row.current_revision)
+      if (!rev) continue
+      const signed = await signedStages(rev.id)
+      for (const stage of stages) {
+        if (!signed.has(stage) && (await stageOpen(stage, row, rev, signed)) === null) {
+          waiting.push(row)
+          break
+        }
+      }
+    }
+    return waiting
   }
 
-  function loadForPortal(req, res) {
+  async function loadForPortal(req, res) {
     const id = parseId(req.params.id)
-    const inspection = id && getInspection(db, id)
-    if (!inspection || !portalCanView(db, inspection, req.vendor)) {
+    const inspection = id && (await getInspection(db, id))
+    if (!inspection || !(await portalCanView(db, inspection, req.vendor))) {
       notFound(res)
       return null
     }
@@ -269,8 +288,8 @@ export function portalRouter({ db, config, limiter, images, diagrams }) {
   // definition and stores them as the working copy. A 0005 inspection gets
   // its (converted) definition stored alongside on first save; its old item
   // rows are left as they were.
-  function saveAnswers(inspection, input) {
-    const { definition, answers: current } = formOf(db, inspection)
+  async function saveAnswers(inspection, input) {
+    const { definition, answers: current } = await formOf(db, inspection)
     let answers = current
     if (input !== undefined) {
       try {
@@ -280,11 +299,9 @@ export function portalRouter({ db, config, limiter, images, diagrams }) {
         throw error
       }
     }
-    db.prepare('UPDATE inspections SET form_definition = ?, form_answers = ? WHERE id = ?').run(
-      inspection.form_definition ?? JSON.stringify(definition),
-      JSON.stringify(answers),
-      inspection.id,
-    )
+    await db
+      .prepare('UPDATE mashoor_inspections SET form_definition = ?, form_answers = ? WHERE id = ?')
+      .run(inspection.form_definition ?? JSON.stringify(definition), JSON.stringify(answers), inspection.id)
     return { definition, answers }
   }
 
@@ -302,72 +319,74 @@ export function portalRouter({ db, config, limiter, images, diagrams }) {
     }
   }
 
-  router.get('/inspections/counts', (req, res) => {
+  const fullInspection = async (id, options) => serializeInspection(db, await getInspection(db, id), options)
+
+  router.get('/inspections/counts', async (req, res) => {
     const counts = {}
     for (const [queue, condition] of Object.entries(QUEUES[req.vendor.role] ?? {})) {
       const { where, params } = baseQuery(req)
-      counts[queue] = db.prepare(`SELECT COUNT(*) AS n FROM inspections i WHERE ${where.join(' AND ')} AND ${condition}`).get(...params).n
+      counts[queue] = (await db.prepare(`SELECT COUNT(*) AS n FROM mashoor_inspections i WHERE ${where.join(' AND ')} AND ${condition}`).get(...params)).n
     }
-    counts.signoffs = pendingSignoffs(req).length
-    res.json({ counts, signatoryStages: stagesAssignedTo(db, req.vendor.companyId, req.vendor.id) })
+    counts.signoffs = (await pendingSignoffs(req)).length
+    res.json({ counts, signatoryStages: await stagesAssignedTo(db, req.vendor.companyId, req.vendor.id) })
   })
 
-  router.get('/inspections', (req, res) => {
+  router.get('/inspections', async (req, res) => {
     const queue = String(req.query.queue ?? '')
-    if (queue === 'signoffs') return res.json({ inspections: pendingSignoffs(req).map((row) => listRow(db, row)) })
+    if (queue === 'signoffs') return res.json({ inspections: await mapAsync(await pendingSignoffs(req), (row) => listRow(db, row)) })
     const condition = QUEUES[req.vendor.role]?.[queue]
     if (!condition) return badRequest(res, 'Unknown inspection list.')
     const { where, params } = baseQuery(req)
-    const rows = db
+    const rows = await db
       .prepare(
-        `SELECT i.*, c.name AS company_name FROM inspections i JOIN vendor_companies c ON c.id = i.company_id
+        `SELECT i.*, c.name AS company_name FROM mashoor_inspections i JOIN mashoor_vendor_companies c ON c.id = i.company_id
           WHERE ${where.join(' AND ')} AND ${condition} ORDER BY i.updated_at DESC, i.id DESC`,
       )
       .all(...params)
-    res.json({ inspections: rows.map((row) => listRow(db, row)) })
+    res.json({ inspections: await mapAsync(rows, (row) => listRow(db, row)) })
   })
 
-  router.get('/inspections/:id', (req, res) => {
-    const inspection = loadForPortal(req, res)
+  router.get('/inspections/:id', async (req, res) => {
+    const inspection = await loadForPortal(req, res)
     if (!inspection) return
     const isAssignedInspector = req.vendor.role === 'inspector' && inspection.inspector_id === req.vendor.id
-    const rev = getRevision(db, inspection.id, inspection.current_revision)
-    const myStages = stagesAssignedTo(db, inspection.company_id, req.vendor.id)
-    const signed = rev ? signedStages(rev.id) : new Set()
+    const rev = await getRevision(db, inspection.id, inspection.current_revision)
+    const myStages = await stagesAssignedTo(db, inspection.company_id, req.vendor.id)
+    const signed = rev ? await signedStages(rev.id) : new Set()
     res.json({
-      inspection: serializeInspection(db, inspection, { includeWorking: isAssignedInspector }),
+      inspection: await serializeInspection(db, inspection, { includeWorking: isAssignedInspector }),
       viewer: {
         accountId: req.vendor.id,
         isAssignedInspector,
         canEdit: isAssignedInspector && EDITABLE.includes(inspection.status),
         canVerify: req.vendor.role === 'client' && inspection.status === 'pending_verification',
         // For each stage assigned to this account: can it be confirmed now, and if not, why not.
-        stages: myStages.map((stage) => ({
+        stages: await mapAsync(myStages, async (stage) => ({
           stage,
           signed: signed.has(stage),
-          blockedReason: !rev ? 'Not submitted yet.' : signed.has(stage) ? null : stageOpen(stage, inspection, rev, signed),
+          blockedReason: !rev ? 'Not submitted yet.' : signed.has(stage) ? null : await stageOpen(stage, inspection, rev, signed),
         })),
       },
     })
   })
 
   // An earlier (or the current) submitted revision with its frozen form.
-  router.get('/inspections/:id/revisions/:revision', (req, res) => {
-    const inspection = loadForPortal(req, res)
+  router.get('/inspections/:id/revisions/:revision', async (req, res) => {
+    const inspection = await loadForPortal(req, res)
     if (!inspection) return
     const number = parseId(req.params.revision)
-    const revision = number && serializeRevision(db, inspection, number)
+    const revision = number && (await serializeRevision(db, inspection, number))
     if (!revision) return notFound(res)
     res.json({ revision })
   })
 
   // Damage diagram image — only one this inspection (or one of its revisions) uses.
-  router.get('/inspections/:id/diagrams/:diagramId', (req, res) => {
-    const inspection = loadForPortal(req, res)
+  router.get('/inspections/:id/diagrams/:diagramId', async (req, res) => {
+    const inspection = await loadForPortal(req, res)
     if (!inspection) return
     const diagramId = parseId(req.params.diagramId)
-    if (!diagramId || !diagramIdsOf(db, inspection).has(diagramId)) return notFound(res)
-    const row = getDiagram(db, diagramId)
+    if (!diagramId || !(await diagramIdsOf(db, inspection)).has(diagramId)) return notFound(res)
+    const row = await getDiagram(db, diagramId)
     if (!row) return notFound(res)
     res.set('Cache-Control', 'private, max-age=3600')
     sendDiagram(res, diagrams, row)
@@ -375,145 +394,138 @@ export function portalRouter({ db, config, limiter, images, diagrams }) {
 
   // Draft save: the whole answers object (vehicle details, items, remarks,
   // next servicing, damage). Nothing is required yet.
-  router.put('/inspections/:id/form', (req, res) => {
-    const inspection = loadForPortal(req, res)
-    if (!inspection) return
-    const ok = run(res, () => {
+  router.put('/inspections/:id/form', async (req, res) => {
+    const found = await loadForPortal(req, res)
+    if (!found) return
+    const ok = await run(res, found.id, async (inspection) => {
       requireAssignedInspector(req, inspection)
       if (req.body?.answers === undefined) throw new Refusal(400, 'answers are required.')
-      saveAnswers(inspection, req.body.answers)
+      await saveAnswers(inspection, req.body.answers)
       const next = inspection.status === 'assigned' ? 'draft' : inspection.status
-      db.prepare('UPDATE inspections SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(next, inspection.id)
-      if (inspection.status === 'assigned') recordEvent(db, { inspectionId: inspection.id, ...vendorActor(req), action: 'started' })
+      await db.prepare('UPDATE mashoor_inspections SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(next, inspection.id)
+      if (inspection.status === 'assigned') await recordEvent(db, { inspectionId: inspection.id, ...vendorActor(req), action: 'started' })
     })
-    if (ok) res.json({ inspection: serializeInspection(db, getInspection(db, inspection.id), { includeWorking: true }) })
+    if (ok) res.json({ inspection: await fullInspection(found.id, { includeWorking: true }) })
   })
 
-  router.post('/inspections/:id/submit', (req, res) => {
-    const inspection = loadForPortal(req, res)
-    if (!inspection) return
-    const ok = run(res, () => {
+  router.post('/inspections/:id/submit', async (req, res) => {
+    const found = await loadForPortal(req, res)
+    if (!found) return
+    const ok = await run(res, found.id, async (inspection) => {
       requireAssignedInspector(req, inspection)
-      const { definition, answers } = saveAnswers(inspection, req.body?.answers)
+      const { definition, answers } = await saveAnswers(inspection, req.body?.answers)
       if (itemCount(definition) === 0) throw new Refusal(400, 'This checklist has no items.')
       const problems = submitProblems(definition, answers)
       if (problems.length) {
         throw new Refusal(400, `Complete the checklist before submitting (${problems.length} missing).`, 'INCOMPLETE', { problems })
       }
-      const fresh = getInspection(db, inspection.id)
+      const fresh = await getInspection(db, inspection.id)
       const revision = fresh.current_revision + 1
       const hasRemarks = revisionHasRemarks(answers)
-      db.prepare(
-        `INSERT INTO inspection_revisions (inspection_id, revision, snapshot, has_remarks, acknowledgement, submitted_by)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      ).run(
-        inspection.id,
-        revision,
-        JSON.stringify(snapshotOf(fresh, definition, answers)),
-        hasRemarks ? 1 : 0,
-        hasRemarks ? 'pending' : 'auto',
-        req.vendor.id,
-      )
-      db.prepare(
-        `UPDATE inspections SET status = 'pending_verification', current_revision = ?, recheck_reason = NULL,
-                updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-      ).run(revision, inspection.id)
+      await db
+        .prepare(
+          `INSERT INTO mashoor_inspection_revisions (inspection_id, revision, snapshot, has_remarks, acknowledgement, submitted_by)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run(inspection.id, revision, JSON.stringify(snapshotOf(fresh, definition, answers)), hasRemarks ? 1 : 0, hasRemarks ? 'pending' : 'auto', req.vendor.id)
+      await db
+        .prepare(
+          `UPDATE mashoor_inspections SET status = 'pending_verification', current_revision = ?, recheck_reason = NULL,
+                  updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        )
+        .run(revision, inspection.id)
       const action = revision === 1 ? 'submitted' : 'resubmitted'
-      recordEvent(db, { inspectionId: inspection.id, revision, ...vendorActor(req), action })
-      auditVendor(req, `inspection.${action}`, inspection.id, { revision })
+      await recordEvent(db, { inspectionId: inspection.id, revision, ...vendorActor(req), action })
+      await auditVendor(req, `inspection.${action}`, inspection.id, { revision })
       if (!hasRemarks) {
         // A system action — not attributed to the acknowledger.
-        recordEvent(db, { inspectionId: inspection.id, revision, actorType: 'system', action: 'acknowledgement.auto', detail: 'Auto-acknowledged — no remarks.' })
-        audit(db, { actorType: 'system', action: 'inspection.acknowledgement_auto', targetType: 'inspection', targetId: inspection.id, metadata: { revision } })
+        await recordEvent(db, { inspectionId: inspection.id, revision, actorType: 'system', action: 'acknowledgement.auto', detail: 'Auto-acknowledged — no remarks.' })
+        await audit(db, { actorType: 'system', action: 'inspection.acknowledgement_auto', targetType: 'inspection', targetId: inspection.id, metadata: { revision } })
       }
     })
-    if (ok) res.json({ inspection: serializeInspection(db, getInspection(db, inspection.id), { includeWorking: true }) })
+    if (ok) res.json({ inspection: await fullInspection(found.id, { includeWorking: true }) })
   })
 
-  router.post('/inspections/:id/recheck', (req, res) => {
-    const inspection = loadForPortal(req, res)
-    if (!inspection) return
+  router.post('/inspections/:id/recheck', async (req, res) => {
+    const found = await loadForPortal(req, res)
+    if (!found) return
     const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : ''
-    const ok = run(res, () => {
+    const ok = await run(res, found.id, async (inspection) => {
       requireClientDecision(req, inspection)
-      requireCurrentRevision(req, inspection)
+      await requireCurrentRevision(req, inspection)
       if (reason.length < 5) throw new Refusal(400, 'Explain what is missing or incorrect so the inspector can re-check it.')
       if (reason.length > MAX_TEXT) throw new Refusal(400, `The explanation is too long (max ${MAX_TEXT} characters).`)
-      db.prepare(`UPDATE inspections SET status = 'returned', recheck_reason = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(
-        reason,
-        inspection.id,
-      )
-      recordEvent(db, { inspectionId: inspection.id, revision: inspection.current_revision, ...vendorActor(req), action: 'recheck_requested', detail: reason })
-      auditVendor(req, 'inspection.recheck_requested', inspection.id, { revision: inspection.current_revision })
+      await db
+        .prepare(`UPDATE mashoor_inspections SET status = 'returned', recheck_reason = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+        .run(reason, inspection.id)
+      await recordEvent(db, { inspectionId: inspection.id, revision: inspection.current_revision, ...vendorActor(req), action: 'recheck_requested', detail: reason })
+      await auditVendor(req, 'inspection.recheck_requested', inspection.id, { revision: inspection.current_revision })
     })
-    if (ok) res.json({ inspection: serializeInspection(db, getInspection(db, inspection.id)) })
+    if (ok) res.json({ inspection: await fullInspection(found.id) })
   })
 
-  router.post('/inspections/:id/verify', (req, res) => {
-    const inspection = loadForPortal(req, res)
-    if (!inspection) return
-    const ok = run(res, () => {
+  router.post('/inspections/:id/verify', async (req, res) => {
+    const found = await loadForPortal(req, res)
+    if (!found) return
+    const ok = await run(res, found.id, async (inspection) => {
       requireClientDecision(req, inspection)
-      const rev = requireCurrentRevision(req, inspection)
-      db.prepare(`UPDATE inspections SET status = 'pending_approval', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(inspection.id)
-      db.prepare('UPDATE inspection_revisions SET verified_by = ?, verified_at = CURRENT_TIMESTAMP WHERE id = ?').run(req.vendor.id, rev.id)
-      recordEvent(db, { inspectionId: inspection.id, revision: rev.revision, ...vendorActor(req), action: 'submitted_for_approval' })
-      auditVendor(req, 'inspection.verified', inspection.id, { revision: rev.revision })
+      const rev = await requireCurrentRevision(req, inspection)
+      await db.prepare(`UPDATE mashoor_inspections SET status = 'pending_approval', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(inspection.id)
+      await db.prepare('UPDATE mashoor_inspection_revisions SET verified_by = ?, verified_at = CURRENT_TIMESTAMP WHERE id = ?').run(req.vendor.id, rev.id)
+      await recordEvent(db, { inspectionId: inspection.id, revision: rev.revision, ...vendorActor(req), action: 'submitted_for_approval' })
+      await auditVendor(req, 'inspection.verified', inspection.id, { revision: rev.revision })
     })
-    if (ok) res.json({ inspection: serializeInspection(db, getInspection(db, inspection.id)) })
+    if (ok) res.json({ inspection: await fullInspection(found.id) })
   })
 
   // Name-confirmed sign-off by the signed-in account for its own assigned stage.
-  router.post('/inspections/:id/signoffs/:stage', (req, res) => {
-    const inspection = loadForPortal(req, res)
-    if (!inspection) return
+  router.post('/inspections/:id/signoffs/:stage', async (req, res) => {
+    const found = await loadForPortal(req, res)
+    if (!found) return
     const stage = req.params.stage
     if (!STAGES.includes(stage)) return notFound(res)
-    const ok = run(res, () => {
-      if (!stagesAssignedTo(db, inspection.company_id, req.vendor.id).includes(stage)) {
+    const ok = await run(res, found.id, async (inspection) => {
+      if (!(await stagesAssignedTo(db, inspection.company_id, req.vendor.id)).includes(stage)) {
         throw new Refusal(403, 'This stage is not assigned to your account.')
       }
-      const rev = requireCurrentRevision(req, inspection)
-      const signed = signedStages(rev.id)
+      const rev = await requireCurrentRevision(req, inspection)
+      const signed = await signedStages(rev.id)
       if (signed.has(stage)) throw new Refusal(409, 'This stage is already confirmed for this revision.')
-      const blocked = stageOpen(stage, inspection, rev, signed)
+      const blocked = await stageOpen(stage, inspection, rev, signed)
       if (blocked) throw new Refusal(409, blocked)
       const typed = normalizePersonName(req.body?.fullName)
       if (!typed || typed !== normalizePersonName(req.vendor.name)) {
         throw new Refusal(400, 'The name you entered does not match the full name on your account.')
       }
-      db.prepare('INSERT INTO inspection_signoffs (revision_id, stage, user_id, name_snapshot) VALUES (?, ?, ?, ?)').run(
-        rev.id,
-        stage,
-        req.vendor.id,
-        req.vendor.name,
-      )
-      if (stage === 'acknowledgement') db.prepare("UPDATE inspection_revisions SET acknowledgement = 'acknowledged' WHERE id = ?").run(rev.id)
+      await db
+        .prepare('INSERT INTO mashoor_inspection_signoffs (revision_id, stage, user_id, name_snapshot) VALUES (?, ?, ?, ?)')
+        .run(rev.id, stage, req.vendor.id, req.vendor.name)
+      if (stage === 'acknowledgement') await db.prepare("UPDATE mashoor_inspection_revisions SET acknowledgement = 'acknowledged' WHERE id = ?").run(rev.id)
       if (stage === 'approved_by') {
-        db.prepare("UPDATE inspections SET status = 'approved', approved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(
-          inspection.id,
-        )
+        await db
+          .prepare("UPDATE mashoor_inspections SET status = 'approved', approved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+          .run(inspection.id)
       } else {
-        db.prepare('UPDATE inspections SET updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(inspection.id)
+        await db.prepare('UPDATE mashoor_inspections SET updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(inspection.id)
       }
-      recordEvent(db, { inspectionId: inspection.id, revision: rev.revision, ...vendorActor(req), action: `signed.${stage}` })
-      auditVendor(req, `inspection.signed.${stage}`, inspection.id, { revision: rev.revision })
+      await recordEvent(db, { inspectionId: inspection.id, revision: rev.revision, ...vendorActor(req), action: `signed.${stage}` })
+      await auditVendor(req, `inspection.signed.${stage}`, inspection.id, { revision: rev.revision })
     })
-    if (ok) res.json({ inspection: serializeInspection(db, getInspection(db, inspection.id)) })
+    if (ok) res.json({ inspection: await fullInspection(found.id) })
   })
 
   // ---- Catalog (read-only) — Vendor / Client accounts only ----------------
 
   router.use(['/categories', '/listings'], requireRole('client'))
 
-  router.get('/categories', (req, res) => {
-    const rows = listVisibleCategories(db, req.vendor.companyId)
+  router.get('/categories', async (req, res) => {
+    const rows = await listVisibleCategories(db, req.vendor.companyId)
     res.json({
       categories: rows.map((r) => ({ id: r.id, name: r.name, description: r.description, listingCount: r.listing_count })),
     })
   })
 
-  router.get('/listings', (req, res) => {
+  router.get('/listings', async (req, res) => {
     const search = typeof req.query.q === 'string' ? req.query.q.slice(0, 200) : ''
     let categoryId = null
     if (req.query.categoryId !== undefined && req.query.categoryId !== '') {
@@ -522,21 +534,21 @@ export function portalRouter({ db, config, limiter, images, diagrams }) {
     }
     const { page, limit, offset } = parsePagination(req)
     const companyId = req.vendor.companyId
-    const total = countVisibleCatalogs(db, companyId, { search, categoryId })
-    const rows = listVisibleCatalogs(db, companyId, { search, categoryId, limit, offset })
+    const total = await countVisibleCatalogs(db, companyId, { search, categoryId })
+    const rows = await listVisibleCatalogs(db, companyId, { search, categoryId, limit, offset })
     res.json({ listings: rows.map(toListing), pagination: paginationMeta({ page, limit, total }) })
   })
 
-  router.get('/listings/:id', (req, res) => {
+  router.get('/listings/:id', async (req, res) => {
     const id = parseId(req.params.id)
-    const row = id && getVisibleCatalog(db, req.vendor.companyId, id)
+    const row = id && (await getVisibleCatalog(db, req.vendor.companyId, id))
     if (!row) return notFound(res)
     res.json({ listing: toListing(row) })
   })
 
-  router.get('/listings/:id/image', (req, res) => {
+  router.get('/listings/:id/image', async (req, res) => {
     const id = parseId(req.params.id)
-    const row = id && getVisibleCatalog(db, req.vendor.companyId, id)
+    const row = id && (await getVisibleCatalog(db, req.vendor.companyId, id))
     if (!row?.image_file) return notFound(res)
     sendImage(res, images, row.image_file, row.image_type)
   })

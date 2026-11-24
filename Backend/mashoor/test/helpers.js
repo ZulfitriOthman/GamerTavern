@@ -1,19 +1,64 @@
+import { randomBytes } from 'node:crypto'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import mysql from 'mysql2/promise'
 import { createApp } from '../src/app.js'
 import { loadConfig } from '../src/config.js'
 import { openDatabase } from '../src/db.js'
+import { applyMigrations } from '../src/migrations.js'
 import { hashPassword } from '../src/auth/passwords.js'
 
 export const APP_ORIGIN = 'http://localhost:5301'
 export const PORTAL_APP_ORIGIN = 'http://localhost:5302'
 
-// Boots the real Express app on a random port with a fresh in-memory database.
+// Tests run against a disposable MySQL / MariaDB server — never the Backend's
+// database. MASHOOR_TEST_MYSQL_URL (Backend/.env.test, loaded by
+// `npm run mashoor:test`) is mysql://user:password@host:port of an account
+// that may create databases named mashoor_test_*.
+export function testServerSettings() {
+  const raw = process.env.MASHOOR_TEST_MYSQL_URL
+  if (!raw) {
+    throw new Error('MASHOOR_TEST_MYSQL_URL is not set: point it at a disposable MySQL/MariaDB test server (see Backend/.env.test).')
+  }
+  const url = new URL(raw)
+  return { host: url.hostname, port: Number(url.port || 3306), user: decodeURIComponent(url.username), password: decodeURIComponent(url.password) }
+}
+
+/**
+ * A brand-new database (mashoor_test_<random>) with every migration applied.
+ * Returns { mysqlConfig, open(options), drop() }.
+ */
+export async function createTestDatabase({ migrations } = {}) {
+  const server = testServerSettings()
+  const database = `mashoor_test_${randomBytes(6).toString('hex')}`
+  const admin = await mysql.createConnection(server)
+  await admin.query(`CREATE DATABASE \`${database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`)
+  await admin.end()
+  const mysqlConfig = { ...server, database, connectionLimit: 5 }
+  const bootstrap = await openDatabase(mysqlConfig, { checkMigrations: false, importChecklists: false, log: false })
+  try {
+    await applyMigrations(bootstrap, migrations)
+  } finally {
+    await bootstrap.close()
+  }
+  return {
+    mysqlConfig,
+    open: (options = {}) => openDatabase(mysqlConfig, { log: false, ...options }),
+    async drop() {
+      const conn = await mysql.createConnection(server)
+      await conn.query(`DROP DATABASE IF EXISTS \`${database}\``)
+      await conn.end()
+    },
+  }
+}
+
+// Boots the real Express app on a random port with a fresh test database.
 export async function startTestServer({ limiter } = {}) {
-  const db = openDatabase(':memory:')
+  const testDb = await createTestDatabase()
+  const db = await testDb.open()
   const storageDir = mkdtempSync(join(tmpdir(), 'mashoor-test-'))
-  const config = { ...loadConfig({}), dbPath: ':memory:', storageDir, allowedOrigins: [APP_ORIGIN, PORTAL_APP_ORIGIN], cookieSecure: false }
+  const config = { ...loadConfig({}), mysql: testDb.mysqlConfig, storageDir, allowedOrigins: [APP_ORIGIN, PORTAL_APP_ORIGIN], cookieSecure: false }
   const app = createApp({ db, config, ...(limiter && { limiter }) })
   const server = await new Promise((resolve) => {
     const s = app.listen(0, '127.0.0.1', () => resolve(s))
@@ -22,20 +67,19 @@ export async function startTestServer({ limiter } = {}) {
     db,
     storageDir,
     baseUrl: `http://127.0.0.1:${server.address().port}`,
-    close: () =>
-      new Promise((resolve) => {
+    close: async () => {
+      await new Promise((resolve) => {
         server.closeAllConnections()
         server.close(resolve)
-      }),
+      })
+      await db.close()
+      await testDb.drop()
+    },
   }
 }
 
 export async function insertStaff(db, { email, name = 'Staff', password }) {
-  db.prepare('INSERT INTO staff_users (email, name, password_hash) VALUES (?, ?, ?)').run(
-    email,
-    name,
-    await hashPassword(password),
-  )
+  await db.prepare('INSERT INTO mashoor_staff_users (email, name, password_hash) VALUES (?, ?, ?)').run(email, name, await hashPassword(password))
 }
 
 // A minimal HTTP client with a cookie jar: one instance = one browser session.

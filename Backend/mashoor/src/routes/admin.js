@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { paginationMeta, parsePagination } from '../../../modules/pagination.module.js'
-import { audit, transaction } from '../db.js'
+import { audit, isDuplicate, transaction } from '../db.js'
 import { requireStaff } from '../auth/middleware.js'
 import { hashPassword, MAX_PASSWORD_LENGTH, passwordProblem, verifyPassword } from '../auth/passwords.js'
 import {
@@ -114,28 +114,35 @@ const toListing = (row) => ({
   updatedAt: row.updated_at,
 })
 
-const isUniqueViolation = (error) => /UNIQUE constraint failed/i.test(error?.message ?? '')
+const mapAsync = async (rows, fn) => {
+  const out = []
+  for (const row of rows) out.push(await fn(row))
+  return out
+}
+
+// Backslash is MySQL's default LIKE escape character.
+const likePattern = (term) => `%${term.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`
 
 export function adminRouter({ db, config, limiter, images, diagrams }) {
   const router = Router()
   const actor = (req) => ({ actorType: 'staff', actorId: req.staff.id })
 
-  const getCompany = (id) => db.prepare('SELECT * FROM vendor_companies WHERE id = ?').get(id)
-  const getVendorUser = (id) => db.prepare('SELECT * FROM vendor_users WHERE id = ?').get(id)
+  const getCompany = (id) => db.prepare('SELECT * FROM mashoor_vendor_companies WHERE id = ?').get(id)
+  const getVendorUser = (id) => db.prepare('SELECT * FROM mashoor_vendor_users WHERE id = ?').get(id)
   const usernameTaken = (username, exceptId = 0) =>
-    db.prepare('SELECT 1 FROM vendor_users WHERE username = ? AND id <> ?').get(username, exceptId)
-  const getCategory = (id) => db.prepare('SELECT * FROM categories WHERE id = ?').get(id)
+    db.prepare('SELECT 1 FROM mashoor_vendor_users WHERE username = ? AND id <> ?').get(username, exceptId)
+  const getCategory = (id) => db.prepare('SELECT * FROM mashoor_categories WHERE id = ?').get(id)
   const categoryKeyTaken = (key, exceptId = 0) =>
-    db.prepare('SELECT name FROM categories WHERE name_key = ? AND id <> ?').get(key, exceptId)
+    db.prepare('SELECT name FROM mashoor_categories WHERE name_key = ? AND id <> ?').get(key, exceptId)
   const companyCategories = (companyId) =>
     db
       .prepare(
-        `SELECT cg.* FROM vendor_company_categories vcc JOIN categories cg ON cg.id = vcc.category_id
-          WHERE vcc.company_id = ? ORDER BY cg.name COLLATE NOCASE`,
+        `SELECT cg.* FROM mashoor_vendor_company_categories vcc JOIN mashoor_categories cg ON cg.id = vcc.category_id
+          WHERE vcc.company_id = ? ORDER BY cg.name`,
       )
       .all(companyId)
   const LISTING_SELECT = `SELECT cat.*, cg.name AS category_name, cg.active AS category_active
-                            FROM catalogs cat LEFT JOIN categories cg ON cg.id = cat.category_id`
+                            FROM mashoor_catalogs cat LEFT JOIN mashoor_categories cg ON cg.id = cat.category_id`
   const getListing = (id) => db.prepare(`${LISTING_SELECT} WHERE cat.id = ?`).get(id)
 
   // ---- Auth (public) ----------------------------------------------------
@@ -149,20 +156,20 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
     const key = `staff:${req.ip}:${email}`
     if (limiter.isBlocked(key)) return res.status(429).json({ error: 'Too many attempts. Try again later.' })
 
-    const staff = db.prepare('SELECT * FROM staff_users WHERE email = ?').get(email)
+    const staff = await db.prepare('SELECT * FROM mashoor_staff_users WHERE email = ?').get(email)
     const valid = await verifyPassword(password, staff?.password_hash)
     if (!staff || !valid || staff.active !== 1) {
       limiter.recordFailure(key)
       return res.status(401).json({ error: INVALID_LOGIN })
     }
     limiter.reset(key)
-    setSessionCookie(res, STAFF_COOKIE, createSession(db, 'staff', staff.id, config.sessionTtlMs), config)
-    audit(db, { actorType: 'staff', actorId: staff.id, action: 'staff.login' })
+    setSessionCookie(res, STAFF_COOKIE, await createSession(db, 'staff', staff.id, config.sessionTtlMs), config)
+    await audit(db, { actorType: 'staff', actorId: staff.id, action: 'staff.login' })
     res.json({ user: toStaff(staff) })
   })
 
-  router.post('/auth/logout', (req, res) => {
-    deleteSession(db, readCookie(req, STAFF_COOKIE.name))
+  router.post('/auth/logout', async (req, res) => {
+    await deleteSession(db, readCookie(req, STAFF_COOKIE.name))
     clearSessionCookie(res, STAFF_COOKIE, config)
     res.status(204).end()
   })
@@ -175,21 +182,21 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
 
   // ---- Dashboard ----------------------------------------------------------
 
-  router.get('/dashboard', (req, res) => {
+  router.get('/dashboard', async (req, res) => {
     const one = (sql) => db.prepare(sql).get()
-    const vendors = one(`SELECT COUNT(*) AS total, COALESCE(SUM(status = 'active'), 0) AS active FROM vendor_companies`)
+    const vendors = await one(`SELECT COUNT(*) AS total, COALESCE(SUM(status = 'active'), 0) AS active FROM mashoor_vendor_companies`)
     // An account can sign in only if it is active AND its company is active.
-    const accounts = one(
+    const accounts = await one(
       `SELECT COUNT(*) AS total, COALESCE(SUM(vu.active = 1 AND c.status = 'active'), 0) AS active
-         FROM vendor_users vu JOIN vendor_companies c ON c.id = vu.company_id`,
+         FROM mashoor_vendor_users vu JOIN mashoor_vendor_companies c ON c.id = vu.company_id`,
     )
-    const categories = one('SELECT COUNT(*) AS total, COALESCE(SUM(active = 1), 0) AS active FROM categories')
-    const listings = one(
+    const categories = await one('SELECT COUNT(*) AS total, COALESCE(SUM(active = 1), 0) AS active FROM mashoor_categories')
+    const listings = await one(
       `SELECT COUNT(*) AS total,
               COALESCE(SUM(status = 'draft'), 0) AS draft,
               COALESCE(SUM(status = 'published'), 0) AS published,
               COALESCE(SUM(status = 'archived'), 0) AS archived
-         FROM catalogs`,
+         FROM mashoor_catalogs`,
     )
     res.json({
       totals: {
@@ -203,30 +210,30 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
 
   // ---- Vendor companies -------------------------------------------------
 
-  router.get('/vendors', (req, res) => {
-    const rows = db
+  router.get('/vendors', async (req, res) => {
+    const rows = await db
       .prepare(
         `SELECT c.*,
-                (SELECT COUNT(*) FROM vendor_users u WHERE u.company_id = c.id) AS user_count,
-                (SELECT COUNT(*) FROM vendor_users u WHERE u.company_id = c.id AND u.active = 1) AS active_user_count,
-                (SELECT COUNT(*) FROM vendor_company_categories v WHERE v.company_id = c.id) AS category_count
-           FROM vendor_companies c
-          ORDER BY c.name COLLATE NOCASE`,
+                (SELECT COUNT(*) FROM mashoor_vendor_users u WHERE u.company_id = c.id) AS user_count,
+                (SELECT COUNT(*) FROM mashoor_vendor_users u WHERE u.company_id = c.id AND u.active = 1) AS active_user_count,
+                (SELECT COUNT(*) FROM mashoor_vendor_company_categories v WHERE v.company_id = c.id) AS category_count
+           FROM mashoor_vendor_companies c
+          ORDER BY c.name`,
       )
       .all()
     // Login accounts per company (never any password data), for list actions.
     const accounts = {}
-    for (const row of db.prepare('SELECT * FROM vendor_users ORDER BY company_id, id').all()) {
+    for (const row of await db.prepare('SELECT * FROM mashoor_vendor_users ORDER BY company_id, id').all()) {
       ;(accounts[row.company_id] ??= []).push(toVendorUser(row))
     }
     res.json({ vendors: rows.map((row) => ({ ...toCompany(row), accounts: accounts[row.id] ?? [] })) })
   })
 
   // Reads { username, password, confirmPassword? } chosen by staff.
-  function readCredentials(body, { exceptId = 0 } = {}) {
+  async function readCredentials(body, { exceptId = 0 } = {}) {
     const username = normalizeUsername(body?.username)
     if (!username) return { error: USERNAME_RULE, status: 400 }
-    if (usernameTaken(username, exceptId)) return { error: USERNAME_TAKEN, status: 409 }
+    if (await usernameTaken(username, exceptId)) return { error: USERNAME_TAKEN, status: 409 }
     const password = readNewPassword(body)
     if (password.error) return password
     return { username, password: password.value }
@@ -256,7 +263,7 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
     if (body.account != null) {
       const accountName = cleanText(body.account.name, 200)
       if (!accountName) return badRequest(res, 'Contact name is required.')
-      const credentials = readCredentials(body.account)
+      const credentials = await readCredentials(body.account)
       if (credentials.error) return res.status(credentials.status).json({ error: credentials.error })
       const role = body.account.role ?? 'client'
       if (!ROLES.includes(role)) return badRequest(res, ROLE_RULE)
@@ -265,17 +272,16 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
 
     let ids
     try {
-      ids = transaction(db, () => {
+      ids = await transaction(db, async () => {
         const companyId = Number(
-          db
-            .prepare('INSERT INTO vendor_companies (name, registration_no, status) VALUES (?, ?, ?)')
-            .run(name, registrationNo, status).lastInsertRowid,
+          (await db.prepare('INSERT INTO mashoor_vendor_companies (name, registration_no, status) VALUES (?, ?, ?)').run(name, registrationNo, status))
+            .lastInsertRowid,
         )
-        audit(db, { ...actor(req), action: 'vendor.create', targetType: 'vendor_company', targetId: companyId, metadata: { name, status } })
+        await audit(db, { ...actor(req), action: 'vendor.create', targetType: 'vendor_company', targetId: companyId, metadata: { name, status } })
         let userId = null
         if (account) {
-          userId = insertVendorUser(companyId, account)
-          audit(db, {
+          userId = await insertVendorUser(companyId, account)
+          await audit(db, {
             ...actor(req),
             action: 'vendor_user.create',
             targetType: 'vendor_user',
@@ -286,28 +292,26 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
         return { companyId, userId }
       })
     } catch (error) {
-      if (isUniqueViolation(error)) return res.status(409).json({ error: USERNAME_TAKEN })
+      if (isDuplicate(error)) return res.status(409).json({ error: USERNAME_TAKEN })
       throw error
     }
     res.status(201).json({
-      vendor: toCompany(getCompany(ids.companyId)),
-      ...(account && { user: toVendorUser(getVendorUser(ids.userId)) }),
+      vendor: toCompany(await getCompany(ids.companyId)),
+      ...(account && { user: toVendorUser(await getVendorUser(ids.userId)) }),
     })
   })
 
-  router.get('/vendors/:id', (req, res) => {
+  router.get('/vendors/:id', async (req, res) => {
     const id = parseId(req.params.id)
-    const company = id && getCompany(id)
+    const company = id && (await getCompany(id))
     if (!company) return notFound(res)
-    const users = db
-      .prepare('SELECT * FROM vendor_users WHERE company_id = ? ORDER BY name COLLATE NOCASE')
-      .all(id)
-    res.json({ vendor: toCompany(company), users: users.map(toVendorUser), categories: companyCategories(id).map(toCategory) })
+    const users = await db.prepare('SELECT * FROM mashoor_vendor_users WHERE company_id = ? ORDER BY name').all(id)
+    res.json({ vendor: toCompany(company), users: users.map(toVendorUser), categories: (await companyCategories(id)).map(toCategory) })
   })
 
-  router.patch('/vendors/:id', (req, res) => {
+  router.patch('/vendors/:id', async (req, res) => {
     const id = parseId(req.params.id)
-    const company = id && getCompany(id)
+    const company = id && (await getCompany(id))
     if (!company) return notFound(res)
 
     const body = req.body ?? {}
@@ -324,39 +328,42 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
     const columns = Object.keys(updates)
     if (columns.length === 0) return badRequest(res, 'Nothing to update.')
 
-    transaction(db, () => {
-      db.prepare(
-        `UPDATE vendor_companies SET ${columns.map((c) => `${c} = ?`).join(', ')}, updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?`,
-      ).run(...columns.map((c) => updates[c]), id)
-      if (updates.status === 'suspended') deleteCompanySessions(db, id)
-      audit(db, { ...actor(req), action: 'vendor.update', targetType: 'vendor_company', targetId: id, metadata: updates })
+    await transaction(db, async () => {
+      await db
+        .prepare(
+          `UPDATE mashoor_vendor_companies SET ${columns.map((c) => `${c} = ?`).join(', ')}, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?`,
+        )
+        .run(...columns.map((c) => updates[c]), id)
+      if (updates.status === 'suspended') await deleteCompanySessions(db, id)
+      await audit(db, { ...actor(req), action: 'vendor.update', targetType: 'vendor_company', targetId: id, metadata: updates })
     })
-    res.json({ vendor: toCompany(getCompany(id)) })
+    res.json({ vendor: toCompany(await getCompany(id)) })
   })
 
   // Replaces the company's full category set. Takes effect on the vendor's
   // next request (access is evaluated per request, nothing is cached).
-  router.put('/vendors/:id/categories', (req, res) => {
+  router.put('/vendors/:id/categories', async (req, res) => {
     const id = parseId(req.params.id)
-    if (!id || !getCompany(id)) return notFound(res)
+    if (!id || !(await getCompany(id))) return notFound(res)
     const raw = req.body?.categoryIds
     if (!Array.isArray(raw) || raw.length > 500) return badRequest(res, 'categoryIds must be a list of category ids.')
     const wanted = [...new Set(raw.map(parseIdValue))]
     if (wanted.some((v) => v === null)) return badRequest(res, 'categoryIds must be a list of category ids.')
-    const unknown = wanted.filter((cid) => !getCategory(cid))
+    const unknown = []
+    for (const cid of wanted) if (!(await getCategory(cid))) unknown.push(cid)
     if (unknown.length) return badRequest(res, `Unknown category id(s): ${unknown.join(', ')}.`)
 
-    const before = companyCategories(id).map((c) => c.id)
+    const before = (await companyCategories(id)).map((c) => c.id)
     const added = wanted.filter((cid) => !before.includes(cid))
     const removed = before.filter((cid) => !wanted.includes(cid))
     if (added.length || removed.length) {
-      transaction(db, () => {
-        const del = db.prepare('DELETE FROM vendor_company_categories WHERE company_id = ? AND category_id = ?')
-        const ins = db.prepare('INSERT INTO vendor_company_categories (company_id, category_id, assigned_by) VALUES (?, ?, ?)')
-        for (const cid of removed) del.run(id, cid)
-        for (const cid of added) ins.run(id, cid, req.staff.id)
-        audit(db, {
+      await transaction(db, async () => {
+        const del = db.prepare('DELETE FROM mashoor_vendor_company_categories WHERE company_id = ? AND category_id = ?')
+        const ins = db.prepare('INSERT INTO mashoor_vendor_company_categories (company_id, category_id, assigned_by) VALUES (?, ?, ?)')
+        for (const cid of removed) await del.run(id, cid)
+        for (const cid of added) await ins.run(id, cid, req.staff.id)
+        await audit(db, {
           ...actor(req),
           action: 'vendor.categories',
           targetType: 'vendor_company',
@@ -365,7 +372,7 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
         })
       })
     }
-    res.json({ categories: companyCategories(id).map(toCategory) })
+    res.json({ categories: (await companyCategories(id)).map(toCategory) })
   })
 
   // ---- Vendor login accounts --------------------------------------------
@@ -373,43 +380,42 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
   // reset, reactivate) is a normal password: it stays valid until staff or the
   // vendor change it (vendors may change theirs voluntarily in the portal).
 
-  function insertVendorUser(companyId, { name, username, role = 'client', hash }) {
-    return Number(
-      db
-        .prepare(
-          `INSERT INTO vendor_users (company_id, username, name, role, password_hash)
-           VALUES (?, ?, ?, ?, ?)`,
-        )
-        .run(companyId, username, name, role, hash).lastInsertRowid,
-    )
+  async function insertVendorUser(companyId, { name, username, role = 'client', hash }) {
+    const { lastInsertRowid } = await db
+      .prepare(
+        `INSERT INTO mashoor_vendor_users (company_id, username, name, role, password_hash)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(companyId, username, name, role, hash)
+    return Number(lastInsertRowid)
   }
 
   router.post('/vendors/:id/users', async (req, res) => {
     const companyId = parseId(req.params.id)
-    if (!companyId || !getCompany(companyId)) return notFound(res)
+    if (!companyId || !(await getCompany(companyId))) return notFound(res)
     const name = cleanText(req.body?.name, 200)
     if (!name) return badRequest(res, 'Name is required.')
     const role = req.body?.role ?? 'client'
     if (!ROLES.includes(role)) return badRequest(res, ROLE_RULE)
-    const credentials = readCredentials(req.body)
+    const credentials = await readCredentials(req.body)
     if (credentials.error) return res.status(credentials.status).json({ error: credentials.error })
     const hash = await hashPassword(credentials.password)
     let id
     try {
-      id = insertVendorUser(companyId, { name, username: credentials.username, role, hash })
+      id = await insertVendorUser(companyId, { name, username: credentials.username, role, hash })
     } catch (error) {
       // e.g. a concurrent create took the username while the password was hashing
-      if (isUniqueViolation(error)) return res.status(409).json({ error: USERNAME_TAKEN })
+      if (isDuplicate(error)) return res.status(409).json({ error: USERNAME_TAKEN })
       throw error
     }
-    audit(db, {
+    await audit(db, {
       ...actor(req),
       action: 'vendor_user.create',
       targetType: 'vendor_user',
       targetId: id,
       metadata: { companyId, username: credentials.username, role },
     })
-    res.status(201).json({ user: toVendorUser(getVendorUser(id)) })
+    res.status(201).json({ user: toVendorUser(await getVendorUser(id)) })
   })
 
   // Details and deactivation. A vendor user's company is fixed at creation.
@@ -422,7 +428,7 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
   //   password       — same effect as POST .../reset-password
   router.patch('/vendor-users/:id', async (req, res) => {
     const id = parseId(req.params.id)
-    const user = id && getVendorUser(id)
+    const user = id && (await getVendorUser(id))
     if (!user) return notFound(res)
 
     const body = req.body ?? {}
@@ -438,7 +444,7 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
     if ('username' in body) {
       updates.username = normalizeUsername(body.username)
       if (!updates.username) return badRequest(res, USERNAME_RULE)
-      if (usernameTaken(updates.username, id)) return res.status(409).json({ error: USERNAME_TAKEN })
+      if (await usernameTaken(updates.username, id)) return res.status(409).json({ error: USERNAME_TAKEN })
     }
     if ('active' in body) {
       if (typeof body.active !== 'boolean') return badRequest(res, 'active must be true or false.')
@@ -459,13 +465,10 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
     }
 
     try {
-      transaction(db, () => {
-        db.prepare(`UPDATE vendor_users SET ${columns.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`).run(
-          ...columns.map((c) => updates[c]),
-          id,
-        )
-        if (updates.active === 0 || updates.password_hash) deleteUserSessions(db, 'vendor', id)
-        audit(db, {
+      await transaction(db, async () => {
+        await db.prepare(`UPDATE mashoor_vendor_users SET ${columns.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`).run(...columns.map((c) => updates[c]), id)
+        if (updates.active === 0 || updates.password_hash) await deleteUserSessions(db, 'vendor', id)
+        await audit(db, {
           ...actor(req),
           action: updates.active === 0 ? 'vendor_user.deactivate' : 'vendor_user.update',
           targetType: 'vendor_user',
@@ -476,10 +479,10 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
         })
       })
     } catch (error) {
-      if (isUniqueViolation(error)) return res.status(409).json({ error: USERNAME_TAKEN })
+      if (isDuplicate(error)) return res.status(409).json({ error: USERNAME_TAKEN })
       throw error
     }
-    res.json({ user: toVendorUser(getVendorUser(id)) })
+    res.json({ user: toVendorUser(await getVendorUser(id)) })
   })
 
   // Reactivates the SAME account (username, company and its categories unchanged)
@@ -487,35 +490,35 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
   // sessions stay invalid; the vendor can sign in with the new one right away.
   router.post('/vendor-users/:id/reactivate', async (req, res) => {
     const id = parseId(req.params.id)
-    const user = id && getVendorUser(id)
+    const user = id && (await getVendorUser(id))
     if (!user) return notFound(res)
     if (user.active === 1) return res.status(409).json({ error: 'This account is already active.' })
     const password = readNewPassword(req.body)
     if (password.error) return res.status(password.status).json({ error: password.error })
     const hash = await hashPassword(password.value)
-    transaction(db, () => {
-      db.prepare('UPDATE vendor_users SET active = 1, password_hash = ? WHERE id = ?').run(hash, id)
-      deleteUserSessions(db, 'vendor', id)
-      audit(db, { ...actor(req), action: 'vendor_user.reactivate', targetType: 'vendor_user', targetId: id })
+    await transaction(db, async () => {
+      await db.prepare('UPDATE mashoor_vendor_users SET active = 1, password_hash = ? WHERE id = ?').run(hash, id)
+      await deleteUserSessions(db, 'vendor', id)
+      await audit(db, { ...actor(req), action: 'vendor_user.reactivate', targetType: 'vendor_user', targetId: id })
     })
-    res.json({ user: toVendorUser(getVendorUser(id)) })
+    res.json({ user: toVendorUser(await getVendorUser(id)) })
   })
 
   // Forgotten password (no email, no self-service recovery): staff set a new
   // password. Ends all sessions and does NOT change whether the account is active.
   router.post('/vendor-users/:id/reset-password', async (req, res) => {
     const id = parseId(req.params.id)
-    const user = id && getVendorUser(id)
+    const user = id && (await getVendorUser(id))
     if (!user) return notFound(res)
     const password = readNewPassword(req.body)
     if (password.error) return res.status(password.status).json({ error: password.error })
     const hash = await hashPassword(password.value)
-    transaction(db, () => {
-      db.prepare('UPDATE vendor_users SET password_hash = ? WHERE id = ?').run(hash, id)
-      deleteUserSessions(db, 'vendor', id)
-      audit(db, { ...actor(req), action: 'vendor_user.reset_password', targetType: 'vendor_user', targetId: id })
+    await transaction(db, async () => {
+      await db.prepare('UPDATE mashoor_vendor_users SET password_hash = ? WHERE id = ?').run(hash, id)
+      await deleteUserSessions(db, 'vendor', id)
+      await audit(db, { ...actor(req), action: 'vendor_user.reset_password', targetType: 'vendor_user', targetId: id })
     })
-    res.json({ user: toVendorUser(getVendorUser(id)) })
+    res.json({ user: toVendorUser(await getVendorUser(id)) })
   })
 
   // ---- Inspection settings per company (signatories) ------------------------
@@ -525,13 +528,13 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
   // What the published checklist templates print under each sign-off line
   // (e.g. "MGCSB, Inspector"). Shown to staff as guidance only: authority comes
   // from the account assigned below, never from these labels.
-  function templateCaptions() {
+  async function templateCaptions() {
     const out = { checked_by: new Set(), agreed_by: new Set(), approved_by: new Set() }
-    const rows = db
+    const rows = await db
       .prepare(
-        `SELECT v.definition FROM checklist_template_versions v JOIN checklist_templates t ON t.id = v.template_id
+        `SELECT v.definition FROM mashoor_checklist_template_versions v JOIN mashoor_checklist_templates t ON t.id = v.template_id
           WHERE t.active = 1 AND v.state = 'published'
-            AND v.version = (SELECT MAX(version) FROM checklist_template_versions w WHERE w.template_id = v.template_id AND w.state = 'published')`,
+            AND v.version = (SELECT MAX(version) FROM mashoor_checklist_template_versions w WHERE w.template_id = v.template_id AND w.state = 'published')`,
       )
       .all()
     for (const row of rows) {
@@ -545,20 +548,20 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
     return Object.fromEntries(Object.entries(out).map(([k, v]) => [k, [...v]]))
   }
 
-  router.get('/vendors/:id/inspection-settings', (req, res) => {
+  router.get('/vendors/:id/inspection-settings', async (req, res) => {
     const id = parseId(req.params.id)
-    const company = id && getCompany(id)
+    const company = id && (await getCompany(id))
     if (!company) return notFound(res)
     res.json({
-      signatories: signatoriesFor(db, id),
+      signatories: await signatoriesFor(db, id),
       ackBlocksApproval: company.inspection_ack_blocks_approval === 1,
-      templateCaptions: templateCaptions(),
+      templateCaptions: await templateCaptions(),
     })
   })
 
-  router.put('/vendors/:id/inspection-settings', (req, res) => {
+  router.put('/vendors/:id/inspection-settings', async (req, res) => {
     const id = parseId(req.params.id)
-    const company = id && getCompany(id)
+    const company = id && (await getCompany(id))
     if (!company) return notFound(res)
     const body = req.body ?? {}
     const wanted = body.signatories ?? {}
@@ -572,7 +575,7 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
         continue
       }
       const userId = parseIdValue(wanted[stage])
-      const user = userId && getVendorUser(userId)
+      const user = userId && (await getVendorUser(userId))
       if (!user || user.company_id !== id) return badRequest(res, `${STAGE_LABELS[stage]}: choose an account of ${company.name}.`)
       if (user.active !== 1) return badRequest(res, `${STAGE_LABELS[stage]}: ${user.name} is deactivated.`)
       resolved[stage] = user.id
@@ -580,21 +583,22 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
     if ('ackBlocksApproval' in body && typeof body.ackBlocksApproval !== 'boolean') {
       return badRequest(res, 'ackBlocksApproval must be true or false.')
     }
-    transaction(db, () => {
+    await transaction(db, async () => {
       for (const [stage, userId] of Object.entries(resolved)) {
-        if (userId === null) db.prepare('DELETE FROM inspection_signatories WHERE company_id = ? AND stage = ?').run(id, stage)
+        if (userId === null) await db.prepare('DELETE FROM mashoor_inspection_signatories WHERE company_id = ? AND stage = ?').run(id, stage)
         else {
-          db.prepare(
-            `INSERT INTO inspection_signatories (company_id, stage, user_id, assigned_by) VALUES (?, ?, ?, ?)
-             ON CONFLICT (company_id, stage) DO UPDATE SET user_id = excluded.user_id, assigned_by = excluded.assigned_by,
-                                                         assigned_at = CURRENT_TIMESTAMP`,
-          ).run(id, stage, userId, req.staff.id)
+          await db
+            .prepare(
+              `INSERT INTO mashoor_inspection_signatories (company_id, stage, user_id, assigned_by) VALUES (?, ?, ?, ?)
+               ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), assigned_by = VALUES(assigned_by), assigned_at = CURRENT_TIMESTAMP`,
+            )
+            .run(id, stage, userId, req.staff.id)
         }
       }
       if ('ackBlocksApproval' in body) {
-        db.prepare('UPDATE vendor_companies SET inspection_ack_blocks_approval = ? WHERE id = ?').run(body.ackBlocksApproval ? 1 : 0, id)
+        await db.prepare('UPDATE mashoor_vendor_companies SET inspection_ack_blocks_approval = ? WHERE id = ?').run(body.ackBlocksApproval ? 1 : 0, id)
       }
-      audit(db, {
+      await audit(db, {
         ...actor(req),
         action: 'inspection.signatories',
         targetType: 'vendor_company',
@@ -602,7 +606,7 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
         metadata: { signatories: resolved, ...('ackBlocksApproval' in body && { ackBlocksApproval: body.ackBlocksApproval }) },
       })
     })
-    res.json({ signatories: signatoriesFor(db, id), ackBlocksApproval: getCompany(id).inspection_ack_blocks_approval === 1 })
+    res.json({ signatories: await signatoriesFor(db, id), ackBlocksApproval: (await getCompany(id)).inspection_ack_blocks_approval === 1 })
   })
 
   // ---- Checklist templates ---------------------------------------------------
@@ -611,12 +615,11 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
   // (database trigger) and new inspections use the latest published one.
   // Existing inspections keep the version they were created from.
 
-  const getTemplate = (id) => db.prepare('SELECT * FROM checklist_templates WHERE id = ?').get(id)
-  const templateVersions = (id) => db.prepare('SELECT * FROM checklist_template_versions WHERE template_id = ? ORDER BY version DESC').all(id)
+  const getTemplate = (id) => db.prepare('SELECT * FROM mashoor_checklist_templates WHERE id = ?').get(id)
+  const templateVersions = (id) => db.prepare('SELECT * FROM mashoor_checklist_template_versions WHERE template_id = ? ORDER BY version DESC').all(id)
   const currentPublished = (id) =>
-    db.prepare("SELECT * FROM checklist_template_versions WHERE template_id = ? AND state = 'published' ORDER BY version DESC LIMIT 1").get(id)
-  const draftOf = (id) => db.prepare("SELECT * FROM checklist_template_versions WHERE template_id = ? AND state = 'draft'").get(id)
-  const diagramExists = (id) => Boolean(getDiagram(db, id))
+    db.prepare("SELECT * FROM mashoor_checklist_template_versions WHERE template_id = ? AND state = 'published' ORDER BY version DESC LIMIT 1").get(id)
+  const draftOf = (id) => db.prepare("SELECT * FROM mashoor_checklist_template_versions WHERE template_id = ? AND state = 'draft'").get(id)
 
   const versionMeta = (v) =>
     v && {
@@ -631,9 +634,9 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
     }
   const versionFull = (v) => v && { ...versionMeta(v), definition: JSON.parse(v.definition) }
 
-  const toTemplate = (row) => {
-    const current = currentPublished(row.id)
-    const draft = draftOf(row.id)
+  const toTemplate = async (row) => {
+    const current = await currentPublished(row.id)
+    const draft = await draftOf(row.id)
     return {
       id: row.id,
       vehicleType: row.vehicle_type,
@@ -644,13 +647,15 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
       updatedAt: row.updated_at,
       current: versionMeta(current) ?? null,
       draft: versionMeta(draft) ?? null,
-      inspectionCount: db.prepare('SELECT COUNT(*) AS n FROM inspections WHERE template_id = ?').get(row.id).n,
+      inspectionCount: (await db.prepare('SELECT COUNT(*) AS n FROM mashoor_inspections WHERE template_id = ?').get(row.id)).n,
     }
   }
 
-  function readDefinition(input) {
+  // normalizeDefinition checks diagram ids synchronously: give it the current set.
+  async function readDefinition(input) {
+    const known = new Set((await db.prepare('SELECT id FROM mashoor_checklist_diagrams').all()).map((r) => r.id))
     try {
-      return { definition: normalizeDefinition(input, { diagramExists }) }
+      return { definition: normalizeDefinition(input, { diagramExists: (id) => known.has(id) }) }
     } catch (error) {
       if (error instanceof DefinitionError) return { error: error.message }
       throw error
@@ -669,64 +674,64 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
       damage: { enabled: false },
     })
 
-  router.get('/checklist-templates', (req, res) => {
-    const rows = db.prepare('SELECT * FROM checklist_templates ORDER BY vehicle_type, name COLLATE NOCASE').all()
-    res.json({ templates: rows.map(toTemplate), vehicleTypes: VEHICLE_TYPES })
+  router.get('/checklist-templates', async (req, res) => {
+    const rows = await db.prepare('SELECT * FROM mashoor_checklist_templates ORDER BY vehicle_type, name').all()
+    res.json({ templates: await mapAsync(rows, toTemplate), vehicleTypes: VEHICLE_TYPES })
   })
 
-  router.get('/checklist-templates/:id', (req, res) => {
+  router.get('/checklist-templates/:id', async (req, res) => {
     const id = parseId(req.params.id)
-    const row = id && getTemplate(id)
+    const row = id && (await getTemplate(id))
     if (!row) return notFound(res)
     res.json({
-      template: toTemplate(row),
-      versions: templateVersions(id).map(versionMeta),
-      current: versionFull(currentPublished(id)) ?? null,
-      draft: versionFull(draftOf(id)) ?? null,
+      template: await toTemplate(row),
+      versions: (await templateVersions(id)).map(versionMeta),
+      current: versionFull(await currentPublished(id)) ?? null,
+      draft: versionFull(await draftOf(id)) ?? null,
     })
   })
 
-  router.get('/checklist-templates/:id/versions/:versionId', (req, res) => {
+  router.get('/checklist-templates/:id/versions/:versionId', async (req, res) => {
     const id = parseId(req.params.id)
     const versionId = parseId(req.params.versionId)
-    const v = id && versionId && db.prepare('SELECT * FROM checklist_template_versions WHERE id = ? AND template_id = ?').get(versionId, id)
+    const v = id && versionId && (await db.prepare('SELECT * FROM mashoor_checklist_template_versions WHERE id = ? AND template_id = ?').get(versionId, id))
     if (!v) return notFound(res)
     res.json({ version: versionFull(v) })
   })
 
   // Creates the template with a draft version 1 (from `definition`, or blank).
-  router.post('/checklist-templates', (req, res) => {
+  router.post('/checklist-templates', async (req, res) => {
     const body = req.body ?? {}
     if (!VEHICLE_TYPES.includes(body.vehicleType)) return badRequest(res, 'Choose a vehicle type.')
     const name = cleanText(body.name, 200)
     if (!name) return badRequest(res, 'Template name is required.')
     let definition = emptyDefinition()
     if (body.definition !== undefined) {
-      const read = readDefinition(body.definition)
+      const read = await readDefinition(body.definition)
       if (read.error) return badRequest(res, read.error)
       definition = read.definition
     }
-    const id = transaction(db, () => {
+    const id = await transaction(db, async () => {
       const newId = Number(
-        db
-          .prepare('INSERT INTO checklist_templates (vehicle_type, name, status_options, active, created_by) VALUES (?, ?, ?, 1, ?)')
-          .run(body.vehicleType, name, JSON.stringify(definition.statusLegend.map((s) => s.value)), req.staff.id).lastInsertRowid,
+        (
+          await db
+            .prepare('INSERT INTO mashoor_checklist_templates (vehicle_type, name, status_options, active, created_by) VALUES (?, ?, ?, 1, ?)')
+            .run(body.vehicleType, name, JSON.stringify(definition.statusLegend.map((s) => s.value)), req.staff.id)
+        ).lastInsertRowid,
       )
-      db.prepare("INSERT INTO checklist_template_versions (template_id, version, state, definition, created_by) VALUES (?, 1, 'draft', ?, ?)").run(
-        newId,
-        JSON.stringify(definition),
-        req.staff.id,
-      )
-      audit(db, { ...actor(req), action: 'template.create', targetType: 'checklist_template', targetId: newId, metadata: { name } })
+      await db
+        .prepare("INSERT INTO mashoor_checklist_template_versions (template_id, version, state, definition, created_by) VALUES (?, 1, 'draft', ?, ?)")
+        .run(newId, JSON.stringify(definition), req.staff.id)
+      await audit(db, { ...actor(req), action: 'template.create', targetType: 'checklist_template', targetId: newId, metadata: { name } })
       return newId
     })
-    res.status(201).json({ template: toTemplate(getTemplate(id)), draft: versionFull(draftOf(id)) })
+    res.status(201).json({ template: await toTemplate(await getTemplate(id)), draft: versionFull(await draftOf(id)) })
   })
 
   // Name / vehicle type / active. Affects inspections created afterwards only.
-  router.patch('/checklist-templates/:id', (req, res) => {
+  router.patch('/checklist-templates/:id', async (req, res) => {
     const id = parseId(req.params.id)
-    if (!id || !getTemplate(id)) return notFound(res)
+    if (!id || !(await getTemplate(id))) return notFound(res)
     const body = req.body ?? {}
     const fields = {}
     if ('vehicleType' in body) {
@@ -743,84 +748,83 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
     }
     const columns = Object.keys(fields)
     if (!columns.length) return badRequest(res, 'Nothing to update.')
-    transaction(db, () => {
-      db.prepare(`UPDATE checklist_templates SET ${columns.map((c) => `${c} = ?`).join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(
-        ...columns.map((c) => fields[c]),
-        id,
-      )
-      audit(db, { ...actor(req), action: 'template.update', targetType: 'checklist_template', targetId: id, metadata: { fields: columns } })
+    await transaction(db, async () => {
+      await db
+        .prepare(`UPDATE mashoor_checklist_templates SET ${columns.map((c) => `${c} = ?`).join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+        .run(...columns.map((c) => fields[c]), id)
+      await audit(db, { ...actor(req), action: 'template.update', targetType: 'checklist_template', targetId: id, metadata: { fields: columns } })
     })
-    res.json({ template: toTemplate(getTemplate(id)) })
+    res.json({ template: await toTemplate(await getTemplate(id)) })
   })
 
   // Saves the draft. Without a draft, starts the next version (copy of the
   // body's definition). Published versions are never edited.
-  router.put('/checklist-templates/:id/draft', (req, res) => {
+  router.put('/checklist-templates/:id/draft', async (req, res) => {
     const id = parseId(req.params.id)
-    if (!id || !getTemplate(id)) return notFound(res)
-    const read = readDefinition(req.body?.definition)
+    if (!id || !(await getTemplate(id))) return notFound(res)
+    const read = await readDefinition(req.body?.definition)
     if (read.error) return badRequest(res, read.error)
     const json = JSON.stringify(read.definition)
-    transaction(db, () => {
-      const draft = draftOf(id)
+    await transaction(db, async () => {
+      // Lock the template row: two concurrent saves must not both start a new version.
+      await db.prepare('SELECT id FROM mashoor_checklist_templates WHERE id = ? FOR UPDATE').get(id)
+      const draft = await draftOf(id)
       if (draft) {
-        db.prepare('UPDATE checklist_template_versions SET definition = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(json, draft.id)
+        await db.prepare('UPDATE mashoor_checklist_template_versions SET definition = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(json, draft.id)
       } else {
-        const next = (db.prepare('SELECT MAX(version) AS v FROM checklist_template_versions WHERE template_id = ?').get(id).v ?? 0) + 1
-        db.prepare("INSERT INTO checklist_template_versions (template_id, version, state, definition, created_by) VALUES (?, ?, 'draft', ?, ?)").run(
-          id,
-          next,
-          json,
-          req.staff.id,
-        )
+        const next = ((await db.prepare('SELECT MAX(version) AS v FROM mashoor_checklist_template_versions WHERE template_id = ?').get(id)).v ?? 0) + 1
+        await db
+          .prepare("INSERT INTO mashoor_checklist_template_versions (template_id, version, state, definition, created_by) VALUES (?, ?, 'draft', ?, ?)")
+          .run(id, next, json, req.staff.id)
       }
-      db.prepare('UPDATE checklist_templates SET updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(id)
-      audit(db, { ...actor(req), action: 'template.draft_saved', targetType: 'checklist_template', targetId: id })
+      await db.prepare('UPDATE mashoor_checklist_templates SET updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(id)
+      await audit(db, { ...actor(req), action: 'template.draft_saved', targetType: 'checklist_template', targetId: id })
     })
-    res.json({ template: toTemplate(getTemplate(id)), draft: versionFull(draftOf(id)) })
+    res.json({ template: await toTemplate(await getTemplate(id)), draft: versionFull(await draftOf(id)) })
   })
 
-  router.delete('/checklist-templates/:id/draft', (req, res) => {
+  router.delete('/checklist-templates/:id/draft', async (req, res) => {
     const id = parseId(req.params.id)
-    if (!id || !getTemplate(id)) return notFound(res)
-    const draft = draftOf(id)
+    if (!id || !(await getTemplate(id))) return notFound(res)
+    const draft = await draftOf(id)
     if (!draft) return notFound(res)
-    if (!currentPublished(id)) return res.status(409).json({ error: 'This template has never been published; its first draft cannot be discarded.' })
-    transaction(db, () => {
-      db.prepare('DELETE FROM checklist_template_versions WHERE id = ?').run(draft.id)
-      audit(db, { ...actor(req), action: 'template.draft_discarded', targetType: 'checklist_template', targetId: id, metadata: { version: draft.version } })
+    if (!(await currentPublished(id))) return res.status(409).json({ error: 'This template has never been published; its first draft cannot be discarded.' })
+    await transaction(db, async () => {
+      await db.prepare('DELETE FROM mashoor_checklist_template_versions WHERE id = ?').run(draft.id)
+      await audit(db, { ...actor(req), action: 'template.draft_discarded', targetType: 'checklist_template', targetId: id, metadata: { version: draft.version } })
     })
-    res.json({ template: toTemplate(getTemplate(id)) })
+    res.json({ template: await toTemplate(await getTemplate(id)) })
   })
 
-  router.post('/checklist-templates/:id/publish', (req, res) => {
+  router.post('/checklist-templates/:id/publish', async (req, res) => {
     const id = parseId(req.params.id)
-    if (!id || !getTemplate(id)) return notFound(res)
-    const draft = draftOf(id)
+    if (!id || !(await getTemplate(id))) return notFound(res)
+    const draft = await draftOf(id)
     if (!draft) return res.status(409).json({ error: 'There is no draft to publish.' })
     const definition = JSON.parse(draft.definition)
     // Re-check against current data (e.g. a diagram must still exist).
-    const read = readDefinition(definition)
+    const read = await readDefinition(definition)
     if (read.error) return badRequest(res, read.error)
     const problems = publishProblems(read.definition)
     if (problems.length) return res.status(400).json({ error: problems[0], problems })
-    transaction(db, () => {
-      db.prepare(
-        "UPDATE checklist_template_versions SET state = 'published', published_by = ?, published_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-      ).run(req.staff.id, draft.id)
-      db.prepare('UPDATE checklist_templates SET status_options = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
-        JSON.stringify(read.definition.statusLegend.map((s) => s.value)),
-        id,
-      )
-      audit(db, { ...actor(req), action: 'template.published', targetType: 'checklist_template', targetId: id, metadata: { version: draft.version } })
+    await transaction(db, async () => {
+      await db
+        .prepare(
+          "UPDATE mashoor_checklist_template_versions SET state = 'published', published_by = ?, published_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        )
+        .run(req.staff.id, draft.id)
+      await db
+        .prepare('UPDATE mashoor_checklist_templates SET status_options = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .run(JSON.stringify(read.definition.statusLegend.map((s) => s.value)), id)
+      await audit(db, { ...actor(req), action: 'template.published', targetType: 'checklist_template', targetId: id, metadata: { version: draft.version } })
     })
-    res.json({ template: toTemplate(getTemplate(id)), current: versionFull(currentPublished(id)) })
+    res.json({ template: await toTemplate(await getTemplate(id)), current: versionFull(await currentPublished(id)) })
   })
 
   // ---- Damage diagrams -------------------------------------------------------
 
-  router.get('/checklist-diagrams', (req, res) => {
-    const rows = db.prepare('SELECT * FROM checklist_diagrams ORDER BY vehicle_type, name COLLATE NOCASE, id').all()
+  router.get('/checklist-diagrams', async (req, res) => {
+    const rows = await db.prepare('SELECT * FROM mashoor_checklist_diagrams ORDER BY vehicle_type, name, id').all()
     res.json({ diagrams: rows.map((r) => toDiagram(r)) })
   })
 
@@ -834,25 +838,27 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
     if (type === 'image/gif') return badRequest(res, 'Use a PNG, JPEG or WebP image for diagrams.')
     const file = diagrams.save(buffer, type)
     try {
-      const id = transaction(db, () => {
+      const id = await transaction(db, async () => {
         const newId = Number(
-          db
-            .prepare('INSERT INTO checklist_diagrams (name, vehicle_type, file, mime_type, source, created_by) VALUES (?, ?, ?, ?, ?, ?)')
-            .run(name, vehicleType, file, type, 'Uploaded by staff', req.staff.id).lastInsertRowid,
+          (
+            await db
+              .prepare('INSERT INTO mashoor_checklist_diagrams (name, vehicle_type, file, mime_type, source, created_by) VALUES (?, ?, ?, ?, ?, ?)')
+              .run(name, vehicleType, file, type, 'Uploaded by staff', req.staff.id)
+          ).lastInsertRowid,
         )
-        audit(db, { ...actor(req), action: 'diagram.upload', targetType: 'checklist_diagram', targetId: newId, metadata: { name } })
+        await audit(db, { ...actor(req), action: 'diagram.upload', targetType: 'checklist_diagram', targetId: newId, metadata: { name } })
         return newId
       })
-      res.status(201).json({ diagram: toDiagram(getDiagram(db, id)) })
+      res.status(201).json({ diagram: toDiagram(await getDiagram(db, id)) })
     } catch (error) {
       diagrams.remove(file)
       throw error
     }
   })
 
-  router.get('/checklist-diagrams/:id/image', (req, res) => {
+  router.get('/checklist-diagrams/:id/image', async (req, res) => {
     const id = parseId(req.params.id)
-    const row = id && getDiagram(db, id)
+    const row = id && (await getDiagram(db, id))
     if (!row) return notFound(res)
     res.set('Cache-Control', 'private, max-age=3600')
     sendDiagram(res, diagrams, row)
@@ -860,7 +866,7 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
 
   // ---- Inspections (staff create and assign; vendors work them in the portal) ----
 
-  router.get('/inspections', (req, res) => {
+  router.get('/inspections', async (req, res) => {
     const where = []
     const params = []
     if (req.query.companyId) {
@@ -876,14 +882,14 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
     }
     const clause = where.length ? `WHERE ${where.join(' AND ')}` : ''
     const { page, limit, offset } = parsePagination(req)
-    const total = db.prepare(`SELECT COUNT(*) AS n FROM inspections i ${clause}`).get(...params).n
-    const rows = db
+    const total = (await db.prepare(`SELECT COUNT(*) AS n FROM mashoor_inspections i ${clause}`).get(...params)).n
+    const rows = await db
       .prepare(
-        `SELECT i.*, c.name AS company_name FROM inspections i JOIN vendor_companies c ON c.id = i.company_id
+        `SELECT i.*, c.name AS company_name FROM mashoor_inspections i JOIN mashoor_vendor_companies c ON c.id = i.company_id
           ${clause} ORDER BY i.updated_at DESC, i.id DESC LIMIT ? OFFSET ?`,
       )
       .all(...params, limit, offset)
-    res.json({ inspections: rows.map((row) => listRow(db, row)), pagination: paginationMeta({ page, limit, total }) })
+    res.json({ inspections: await mapAsync(rows, (row) => listRow(db, row)), pagination: paginationMeta({ page, limit, total }) })
   })
 
   function readVehicle(body, { partial }) {
@@ -898,20 +904,20 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
     return fields
   }
 
-  router.post('/inspections', (req, res) => {
+  router.post('/inspections', async (req, res) => {
     const body = req.body ?? {}
     const companyId = parseIdValue(body.companyId)
-    const company = companyId && getCompany(companyId)
+    const company = companyId && (await getCompany(companyId))
     if (!company) return badRequest(res, 'Choose a vendor / company.')
     const inspectorId = parseIdValue(body.inspectorId)
-    const inspector = inspectorId && getVendorUser(inspectorId)
+    const inspector = inspectorId && (await getVendorUser(inspectorId))
     if (!inspector || inspector.company_id !== companyId || inspector.role !== 'inspector' || inspector.active !== 1) {
       return badRequest(res, `Choose an active Inspector account of ${company.name}.`)
     }
     const templateId = parseIdValue(body.templateId)
-    const template = templateId && getTemplate(templateId)
+    const template = templateId && (await getTemplate(templateId))
     if (!template || template.active !== 1) return badRequest(res, 'Choose an active checklist template.')
-    const version = currentPublished(templateId)
+    const version = await currentPublished(templateId)
     if (!version) return badRequest(res, 'That template has no published version yet.')
     const definition = JSON.parse(version.definition)
     if (itemCount(definition) === 0) return badRequest(res, 'That template has no checklist items yet.')
@@ -919,34 +925,36 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
     if (!vehicle.vehicle_plate && !vehicle.vehicle_registration_no && !vehicle.mod_registration_no) {
       return badRequest(res, 'Enter at least one vehicle identifier (plate, registration no. or MOD registration no.).')
     }
-    const id = transaction(db, () => {
+    const id = await transaction(db, async () => {
       const newId = Number(
-        db
-          .prepare(
-            `INSERT INTO inspections (company_id, inspector_id, template_id, template_name, status_options, vehicle_type,
-                                      vehicle_plate, vehicle_registration_no, mod_registration_no, created_by,
-                                      template_version_id, template_version, form_definition, form_answers)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          )
-          .run(
-            companyId,
-            inspectorId,
-            templateId,
-            template.name,
-            JSON.stringify(definition.statusLegend.map((s) => s.value)),
-            template.vehicle_type,
-            vehicle.vehicle_plate,
-            vehicle.vehicle_registration_no,
-            vehicle.mod_registration_no,
-            req.staff.id,
-            version.id,
-            version.version,
-            version.definition,
-            JSON.stringify(initialAnswers(definition)),
-          ).lastInsertRowid,
+        (
+          await db
+            .prepare(
+              `INSERT INTO mashoor_inspections (company_id, inspector_id, template_id, template_name, status_options, vehicle_type,
+                                                vehicle_plate, vehicle_registration_no, mod_registration_no, created_by,
+                                                template_version_id, template_version, form_definition, form_answers)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            )
+            .run(
+              companyId,
+              inspectorId,
+              templateId,
+              template.name,
+              JSON.stringify(definition.statusLegend.map((s) => s.value)),
+              template.vehicle_type,
+              vehicle.vehicle_plate,
+              vehicle.vehicle_registration_no,
+              vehicle.mod_registration_no,
+              req.staff.id,
+              version.id,
+              version.version,
+              version.definition,
+              JSON.stringify(initialAnswers(definition)),
+            )
+        ).lastInsertRowid,
       )
-      recordEvent(db, { inspectionId: newId, actorType: 'staff', actorId: req.staff.id, actorName: req.staff.name, action: 'created', detail: `Assigned to ${inspector.name}` })
-      audit(db, {
+      await recordEvent(db, { inspectionId: newId, actorType: 'staff', actorId: req.staff.id, actorName: req.staff.name, action: 'created', detail: `Assigned to ${inspector.name}` })
+      await audit(db, {
         ...actor(req),
         action: 'inspection.create',
         targetType: 'inspection',
@@ -955,43 +963,42 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
       })
       return newId
     })
-    res.status(201).json({ inspection: serializeInspection(db, getInspection(db, id), { includeWorking: true }) })
+    res.status(201).json({ inspection: await serializeInspection(db, await getInspection(db, id), { includeWorking: true }) })
   })
 
-  router.get('/inspections/:id', (req, res) => {
+  router.get('/inspections/:id', async (req, res) => {
     const id = parseId(req.params.id)
-    const inspection = id && getInspection(db, id)
+    const inspection = id && (await getInspection(db, id))
     if (!inspection) return notFound(res)
-    const inspectors = db
-      .prepare("SELECT id, name, username FROM vendor_users WHERE company_id = ? AND role = 'inspector' AND active = 1 ORDER BY name COLLATE NOCASE")
+    const inspectors = await db
+      .prepare("SELECT id, name, username FROM mashoor_vendor_users WHERE company_id = ? AND role = 'inspector' AND active = 1 ORDER BY name")
       .all(inspection.company_id)
-    res.json({ inspection: serializeInspection(db, inspection, { includeWorking: true }), inspectors })
+    res.json({ inspection: await serializeInspection(db, inspection, { includeWorking: true }), inspectors })
   })
 
-  router.get('/inspections/:id/revisions/:revision', (req, res) => {
+  router.get('/inspections/:id/revisions/:revision', async (req, res) => {
     const id = parseId(req.params.id)
-    const inspection = id && getInspection(db, id)
+    const inspection = id && (await getInspection(db, id))
     if (!inspection) return notFound(res)
     const number = parseId(req.params.revision)
-    const revision = number && serializeRevision(db, inspection, number)
+    const revision = number && (await serializeRevision(db, inspection, number))
     if (!revision) return notFound(res)
     res.json({ revision })
   })
 
   // Reassign the inspector / correct vehicle identifiers while the checklist is
   // still with the inspector. Submitted revisions are never changed.
-  router.patch('/inspections/:id', (req, res) => {
+  const NOT_EDITABLE = 'Only inspections still with the inspector (assigned, draft or returned) can be changed.'
+  router.patch('/inspections/:id', async (req, res) => {
     const id = parseId(req.params.id)
-    const inspection = id && getInspection(db, id)
+    const inspection = id && (await getInspection(db, id))
     if (!inspection) return notFound(res)
-    if (!EDITABLE.includes(inspection.status)) {
-      return res.status(409).json({ error: 'Only inspections still with the inspector (assigned, draft or returned) can be changed.' })
-    }
+    if (!EDITABLE.includes(inspection.status)) return res.status(409).json({ error: NOT_EDITABLE })
     const body = req.body ?? {}
     const updates = readVehicle(body, { partial: true })
     let inspectorName
     if ('inspectorId' in body) {
-      const inspector = getVendorUser(parseIdValue(body.inspectorId) ?? 0)
+      const inspector = await getVendorUser(parseIdValue(body.inspectorId) ?? 0)
       if (!inspector || inspector.company_id !== inspection.company_id || inspector.role !== 'inspector' || inspector.active !== 1) {
         return badRequest(res, 'Choose an active Inspector account of the same company.')
       }
@@ -1004,12 +1011,14 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
     if (!merged.vehicle_plate && !merged.vehicle_registration_no && !merged.mod_registration_no) {
       return badRequest(res, 'Keep at least one vehicle identifier.')
     }
-    transaction(db, () => {
-      db.prepare(`UPDATE inspections SET ${columns.map((c) => `${c} = ?`).join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(
-        ...columns.map((c) => updates[c]),
-        id,
-      )
-      recordEvent(db, {
+    const changed = await transaction(db, async () => {
+      // Re-checked on the locked row: the inspector may have submitted meanwhile.
+      const locked = await getInspection(db, id, { forUpdate: true })
+      if (!EDITABLE.includes(locked.status)) return false
+      await db
+        .prepare(`UPDATE mashoor_inspections SET ${columns.map((c) => `${c} = ?`).join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+        .run(...columns.map((c) => updates[c]), id)
+      await recordEvent(db, {
         inspectionId: id,
         actorType: 'staff',
         actorId: req.staff.id,
@@ -1017,28 +1026,30 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
         action: 'updated',
         detail: inspectorName ? `Reassigned to ${inspectorName}` : 'Vehicle details updated',
       })
-      audit(db, { ...actor(req), action: 'inspection.update', targetType: 'inspection', targetId: id, metadata: { fields: columns } })
+      await audit(db, { ...actor(req), action: 'inspection.update', targetType: 'inspection', targetId: id, metadata: { fields: columns } })
+      return true
     })
-    res.json({ inspection: serializeInspection(db, getInspection(db, id), { includeWorking: true }) })
+    if (!changed) return res.status(409).json({ error: NOT_EDITABLE })
+    res.json({ inspection: await serializeInspection(db, await getInspection(db, id), { includeWorking: true }) })
   })
 
   // ---- Categories ---------------------------------------------------------
 
-  router.get('/categories', (req, res) => {
-    const rows = db
+  router.get('/categories', async (req, res) => {
+    const rows = await db
       .prepare(
         `SELECT cg.*,
-                (SELECT COUNT(*) FROM catalogs c WHERE c.category_id = cg.id) AS listing_count,
-                (SELECT COUNT(*) FROM catalogs c WHERE c.category_id = cg.id AND c.status = 'published') AS published_count,
-                (SELECT COUNT(*) FROM vendor_company_categories v WHERE v.category_id = cg.id) AS vendor_count
-           FROM categories cg
-          ORDER BY cg.name COLLATE NOCASE`,
+                (SELECT COUNT(*) FROM mashoor_catalogs c WHERE c.category_id = cg.id) AS listing_count,
+                (SELECT COUNT(*) FROM mashoor_catalogs c WHERE c.category_id = cg.id AND c.status = 'published') AS published_count,
+                (SELECT COUNT(*) FROM mashoor_vendor_company_categories v WHERE v.category_id = cg.id) AS vendor_count
+           FROM mashoor_categories cg
+          ORDER BY cg.name`,
       )
       .all()
     res.json({ categories: rows.map(toCategory) })
   })
 
-  router.post('/categories', (req, res) => {
+  router.post('/categories', async (req, res) => {
     const normalized = normalizeCategoryName(req.body?.name)
     if (!normalized) return badRequest(res, 'Category name is required (max 100 characters).')
     const description = cleanText(req.body?.description, 1000) || null
@@ -1046,32 +1057,34 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
     if (active === null) return badRequest(res, 'active must be true or false.')
     const duplicate = (existing = normalized) =>
       res.status(409).json({ error: `A category named "${existing.name}" already exists.` })
-    const existing = categoryKeyTaken(normalized.key)
+    const existing = await categoryKeyTaken(normalized.key)
     if (existing) return duplicate(existing)
     let id
     try {
       id = Number(
-        db
-          .prepare('INSERT INTO categories (name, name_key, description, active, created_by) VALUES (?, ?, ?, ?, ?)')
-          .run(normalized.name, normalized.key, description, active, req.staff.id).lastInsertRowid,
+        (
+          await db
+            .prepare('INSERT INTO mashoor_categories (name, name_key, description, active, created_by) VALUES (?, ?, ?, ?, ?)')
+            .run(normalized.name, normalized.key, description, active, req.staff.id)
+        ).lastInsertRowid,
       )
     } catch (error) {
-      if (isUniqueViolation(error)) return duplicate()
+      if (isDuplicate(error)) return duplicate()
       throw error
     }
-    audit(db, { ...actor(req), action: 'category.create', targetType: 'category', targetId: id, metadata: { name: normalized.name } })
-    res.status(201).json({ category: toCategory(getCategory(id)) })
+    await audit(db, { ...actor(req), action: 'category.create', targetType: 'category', targetId: id, metadata: { name: normalized.name } })
+    res.status(201).json({ category: toCategory(await getCategory(id)) })
   })
 
-  router.patch('/categories/:id', (req, res) => {
+  router.patch('/categories/:id', async (req, res) => {
     const id = parseId(req.params.id)
-    if (!id || !getCategory(id)) return notFound(res)
+    if (!id || !(await getCategory(id))) return notFound(res)
     const body = req.body ?? {}
     const updates = {}
     if ('name' in body) {
       const normalized = normalizeCategoryName(body.name)
       if (!normalized) return badRequest(res, 'Category name is required (max 100 characters).')
-      const existing = categoryKeyTaken(normalized.key, id)
+      const existing = await categoryKeyTaken(normalized.key, id)
       if (existing) return res.status(409).json({ error: `A category named "${existing.name}" already exists.` })
       updates.name = normalized.name
       updates.name_key = normalized.key
@@ -1084,26 +1097,26 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
     const columns = Object.keys(updates)
     if (columns.length === 0) return badRequest(res, 'Nothing to update.')
     try {
-      db.prepare(
-        `UPDATE categories SET ${columns.map((c) => `${c} = ?`).join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-      ).run(...columns.map((c) => updates[c]), id)
+      await db
+        .prepare(`UPDATE mashoor_categories SET ${columns.map((c) => `${c} = ?`).join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+        .run(...columns.map((c) => updates[c]), id)
     } catch (error) {
-      if (isUniqueViolation(error)) return res.status(409).json({ error: `A category named "${updates.name}" already exists.` })
+      if (isDuplicate(error)) return res.status(409).json({ error: `A category named "${updates.name}" already exists.` })
       throw error
     }
     const logged = { ...updates }
     delete logged.name_key
-    audit(db, { ...actor(req), action: 'category.update', targetType: 'category', targetId: id, metadata: logged })
-    res.json({ category: toCategory(getCategory(id)) })
+    await audit(db, { ...actor(req), action: 'category.update', targetType: 'category', targetId: id, metadata: logged })
+    res.json({ category: toCategory(await getCategory(id)) })
   })
 
   // Only an unused category can be deleted; otherwise explain what to move.
-  router.delete('/categories/:id', (req, res) => {
+  router.delete('/categories/:id', async (req, res) => {
     const id = parseId(req.params.id)
-    const category = id && getCategory(id)
+    const category = id && (await getCategory(id))
     if (!category) return notFound(res)
-    const listings = db.prepare('SELECT COUNT(*) AS n FROM catalogs WHERE category_id = ?').get(id).n
-    const vendors = db.prepare('SELECT COUNT(*) AS n FROM vendor_company_categories WHERE category_id = ?').get(id).n
+    const listings = (await db.prepare('SELECT COUNT(*) AS n FROM mashoor_catalogs WHERE category_id = ?').get(id)).n
+    const vendors = (await db.prepare('SELECT COUNT(*) AS n FROM mashoor_vendor_company_categories WHERE category_id = ?').get(id)).n
     if (listings || vendors) {
       const parts = []
       if (listings) parts.push(`move its ${listings} listing${listings === 1 ? '' : 's'} (including archived) to another category`)
@@ -1114,20 +1127,20 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
         vendorCount: vendors,
       })
     }
-    db.prepare('DELETE FROM categories WHERE id = ?').run(id)
-    audit(db, { ...actor(req), action: 'category.delete', targetType: 'category', targetId: id, metadata: { name: category.name } })
+    await db.prepare('DELETE FROM mashoor_categories WHERE id = ?').run(id)
+    await audit(db, { ...actor(req), action: 'category.delete', targetType: 'category', targetId: id, metadata: { name: category.name } })
     res.status(204).end()
   })
 
   // ---- Catalog listings ---------------------------------------------------
 
-  router.get('/listings', (req, res) => {
+  router.get('/listings', async (req, res) => {
     const where = []
     const params = []
     const term = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 200) : ''
     if (term) {
-      const pattern = `%${term.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`
-      where.push(`(cat.title LIKE ? ESCAPE '\\' OR cat.description LIKE ? ESCAPE '\\')`)
+      const pattern = likePattern(term)
+      where.push('(cat.title LIKE ? OR cat.description LIKE ?)')
       params.push(pattern, pattern)
     }
     if (req.query.categoryId !== undefined && req.query.categoryId !== '') {
@@ -1143,14 +1156,12 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
     }
     const clause = where.length ? `WHERE ${where.join(' AND ')}` : ''
     const { page, limit, offset } = parsePagination(req)
-    const total = db.prepare(`SELECT COUNT(*) AS n FROM catalogs cat ${clause}`).get(...params).n
-    const rows = db
-      .prepare(`${LISTING_SELECT} ${clause} ORDER BY cat.updated_at DESC, cat.id DESC LIMIT ? OFFSET ?`)
-      .all(...params, limit, offset)
+    const total = (await db.prepare(`SELECT COUNT(*) AS n FROM mashoor_catalogs cat ${clause}`).get(...params)).n
+    const rows = await db.prepare(`${LISTING_SELECT} ${clause} ORDER BY cat.updated_at DESC, cat.id DESC LIMIT ? OFFSET ?`).all(...params, limit, offset)
     res.json({ listings: rows.map(toListing), pagination: paginationMeta({ page, limit, total }) })
   })
 
-  function readListingFields(body, { partial }) {
+  async function readListingFields(body, { partial }) {
     const fields = {}
     if (!partial || 'title' in body) {
       fields.title = cleanText(body.title, 200)
@@ -1160,7 +1171,7 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
     if (!partial || 'categoryId' in body) {
       const categoryId = parseIdValue(body.categoryId)
       if (!categoryId) return { error: 'Choose a category.' }
-      if (!getCategory(categoryId)) return { error: 'That category does not exist.' }
+      if (!(await getCategory(categoryId))) return { error: 'That category does not exist.' }
       fields.category_id = categoryId
     }
     if (!partial || 'price' in body) {
@@ -1177,40 +1188,41 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
     return { fields }
   }
 
-  router.post('/listings', (req, res) => {
-    const { error, fields } = readListingFields(req.body ?? {}, { partial: false })
+  router.post('/listings', async (req, res) => {
+    const { error, fields } = await readListingFields(req.body ?? {}, { partial: false })
     if (error) return badRequest(res, error)
     const id = Number(
-      db
-        .prepare(
-          `INSERT INTO catalogs (title, description, category_id, price_cents, status, published_at, created_by, updated_by)
-           VALUES (?, ?, ?, ?, ?, CASE WHEN ? = 'published' THEN CURRENT_TIMESTAMP END, ?, ?)`,
-        )
-        .run(fields.title, fields.description, fields.category_id, fields.price_cents, fields.status, fields.status, req.staff.id, req.staff.id)
-        .lastInsertRowid,
+      (
+        await db
+          .prepare(
+            `INSERT INTO mashoor_catalogs (title, description, category_id, price_cents, status, published_at, created_by, updated_by)
+             VALUES (?, ?, ?, ?, ?, CASE WHEN ? = 'published' THEN CURRENT_TIMESTAMP END, ?, ?)`,
+          )
+          .run(fields.title, fields.description, fields.category_id, fields.price_cents, fields.status, fields.status, req.staff.id, req.staff.id)
+      ).lastInsertRowid,
     )
-    audit(db, {
+    await audit(db, {
       ...actor(req),
       action: 'listing.create',
       targetType: 'catalog',
       targetId: id,
       metadata: { title: fields.title, categoryId: fields.category_id, status: fields.status },
     })
-    res.status(201).json({ listing: toListing(getListing(id)) })
+    res.status(201).json({ listing: toListing(await getListing(id)) })
   })
 
-  router.get('/listings/:id', (req, res) => {
+  router.get('/listings/:id', async (req, res) => {
     const id = parseId(req.params.id)
-    const listing = id && getListing(id)
+    const listing = id && (await getListing(id))
     if (!listing) return notFound(res)
     res.json({ listing: toListing(listing) })
   })
 
-  router.patch('/listings/:id', (req, res) => {
+  router.patch('/listings/:id', async (req, res) => {
     const id = parseId(req.params.id)
-    const current = id && getListing(id)
+    const current = id && (await getListing(id))
     if (!current) return notFound(res)
-    const { error, fields } = readListingFields(req.body ?? {}, { partial: true })
+    const { error, fields } = await readListingFields(req.body ?? {}, { partial: true })
     if (error) return badRequest(res, error)
     const columns = Object.keys(fields)
     if (columns.length === 0) return badRequest(res, 'Nothing to update.')
@@ -1219,53 +1231,55 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
       return badRequest(res, 'Choose a category before publishing.')
     }
     const becamePublished = fields.status === 'published' && current.status !== 'published'
-    db.prepare(
-      `UPDATE catalogs SET ${columns.map((c) => `${c} = ?`).join(', ')},
-              ${becamePublished ? 'published_at = CURRENT_TIMESTAMP,' : ''}
-              updated_by = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?`,
-    ).run(...columns.map((c) => fields[c]), req.staff.id, id)
-    audit(db, {
+    await db
+      .prepare(
+        `UPDATE mashoor_catalogs SET ${columns.map((c) => `${c} = ?`).join(', ')},
+                ${becamePublished ? 'published_at = CURRENT_TIMESTAMP,' : ''}
+                updated_by = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?`,
+      )
+      .run(...columns.map((c) => fields[c]), req.staff.id, id)
+    await audit(db, {
       ...actor(req),
       action: fields.status && fields.status !== current.status ? `listing.${fields.status}` : 'listing.update',
       targetType: 'catalog',
       targetId: id,
       metadata: { fields: columns, ...(fields.status && { from: current.status, to: fields.status }) },
     })
-    res.json({ listing: toListing(getListing(id)) })
+    res.json({ listing: toListing(await getListing(id)) })
   })
 
   router.put('/listings/:id/image', async (req, res) => {
     const id = parseId(req.params.id)
-    const current = id && getListing(id)
+    const current = id && (await getListing(id))
     if (!current) return notFound(res)
     const { buffer, type } = await receiveImage(req, res)
     const file = images.save(buffer, type)
-    db.prepare(
-      'UPDATE catalogs SET image_file = ?, image_type = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-    ).run(file, type, req.staff.id, id)
+    await db
+      .prepare('UPDATE mashoor_catalogs SET image_file = ?, image_type = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(file, type, req.staff.id, id)
     images.remove(current.image_file)
-    audit(db, { ...actor(req), action: 'listing.image', targetType: 'catalog', targetId: id, metadata: { type, bytes: buffer.length } })
-    res.json({ listing: toListing(getListing(id)) })
+    await audit(db, { ...actor(req), action: 'listing.image', targetType: 'catalog', targetId: id, metadata: { type, bytes: buffer.length } })
+    res.json({ listing: toListing(await getListing(id)) })
   })
 
-  router.delete('/listings/:id/image', (req, res) => {
+  router.delete('/listings/:id/image', async (req, res) => {
     const id = parseId(req.params.id)
-    const current = id && getListing(id)
+    const current = id && (await getListing(id))
     if (!current) return notFound(res)
     if (current.image_file) {
-      db.prepare(
-        'UPDATE catalogs SET image_file = NULL, image_type = NULL, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      ).run(req.staff.id, id)
+      await db
+        .prepare('UPDATE mashoor_catalogs SET image_file = NULL, image_type = NULL, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .run(req.staff.id, id)
       images.remove(current.image_file)
-      audit(db, { ...actor(req), action: 'listing.image_remove', targetType: 'catalog', targetId: id })
+      await audit(db, { ...actor(req), action: 'listing.image_remove', targetType: 'catalog', targetId: id })
     }
-    res.json({ listing: toListing(getListing(id)) })
+    res.json({ listing: toListing(await getListing(id)) })
   })
 
-  router.get('/listings/:id/image', (req, res) => {
+  router.get('/listings/:id/image', async (req, res) => {
     const id = parseId(req.params.id)
-    const listing = id && getListing(id)
+    const listing = id && (await getListing(id))
     if (!listing?.image_file) return notFound(res)
     sendImage(res, images, listing.image_file, listing.image_type)
   })

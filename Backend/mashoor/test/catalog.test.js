@@ -59,7 +59,7 @@ describe('categories, listings and category-based vendor access', () => {
     assert.equal(a.body.user.username, 'alice.a', 'usernames are stored lower-cased and trimmed')
     assert.equal(a.body.temporaryPassword, undefined)
     assert.equal(JSON.stringify(a.body).includes(temp.alice), false, 'passwords are never returned')
-    assert.equal(server.db.prepare('SELECT email FROM vendor_users WHERE id = ?').get(a.body.user.id).email, null)
+    assert.equal((await server.db.prepare('SELECT email FROM mashoor_vendor_users WHERE id = ?').get(a.body.user.id)).email, null)
     ids.vendorA = a.body.vendor.id
     ids.alice = a.body.user.id
 
@@ -87,11 +87,11 @@ describe('categories, listings and category-based vendor access', () => {
     const list = await staff.get('/api/mashoor/admin/vendors')
     assert.equal(JSON.stringify(list.body).includes('scrypt'), false, 'no password hashes in list responses')
     assert.deepEqual(list.body.vendors.find((v) => v.id === ids.vendorA).accounts.map((u) => u.username), ['alice.a'])
-    assert.equal(server.db.prepare("SELECT COUNT(*) AS n FROM vendor_companies WHERE name = 'X'").get().n, 0)
+    assert.equal((await server.db.prepare("SELECT COUNT(*) AS n FROM mashoor_vendor_companies WHERE name = 'X'").get()).n, 0)
 
-    const stored = server.db.prepare('SELECT password_hash FROM vendor_users WHERE id = ?').get(ids.alice).password_hash
+    const stored = (await server.db.prepare('SELECT password_hash FROM mashoor_vendor_users WHERE id = ?').get(ids.alice)).password_hash
     assert.match(stored, /^scrypt\$/)
-    const audit = JSON.stringify(server.db.prepare('SELECT * FROM audit_log').all())
+    const audit = JSON.stringify((await server.db.prepare('SELECT * FROM mashoor_audit_log').all()))
     assert.ok(!audit.includes(temp.alice) && !audit.includes(temp.bob), 'passwords must never be logged')
   })
 
@@ -320,7 +320,7 @@ describe('categories, listings and category-based vendor access', () => {
       }
     }
     assert.equal((await vendor.upload(`/api/mashoor/admin/listings/${ids.chair}/image`, TINY_PNG)).status, 401)
-    assert.equal(server.db.prepare("SELECT status FROM catalogs WHERE id = ?").get(ids.deskDraft).status, 'draft')
+    assert.equal((await server.db.prepare("SELECT status FROM mashoor_catalogs WHERE id = ?").get(ids.deskDraft)).status, 'draft')
   })
 
   it('rejects admin writes from unknown browser origins (CSRF)', async () => {

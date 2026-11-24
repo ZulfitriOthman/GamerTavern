@@ -12,9 +12,8 @@ import { after, before, describe, it } from 'node:test'
 import { Server } from 'socket.io'
 import { createApp } from '../src/app.js'
 import { loadConfig } from '../src/config.js'
-import { openDatabase } from '../src/db.js'
 import { createRealtime } from '../src/realtime.js'
-import { APP_ORIGIN, Client, insertStaff, PORTAL_APP_ORIGIN } from './helpers.js'
+import { APP_ORIGIN, Client, createTestDatabase, insertStaff, PORTAL_APP_ORIGIN } from './helpers.js'
 
 const STAFF = { email: 'staff@mashoor.test', password: 'StaffPass123!' }
 const PW = 'Account-Pass-2026'
@@ -68,6 +67,7 @@ describe('live inspection updates (Socket.IO /mashoor)', () => {
   let io
   let realtime
   let db
+  let testDb
   let port
   let base
   let staff
@@ -100,10 +100,11 @@ describe('live inspection updates (Socket.IO /mashoor)', () => {
   const reset = (...list) => list.forEach((s) => (s.events.length = 0))
 
   before(async () => {
-    db = openDatabase(':memory:')
+    testDb = await createTestDatabase()
+    db = await testDb.open({ importChecklists: false })
     const config = {
       ...loadConfig({}),
-      dbPath: ':memory:',
+      mysql: testDb.mysqlConfig,
       storageDir: mkdtempSync(join(tmpdir(), 'mashoor-test-')),
       allowedOrigins: [APP_ORIGIN, PORTAL_APP_ORIGIN],
       cookieSecure: false,
@@ -137,7 +138,8 @@ describe('live inspection updates (Socket.IO /mashoor)', () => {
     realtime.close()
     io.close()
     http.closeAllConnections()
-    db.close()
+    await db.close()
+    await testDb.drop()
   })
 
   it('issues tickets only to signed-in sessions from an allowed origin', async () => {
@@ -264,6 +266,35 @@ describe('live inspection updates (Socket.IO /mashoor)', () => {
     assert.deepEqual(got(s.inspb), [])
   })
 
+  it('serialises concurrent workflow steps on one inspection (row lock)', async () => {
+    const answers = { items: { a: { status: 'A', remark: '', action: '' } } }
+    const created = await adm('POST', '/inspections', { companyId: ids.companyA, inspectorId: ids.insp, templateId: ids.template, vehiclePlate: 'RACE 1' })
+    const id = created.body.inspection.id
+    // Two submissions at once: one revision, one refusal.
+    const subs = await Promise.all([1, 2].map(() => api('insp', 'POST', `/inspections/${id}/submit`, { answers })))
+    assert.deepEqual(subs.map((r) => r.status).sort(), [200, 409])
+    assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM mashoor_inspection_revisions WHERE inspection_id = ?').get(id)).n, 1)
+    // Verify and re-check of the same revision at once: exactly one decision.
+    const [verify, recheck] = await Promise.all([
+      api('cli', 'POST', `/inspections/${id}/verify`, { revision: 1 }),
+      api('cli', 'POST', `/inspections/${id}/recheck`, { revision: 1, reason: 'Concurrent re-check' }),
+    ])
+    assert.deepEqual([verify.status, recheck.status].sort(), [200, 409])
+    const status = (await db.prepare('SELECT status FROM mashoor_inspections WHERE id = ?').get(id)).status
+    assert.equal(status, verify.status === 200 ? 'pending_approval' : 'returned')
+    // The same stage confirmed twice at once: one sign-off row.
+    if (verify.status !== 200) {
+      assert.equal((await api('insp', 'POST', `/inspections/${id}/submit`, { answers })).status, 200)
+    }
+    const revision = (await db.prepare('SELECT current_revision AS r FROM mashoor_inspections WHERE id = ?').get(id)).r
+    const signs = await Promise.all([1, 2].map(() => api('checker', 'POST', `/inspections/${id}/signoffs/checked_by`, { revision, fullName: 'Chad Checker' })))
+    assert.deepEqual(signs.map((r) => r.status).sort(), [200, 409])
+    const rows = await db
+      .prepare("SELECT COUNT(*) AS n FROM mashoor_inspection_signoffs s JOIN mashoor_inspection_revisions r ON r.id = s.revision_id WHERE r.inspection_id = ? AND s.stage = 'checked_by'")
+      .get(id)
+    assert.equal(rows.n, 1)
+  })
+
   it('disconnects sockets whose session ends (logout, deactivation)', async () => {
     const cli = await connect('cli')
     assert.equal((await api('cli', 'POST', '/auth/logout')).status, 204)
@@ -277,7 +308,7 @@ describe('live inspection updates (Socket.IO /mashoor)', () => {
 
     // A socket left behind by an ended session never receives later updates.
     const checker = await connect('checker')
-    db.prepare("DELETE FROM sessions WHERE user_type = 'vendor' AND user_id = ?").run(ids.checker)
+    await db.prepare("DELETE FROM mashoor_sessions WHERE user_type = 'vendor' AND user_id = ?").run(ids.checker)
     await adm('POST', '/inspections', { companyId: ids.companyA, inspectorId: ids.insp, templateId: ids.template, vehiclePlate: 'LIVE 2' })
     await wait(150)
     assert.deepEqual(checker.changes(), [])
