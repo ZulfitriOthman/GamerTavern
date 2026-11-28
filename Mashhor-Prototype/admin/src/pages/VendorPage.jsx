@@ -80,6 +80,7 @@ export default function VendorPage() {
 
   const { vendor, users } = data
   const suspended = vendor.status === 'suspended'
+  const removed = vendor.status === 'removed'
   const label = (user) => user.username ?? user.name
   const dialogUser = dialog?.userId ? users.find((u) => u.id === dialog.userId) : dialog?.user
   const showReactivate = dialog?.kind === 'reactivate' && dialogUser && !dialogUser.active
@@ -89,14 +90,14 @@ export default function VendorPage() {
       <PageHeader
         back={back}
         title={vendor.name}
-        badge={<StatusBadge active={!suspended} activeLabel="Active" inactiveLabel="Suspended" />}
+        badge={<StatusBadge active={!suspended && !removed} activeLabel="Active" inactiveLabel={removed ? 'Removed' : 'Suspended'} />}
         description={vendor.registrationNo ? `Registration no. ${vendor.registrationNo}` : 'Organisation details, portal accounts and sign-off stages.'}
         actions={
           <>
             <Link className="btn" to={`/inspections?companyId=${vendor.id}`}>
               <Icon name="check" /> Inspections
             </Link>
-            {suspended ? (
+            {removed ? null : suspended ? (
               <button type="button" className="btn" onClick={() => setDialog({ kind: 'unsuspend' })}>
                 <Icon name="power" /> Reactivate organisation
               </button>
@@ -108,6 +109,14 @@ export default function VendorPage() {
           </>
         }
       />
+
+      {removed && (
+        <Alert tone="warning" title="This organisation has been removed">
+          Removed {vendor.removedAt ? `on ${new Date(`${vendor.removedAt.replace(' ', 'T')}Z`).toLocaleString()}` : ''}
+          {vendor.removedBy?.name ? ` by ${vendor.removedBy.name}` : ''}. Its portal accounts can’t sign in, and it can no longer be changed. Its
+          inspections and history are kept for reference.
+        </Alert>
+      )}
 
       {pageError && (
         <Alert tone="danger" onDismiss={() => setPageError('')}>

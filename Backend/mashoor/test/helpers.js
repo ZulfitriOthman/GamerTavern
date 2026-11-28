@@ -54,11 +54,11 @@ export async function createTestDatabase({ migrations } = {}) {
 }
 
 // Boots the real Express app on a random port with a fresh test database.
-export async function startTestServer({ limiter } = {}) {
+export async function startTestServer({ limiter, config: overrides = {} } = {}) {
   const testDb = await createTestDatabase()
   const db = await testDb.open()
   const storageDir = mkdtempSync(join(tmpdir(), 'mashoor-test-'))
-  const config = { ...loadConfig({}), mysql: testDb.mysqlConfig, storageDir, allowedOrigins: [APP_ORIGIN, PORTAL_APP_ORIGIN], cookieSecure: false }
+  const config = { ...loadConfig({}), mysql: testDb.mysqlConfig, storageDir, allowedOrigins: [APP_ORIGIN, PORTAL_APP_ORIGIN], cookieSecure: false, ...overrides }
   const app = createApp({ db, config, ...(limiter && { limiter }) })
   const server = await new Promise((resolve) => {
     const s = app.listen(0, '127.0.0.1', () => resolve(s))

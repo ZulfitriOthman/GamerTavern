@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { decoyExportSettings } from './decoy.js'
 
 /** Public path prefix of the Mashoor API inside the shared Backend. */
 export const MASHOOR_API_PREFIX = '/api/mashoor'
@@ -39,6 +40,9 @@ export function loadConfig(env = process.env) {
       .filter(Boolean),
     cookieSecure: env.MASHOOR_COOKIE_SECURE ? env.MASHOOR_COOKIE_SECURE === 'true' : production,
     sessionTtlMs: Number(env.MASHOOR_SESSION_TTL_HOURS || 8) * 60 * 60 * 1000,
+    // Decoy export tripwire (decoy.js). Off unless explicitly enabled with a
+    // Canarytokens URL; the URL itself is never logged.
+    decoyExport: decoyExportSettings(env),
     // Only used by the standalone test app; when embedded, the Backend's own
     // `trust proxy` setting applies.
     trustProxy: false,

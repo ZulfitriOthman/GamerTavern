@@ -314,4 +314,25 @@ describe('live inspection updates (Socket.IO /mashoor)', () => {
     assert.deepEqual(checker.changes(), [])
     assert.equal(checker.closed, true)
   })
+
+  it('disconnects every live socket of a removed organisation, and only those', async () => {
+    const companyC = (await adm('POST', '/vendors', { name: 'Company C (to remove)' })).body.vendor.id
+    await account(companyC, 'clic', 'Cy Client')
+    await account(companyC, 'inspc', 'Cy Inspector', 'inspector')
+    const clic = await connect('clic')
+    const inspc = await connect('inspc')
+    const clib = await connect('clib')
+    const staffSocket = await connect('staff')
+    reset(staffSocket)
+
+    assert.equal((await adm('POST', `/vendors/${companyC}/remove`)).status, 200)
+    await wait(150)
+    assert.equal(clic.closed, true, 'client of the removed organisation')
+    assert.equal(inspc.closed, true, 'inspector of the removed organisation')
+    assert.equal(clib.closed, false, 'another organisation stays connected')
+    assert.equal(staffSocket.closed, false)
+    assert.ok(staffSocket.events.some(([name]) => name === 'access:changed'), 'staff lists refetch')
+    // A new ticket is refused for the removed organisation's (ended) sessions.
+    assert.equal((await api('clic', 'POST', '/realtime/ticket')).status, 401)
+  })
 })

@@ -13,7 +13,7 @@ Database/mashoor/
 ├── mysql/
 │   ├── mashoor_mysql_schema.sql   ← fresh install: run this in MySQL Workbench
 │   └── migrations/                ← MySQL migration path (checked by the backend, applied by you)
-│       ├── 0001_initial_schema.sql … 0008_schema_migrations_and_history_triggers.sql
+│       ├── 0001_initial_schema.sql … 0009_vendor_company_removal.sql
 └── migrations/                    ← HISTORICAL SQLite migrations — do NOT run in MySQL
 ```
 
@@ -21,7 +21,7 @@ Database/mashoor/
 
 | Situation | Run |
 |---|---|
-| New, empty MySQL database (no `mashoor_` tables) | `mysql/mashoor_mysql_schema.sql` once, then `mysql/migrations/0008_…` (a no-op apart from recording version 8). Or, from `Backend/`: `npm run mashoor:migrate -- --apply` (applies 0001–0008). The backend never creates or changes tables by itself. |
+| New, empty MySQL database (no `mashoor_` tables) | `mysql/mashoor_mysql_schema.sql` once (it already records versions 1–9). Or, from `Backend/`: `npm run mashoor:migrate -- --apply` (applies 0001–0009). The backend never creates or changes tables by itself. |
 | Moving the existing SQLite data to MySQL | 1. `mysql/mashoor_mysql_schema.sql` 2. the generated import file (see below) 3. start the backend. In that order — start the backend only after the import. |
 | MySQL database that already has some `mashoor_` migrations | The missing `mysql/migrations` files, in order — in Workbench, or `npm run mashoor:migrate -- --apply`. Each file records itself. |
 | Tables created by hand but **no `mashoor_schema_migrations`** (the state `nanashi_collectibles` was in on 2026-11-23: all tables, checks and keys of 0001–0007, but no ledger and no triggers) | `mysql/migrations/0008_schema_migrations_and_history_triggers.sql` only — or `npm run mashoor:migrate -- --apply --from 8`. Applied to `nanashi_collectibles` on 2026-11-23. |
@@ -57,6 +57,7 @@ anything; `-- --apply` applies the pending files.
 | `0006_checklist_form_templates.sql` | Versioned form templates (one draft per template), damage diagrams, form copy + answers on inspections; triggers freeze published versions, submitted revisions, sign-offs and history; history foreign keys become RESTRICT |
 | `0007_staff_username_login.sql` | MySQL only (no SQLite counterpart): admin accounts get a username (unique case-insensitively, stored lower-case); email becomes optional; each account keeps at least one of the two |
 | `0008_schema_migrations_and_history_triggers.sql` | MySQL only, additive and idempotent: creates `mashoor_schema_migrations` if missing, records 1–7, and creates the 8 frozen-history triggers if missing (for a schema built by hand without them) |
+| `0009_vendor_company_removal.sql` | MySQL only, additive: organisation status gains `removed` (soft, final removal) with `removed_at` / `removed_by` (who and when; set exactly when removed, CHECK + foreign key to staff). Existing rows are unchanged. The backend requires version 9 after this file ships: apply it before deploying the backend that contains it |
 
 ## Creating an admin account from the terminal
 

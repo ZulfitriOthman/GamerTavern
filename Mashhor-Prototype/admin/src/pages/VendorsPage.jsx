@@ -18,6 +18,8 @@ export default function VendorsPage() {
   const [actionError, setActionError] = useState('')
   const [creating, setCreating] = useState(false)
   const [deactivating, setDeactivating] = useState(null) // { vendor, account }
+  const [removing, setRemoving] = useState(null) // vendor row
+  const [removeError, setRemoveError] = useState('')
   const [busy, setBusy] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
   const reload = () => setReloadKey((k) => k + 1)
@@ -48,6 +50,36 @@ export default function VendorsPage() {
       reload()
     } catch (err) {
       setActionError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function startRemove(vendor) {
+    setRemoveError('')
+    setRemoving(vendor)
+  }
+
+  async function confirmRemove() {
+    if (busy || !removing) return // one request at a time, even on a fast double click
+    const vendor = removing
+    setBusy(true)
+    setRemoveError('')
+    try {
+      await api(`/vendors/${vendor.id}/remove`, { method: 'POST' })
+      setNotice({ text: `${vendor.name} was removed. Its portal accounts were signed out and can no longer sign in; its inspections and history are kept.` })
+      setRemoving(null)
+      reload()
+    } catch (err) {
+      // Already removed elsewhere (another tab or admin): the list is stale, refresh it.
+      if (err.status === 409 || err.status === 404) reload()
+      setRemoveError(
+        err.status === 403
+          ? 'Only administrators can remove organisations.'
+          : err.status === 401
+            ? 'Your session has ended. Sign in again, then retry.'
+            : err.message || 'The organisation couldn’t be removed. Try again.',
+      )
     } finally {
       setBusy(false)
     }
@@ -166,9 +198,19 @@ export default function VendorsPage() {
                       <StatusBadge active={v.status === 'active'} inactiveLabel="Suspended" />
                     </td>
                     <td data-label="" className="col-actions">
-                      <Link className="btn btn-sm" to={`/vendors/${v.id}`}>
-                        Manage
-                      </Link>
+                      <div className="row-actions">
+                        <Link className="btn btn-sm" to={`/vendors/${v.id}`}>
+                          Manage
+                        </Link>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-danger-outline"
+                          aria-label={`Remove ${v.name}`}
+                          onClick={() => startRemove(v)}
+                        >
+                          Remove
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -202,7 +244,32 @@ export default function VendorsPage() {
         onConfirm={confirmDeactivate}
         onCancel={() => setDeactivating(null)}
       />
+
+      <ConfirmDialog
+        open={Boolean(removing)}
+        title={removing ? `Remove ${removing.name}?` : 'Remove organisation?'}
+        description={removing && removeDescription(removing)}
+        confirmLabel="Remove organisation"
+        busy={busy}
+        error={removeError}
+        onConfirm={confirmRemove}
+        onCancel={() => setRemoving(null)}
+      />
     </>
+  )
+}
+
+// What removing does, in the words staff see before confirming.
+function removeDescription(vendor) {
+  const total = vendor.accounts.length
+  const active = vendor.accounts.filter((a) => a.active).length
+  const accounts =
+    total === 0
+      ? 'It has no portal accounts.'
+      : `Its ${total} portal account${total === 1 ? '' : 's'}${active !== total ? ` (${active} active)` : ''} will be signed out immediately and will no longer be able to sign in.`
+  return (
+    `${vendor.name} will be removed from the organisation list. ${accounts} ` +
+    'Its inspections, approvals, sign-offs and history are kept, and the removal is recorded under your name. This can’t be undone here.'
   )
 }
 

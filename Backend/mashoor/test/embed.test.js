@@ -67,7 +67,8 @@ describe('embedded in the shared Backend', () => {
   it('refuses to start on a schema that is not at the bundled version', async () => {
     const older = await createTestDatabase({ migrations: loadMigrations().slice(0, 7) })
     try {
-      await assert.rejects(createMashoorModule({ env: mysqlEnv(older.mysqlConfig) }), /schema is at version 7; 8 is required\. Apply 0008_/)
+      const latest = loadMigrations().length
+      await assert.rejects(createMashoorModule({ env: mysqlEnv(older.mysqlConfig) }), new RegExp(`schema is at version 7; ${latest} is required\\. Apply 0008_`))
     } finally {
       await older.drop()
     }

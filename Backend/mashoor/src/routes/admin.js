@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { paginationMeta, parsePagination } from '../../../modules/pagination.module.js'
 import { audit, isDuplicate, transaction } from '../db.js'
 import { requireStaff } from '../auth/middleware.js'
+import { createDecoyExport, DECOY_EXPORT_PATH } from '../decoy.js'
 import { hashPassword, MAX_PASSWORD_LENGTH, passwordProblem, verifyPassword } from '../auth/passwords.js'
 import {
   clearSessionCookie,
@@ -54,6 +55,11 @@ const USERNAME_TAKEN = 'That username is already taken.'
 const ROLES = ['client', 'inspector']
 const ROLE_RULE = 'Role must be Vendor / Client or Inspector.'
 const LISTING_STATUSES = ['draft', 'published', 'archived']
+// Removal is a soft, final status (migration 0009): the row and every record
+// that references it stay; the backend refuses any further change to it.
+const REMOVED = 'removed'
+const REMOVED_REFUSAL = 'This organisation has been removed and can no longer be changed.'
+const refuseRemoved = (res) => res.status(409).json({ error: REMOVED_REFUSAL, code: 'organisation_removed' })
 
 const toStaff = (row) => ({ id: row.id, email: row.email, name: row.name, role: row.role })
 
@@ -64,6 +70,8 @@ const toCompany = (row) => ({
   status: row.status,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
+  removedAt: row.removed_at ?? null,
+  removedBy: row.removed_by ? { id: row.removed_by, name: row.removed_by_name ?? null } : null,
   ...(row.user_count !== undefined && {
     userCount: row.user_count,
     activeUserCount: row.active_user_count ?? 0,
@@ -127,8 +135,26 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
   const router = Router()
   const actor = (req) => ({ actorType: 'staff', actorId: req.staff.id })
 
-  const getCompany = (id) => db.prepare('SELECT * FROM mashoor_vendor_companies WHERE id = ?').get(id)
+  const getCompany = (id) =>
+    db
+      .prepare(
+        `SELECT c.*, s.name AS removed_by_name FROM mashoor_vendor_companies c
+           LEFT JOIN mashoor_staff_users s ON s.id = c.removed_by WHERE c.id = ?`,
+      )
+      .get(id)
+  // Inside a transaction: locks the company row so a concurrent removal and a
+  // change cannot interleave. Returns the row (any status) or undefined.
+  const lockCompany = (id) => db.prepare('SELECT * FROM mashoor_vendor_companies WHERE id = ? FOR UPDATE').get(id)
+  // Thrown inside a transaction to roll it back when the company turned out removed.
+  class CompanyRemoved extends Error {}
+  const lockOpenCompany = async (id) => {
+    const row = await lockCompany(id)
+    if (row?.status === REMOVED) throw new CompanyRemoved()
+    return row
+  }
   const getVendorUser = (id) => db.prepare('SELECT * FROM mashoor_vendor_users WHERE id = ?').get(id)
+  const inRemovedCompany = async (user) =>
+    (await db.prepare('SELECT status FROM mashoor_vendor_companies WHERE id = ?').get(user.company_id))?.status === REMOVED
   const usernameTaken = (username, exceptId = 0) =>
     db.prepare('SELECT 1 FROM mashoor_vendor_users WHERE username = ? AND id <> ?').get(username, exceptId)
   const getCategory = (id) => db.prepare('SELECT * FROM mashoor_categories WHERE id = ?').get(id)
@@ -174,9 +200,20 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
     res.status(204).end()
   })
 
+  // ---- Decoy export (alert-only, see ../decoy.js) ------------------------
+  // Registered only when enabled, ahead of the staff gate so unauthenticated
+  // probes are caught too. It reads no data and always answers 404.
+  if (config.decoyExport?.enabled) router.get(DECOY_EXPORT_PATH, createDecoyExport(config.decoyExport))
+
   // ---- Everything below requires an active staff session ----------------
 
   router.use(requireStaff(db))
+
+  // Destructive organisation actions are limited to the admin role. Every staff
+  // account is 'admin' today (CHECK in 0001); this keeps the rule explicit and
+  // server-side should other staff roles be added.
+  const requireAdmin = (req, res, next) =>
+    req.staff.role === 'admin' ? next() : res.status(403).json({ error: 'Only administrators can do this.' })
 
   router.get('/auth/me', (req, res) => res.json({ user: toStaff(req.staff) }))
 
@@ -184,11 +221,15 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
 
   router.get('/dashboard', async (req, res) => {
     const one = (sql) => db.prepare(sql).get()
-    const vendors = await one(`SELECT COUNT(*) AS total, COALESCE(SUM(status = 'active'), 0) AS active FROM mashoor_vendor_companies`)
+    // Removed organisations (and their accounts) are archived: not counted.
+    const vendors = await one(
+      `SELECT COUNT(*) AS total, COALESCE(SUM(status = 'active'), 0) AS active FROM mashoor_vendor_companies WHERE status <> 'removed'`,
+    )
     // An account can sign in only if it is active AND its company is active.
     const accounts = await one(
       `SELECT COUNT(*) AS total, COALESCE(SUM(vu.active = 1 AND c.status = 'active'), 0) AS active
-         FROM mashoor_vendor_users vu JOIN mashoor_vendor_companies c ON c.id = vu.company_id`,
+         FROM mashoor_vendor_users vu JOIN mashoor_vendor_companies c ON c.id = vu.company_id
+        WHERE c.status <> 'removed'`,
     )
     const categories = await one('SELECT COUNT(*) AS total, COALESCE(SUM(active = 1), 0) AS active FROM mashoor_categories')
     const listings = await one(
@@ -210,20 +251,30 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
 
   // ---- Vendor companies -------------------------------------------------
 
+  // Default: active and suspended organisations. ?status=removed lists only the
+  // removed (archived) ones instead.
   router.get('/vendors', async (req, res) => {
+    if (req.query.status !== undefined && req.query.status !== REMOVED) return badRequest(res, 'Invalid status filter.')
+    const removed = req.query.status === REMOVED
     const rows = await db
       .prepare(
-        `SELECT c.*,
+        `SELECT c.*, s.name AS removed_by_name,
                 (SELECT COUNT(*) FROM mashoor_vendor_users u WHERE u.company_id = c.id) AS user_count,
                 (SELECT COUNT(*) FROM mashoor_vendor_users u WHERE u.company_id = c.id AND u.active = 1) AS active_user_count,
                 (SELECT COUNT(*) FROM mashoor_vendor_company_categories v WHERE v.company_id = c.id) AS category_count
            FROM mashoor_vendor_companies c
+           LEFT JOIN mashoor_staff_users s ON s.id = c.removed_by
+          WHERE ${removed ? "c.status = 'removed'" : "c.status <> 'removed'"}
           ORDER BY c.name`,
       )
       .all()
     // Login accounts per company (never any password data), for list actions.
     const accounts = {}
-    for (const row of await db.prepare('SELECT * FROM mashoor_vendor_users ORDER BY company_id, id').all()) {
+    const listed = rows.map((row) => row.id)
+    const accountRows = listed.length
+      ? await db.prepare('SELECT * FROM mashoor_vendor_users WHERE company_id IN (?) ORDER BY company_id, id').all(listed)
+      : []
+    for (const row of accountRows) {
       ;(accounts[row.company_id] ??= []).push(toVendorUser(row))
     }
     res.json({ vendors: rows.map((row) => ({ ...toCompany(row), accounts: accounts[row.id] ?? [] })) })
@@ -313,6 +364,7 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
     const id = parseId(req.params.id)
     const company = id && (await getCompany(id))
     if (!company) return notFound(res)
+    if (company.status === REMOVED) return refuseRemoved(res)
 
     const body = req.body ?? {}
     const updates = {}
@@ -328,16 +380,78 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
     const columns = Object.keys(updates)
     if (columns.length === 0) return badRequest(res, 'Nothing to update.')
 
-    await transaction(db, async () => {
+    try {
+      await transaction(db, async () => {
+        await lockOpenCompany(id) // a concurrent removal wins; this change is then refused
+        await db
+          .prepare(
+            `UPDATE mashoor_vendor_companies SET ${columns.map((c) => `${c} = ?`).join(', ')}, updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?`,
+          )
+          .run(...columns.map((c) => updates[c]), id)
+        if (updates.status === 'suspended') await deleteCompanySessions(db, id)
+        await audit(db, { ...actor(req), action: 'vendor.update', targetType: 'vendor_company', targetId: id, metadata: updates })
+      })
+    } catch (error) {
+      if (error instanceof CompanyRemoved) return refuseRemoved(res)
+      throw error
+    }
+    res.json({ vendor: toCompany(await getCompany(id)) })
+  })
+
+  // Removes (archives) an organisation. Soft and final:
+  //   * status becomes 'removed', with removed_at / removed_by (who and when);
+  //   * the organisation leaves the default list and the dashboard counts;
+  //   * its portal accounts keep their own active flag (so the per-account
+  //     Deactivate state is preserved) but can no longer sign in or use any
+  //     portal route, because both require an active organisation;
+  //   * every portal session of the organisation is deleted now, which also
+  //     disconnects its live (Socket.IO) connections on the realtime sweep;
+  //   * inspections, revisions, sign-offs, history and the audit log are
+  //     untouched (nothing is deleted).
+  // All of it is one transaction, with the company row locked.
+  router.post('/vendors/:id/remove', requireAdmin, async (req, res) => {
+    const id = parseId(req.params.id)
+    if (!id) return notFound(res)
+    const outcome = await transaction(db, async () => {
+      const company = await lockCompany(id)
+      if (!company) return { status: 404 }
+      if (company.status === REMOVED) return { status: 409 }
+      const counts = await db
+        .prepare(
+          `SELECT COUNT(*) AS accounts, COALESCE(SUM(active = 1), 0) AS active_accounts,
+                  (SELECT COUNT(*) FROM mashoor_sessions s JOIN mashoor_vendor_users u ON u.id = s.user_id
+                    WHERE s.user_type = 'vendor' AND u.company_id = ?) AS sessions,
+                  (SELECT COUNT(*) FROM mashoor_inspections i WHERE i.company_id = ?) AS inspections
+             FROM mashoor_vendor_users WHERE company_id = ?`,
+        )
+        .get(id, id, id)
       await db
         .prepare(
-          `UPDATE mashoor_vendor_companies SET ${columns.map((c) => `${c} = ?`).join(', ')}, updated_at = CURRENT_TIMESTAMP
+          `UPDATE mashoor_vendor_companies
+              SET status = 'removed', removed_at = CURRENT_TIMESTAMP, removed_by = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?`,
         )
-        .run(...columns.map((c) => updates[c]), id)
-      if (updates.status === 'suspended') await deleteCompanySessions(db, id)
-      await audit(db, { ...actor(req), action: 'vendor.update', targetType: 'vendor_company', targetId: id, metadata: updates })
+        .run(req.staff.id, id)
+      await deleteCompanySessions(db, id)
+      await audit(db, {
+        ...actor(req),
+        action: 'vendor.remove',
+        targetType: 'vendor_company',
+        targetId: id,
+        metadata: {
+          name: company.name,
+          previousStatus: company.status,
+          accounts: Number(counts.accounts),
+          activeAccounts: Number(counts.active_accounts),
+          sessionsEnded: Number(counts.sessions),
+          inspectionsKept: Number(counts.inspections),
+        },
+      })
+      return { status: 200 }
     })
+    if (outcome.status === 404) return notFound(res)
+    if (outcome.status === 409) return res.status(409).json({ error: 'This organisation has already been removed.', code: 'organisation_removed' })
     res.json({ vendor: toCompany(await getCompany(id)) })
   })
 
@@ -345,7 +459,9 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
   // next request (access is evaluated per request, nothing is cached).
   router.put('/vendors/:id/categories', async (req, res) => {
     const id = parseId(req.params.id)
-    if (!id || !(await getCompany(id))) return notFound(res)
+    const company = id && (await getCompany(id))
+    if (!company) return notFound(res)
+    if (company.status === REMOVED) return refuseRemoved(res)
     const raw = req.body?.categoryIds
     if (!Array.isArray(raw) || raw.length > 500) return badRequest(res, 'categoryIds must be a list of category ids.')
     const wanted = [...new Set(raw.map(parseIdValue))]
@@ -392,7 +508,9 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
 
   router.post('/vendors/:id/users', async (req, res) => {
     const companyId = parseId(req.params.id)
-    if (!companyId || !(await getCompany(companyId))) return notFound(res)
+    const company = companyId && (await getCompany(companyId))
+    if (!company) return notFound(res)
+    if (company.status === REMOVED) return refuseRemoved(res)
     const name = cleanText(req.body?.name, 200)
     if (!name) return badRequest(res, 'Name is required.')
     const role = req.body?.role ?? 'client'
@@ -430,6 +548,7 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
     const id = parseId(req.params.id)
     const user = id && (await getVendorUser(id))
     if (!user) return notFound(res)
+    if (await inRemovedCompany(user)) return refuseRemoved(res)
 
     const body = req.body ?? {}
     const updates = {}
@@ -492,6 +611,7 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
     const id = parseId(req.params.id)
     const user = id && (await getVendorUser(id))
     if (!user) return notFound(res)
+    if (await inRemovedCompany(user)) return refuseRemoved(res)
     if (user.active === 1) return res.status(409).json({ error: 'This account is already active.' })
     const password = readNewPassword(req.body)
     if (password.error) return res.status(password.status).json({ error: password.error })
@@ -510,6 +630,7 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
     const id = parseId(req.params.id)
     const user = id && (await getVendorUser(id))
     if (!user) return notFound(res)
+    if (await inRemovedCompany(user)) return refuseRemoved(res)
     const password = readNewPassword(req.body)
     if (password.error) return res.status(password.status).json({ error: password.error })
     const hash = await hashPassword(password.value)
@@ -563,6 +684,7 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
     const id = parseId(req.params.id)
     const company = id && (await getCompany(id))
     if (!company) return notFound(res)
+    if (company.status === REMOVED) return refuseRemoved(res)
     const body = req.body ?? {}
     const wanted = body.signatories ?? {}
     if (typeof wanted !== 'object' || Array.isArray(wanted)) return badRequest(res, 'signatories must be an object.')
@@ -909,6 +1031,7 @@ export function adminRouter({ db, config, limiter, images, diagrams }) {
     const companyId = parseIdValue(body.companyId)
     const company = companyId && (await getCompany(companyId))
     if (!company) return badRequest(res, 'Choose a vendor / company.')
+    if (company.status === REMOVED) return badRequest(res, `${company.name} has been removed; choose an active organisation.`)
     const inspectorId = parseIdValue(body.inspectorId)
     const inspector = inspectorId && (await getVendorUser(inspectorId))
     if (!inspector || inspector.company_id !== companyId || inspector.role !== 'inspector' || inspector.active !== 1) {

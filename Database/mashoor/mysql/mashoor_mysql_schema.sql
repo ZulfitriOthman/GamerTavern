@@ -4,9 +4,9 @@
 -- File: Database/mashoor/mysql/mashoor_mysql_schema.sql
 --
 -- Equals the MySQL migrations in Database/mashoor/mysql/migrations
--- (0001–0008) applied in order (an automated test checks that both produce the
+-- (0001–0009) applied in order (an automated test checks that both produce the
 -- same tables, columns, indexes, foreign keys, checks and triggers) and
--- records versions 1–8 in mashoor_schema_migrations, so the backend will not
+-- records versions 1–9 in mashoor_schema_migrations, so the backend will not
 -- apply them again.
 --
 -- Run this ONLY on a database that has no mashoor_ tables yet. On a database
@@ -57,9 +57,18 @@ CREATE TABLE mashoor_vendor_companies (
   created_at                     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at                     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   inspection_ack_blocks_approval TINYINT(1)   NOT NULL DEFAULT 0,
+  -- Soft removal (0009): set exactly when status = 'removed'; the row and its history stay.
+  removed_at                     DATETIME     NULL,
+  removed_by                     INT UNSIGNED NULL,
   PRIMARY KEY (id),
-  CONSTRAINT mashoor_vendor_companies_status_chk CHECK (status IN ('active', 'suspended')),
-  CONSTRAINT mashoor_vendor_companies_ack_chk CHECK (inspection_ack_blocks_approval IN (0, 1))
+  KEY mashoor_vendor_companies_status_idx (status),
+  CONSTRAINT mashoor_vendor_companies_removed_by_fk FOREIGN KEY (removed_by) REFERENCES mashoor_staff_users (id),
+  CONSTRAINT mashoor_vendor_companies_ack_chk CHECK (inspection_ack_blocks_approval IN (0, 1)),
+  CONSTRAINT mashoor_vendor_companies_status_chk CHECK (status IN ('active', 'suspended', 'removed')),
+  CONSTRAINT mashoor_vendor_companies_removed_chk CHECK (
+    (status = 'removed' AND removed_at IS NOT NULL AND removed_by IS NOT NULL)
+    OR (status <> 'removed' AND removed_at IS NULL AND removed_by IS NULL)
+  )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Vendor / Client and Inspector logins. Usernames are unique case-insensitively
@@ -445,7 +454,7 @@ END$$
 
 DELIMITER ;
 
--- ---- Recorded as migrations 0001–0008 (0008 only adds what this file already has) ---------------------------------------
+-- ---- Recorded as migrations 0001–0009 (0008 only adds what this file already has) ---------------------------------------
 
 INSERT INTO mashoor_schema_migrations (version, name) VALUES
   (1, '0001_initial_schema'),
@@ -455,4 +464,5 @@ INSERT INTO mashoor_schema_migrations (version, name) VALUES
   (5, '0005_inspector_role_and_vehicle_inspections'),
   (6, '0006_checklist_form_templates'),
   (7, '0007_staff_username_login'),
-  (8, '0008_schema_migrations_and_history_triggers');
+  (8, '0008_schema_migrations_and_history_triggers'),
+  (9, '0009_vendor_company_removal');

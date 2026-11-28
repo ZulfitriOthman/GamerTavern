@@ -90,8 +90,8 @@ transport too (the marketplace HTTP CORS list is not widened).
   settings; `MASHOOR_MYSQL_*` in `Backend/.env.dev`, falling back to `MYSQL_*`. Verified 2026-11-23 from inside
   the container: `SELECT DATABASE(), VERSION()` → `nanashi_collectibles`, `10.6.28-MariaDB` on
   `s1319.sgp1.mysecurecloudhost.com:3306` — **the same database the live marketplace uses**. Tables are
-  `mashoor_*`; schema version 8 (`Database/mashoor/mysql/migrations`).
-- **No fallback:** if MySQL is unreachable, not configured, or the schema is not at version 8, `/api/mashoor`
+  `mashoor_*`; schema version 9 (`Database/mashoor/mysql/migrations`; 0009 adds organisation removal).
+- **No fallback:** if MySQL is unreachable, not configured, or the schema is not at version 9, `/api/mashoor`
   does not start and the Backend log says why (host and database name, never credentials). The marketplace keeps
   running. The old SQLite file `Backend/mashoor/data/mashoor.db` is kept but no longer read.
 - **Migrations are never applied automatically.** From `Backend/`: `npm run mashoor:migrate` shows the status;

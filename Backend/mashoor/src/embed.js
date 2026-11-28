@@ -36,6 +36,9 @@ export async function createMashoorModule({ env = process.env } = {}) {
   timer.unref()
 
   console.log(`[mashoor-api] mounted at ${MASHOOR_API_PREFIX} (db: ${db.info.where}, ${db.info.version})`)
+  // State only — never the decoy path or token URL.
+  if (config.decoyExport.enabled) console.log('[mashoor-api] decoy export alert: enabled')
+  else if (config.decoyExport.problem) console.warn(`[mashoor-api] decoy export alert: disabled (${config.decoyExport.problem})`)
   return {
     prefix: MASHOOR_API_PREFIX,
     router: createMashoorRouter({ db, config, realtime }),

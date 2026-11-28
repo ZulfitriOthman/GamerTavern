@@ -52,7 +52,8 @@ describe('MySQL migrations', () => {
   })
 
   it('0008 restores the ledger and triggers on a hand-built schema and keeps its rows', async () => {
-    const all = loadMigrations()
+    // Exercised as the latest file it was written as (later files are covered below).
+    const all = loadMigrations().slice(0, 8)
     const testDb = await createTestDatabase({ migrations: all.slice(0, 7) })
     const db = await testDb.open({ checkMigrations: false, importChecklists: false })
     try {
@@ -62,7 +63,7 @@ describe('MySQL migrations', () => {
       await db.exec('DROP TABLE mashoor_schema_migrations')
       await db.prepare("INSERT INTO mashoor_vendor_companies (name) VALUES ('Existing Co')").run()
       assert.equal(await schemaVersion(db), 0)
-      await assert.rejects(checkSchema(db), /schema is at version 0; 8 is required/)
+      await assert.rejects(checkSchema(db, all), /schema is at version 0; 8 is required/)
 
       assert.deepEqual(await applyMigrations(db, all, { from: 8 }), ['0008_schema_migrations_and_history_triggers'])
       assert.equal(await schemaVersion(db), 8)
@@ -74,7 +75,40 @@ describe('MySQL migrations', () => {
       await db.exec('DELETE FROM mashoor_schema_migrations WHERE version = 8')
       assert.deepEqual(await applyMigrations(db, all, { from: 8 }), ['0008_schema_migrations_and_history_triggers'])
       assert.deepEqual(await triggersOf(db), TRIGGERS)
-      assert.equal(await checkSchema(db), 8)
+      assert.equal(await checkSchema(db, all), 8)
+    } finally {
+      await db.close()
+      await testDb.drop()
+    }
+  })
+
+  it('0009 adds organisation removal and keeps existing organisations as they were', async () => {
+    const all = loadMigrations()
+    assert.equal(all[8].name, '0009_vendor_company_removal')
+    const testDb = await createTestDatabase({ migrations: all.slice(0, 8) })
+    const db = await testDb.open({ checkMigrations: false, importChecklists: false })
+    try {
+      await db.prepare("INSERT INTO mashoor_vendor_companies (name, status) VALUES ('Kept Active', 'active'), ('Kept Suspended', 'suspended')").run()
+      await assert.rejects(db.prepare("UPDATE mashoor_vendor_companies SET status = 'removed'").run(), /CONSTRAINT|check/i)
+      assert.deepEqual(await applyMigrations(db, all), ['0009_vendor_company_removal'])
+      assert.equal(await checkSchema(db), all.length)
+      const rows = await db.prepare('SELECT name, status, removed_at, removed_by FROM mashoor_vendor_companies ORDER BY name').all()
+      assert.deepEqual(rows, [
+        { name: 'Kept Active', status: 'active', removed_at: null, removed_by: null },
+        { name: 'Kept Suspended', status: 'suspended', removed_at: null, removed_by: null },
+      ])
+      // removed requires who and when, and only removed may carry them.
+      await assert.rejects(db.prepare("UPDATE mashoor_vendor_companies SET status = 'removed' WHERE name = 'Kept Active'").run(), /CONSTRAINT|check/i)
+      await db.prepare("INSERT INTO mashoor_staff_users (email, name, password_hash) VALUES ('s@x.test', 'S', 'x')").run()
+      const staffId = (await db.prepare('SELECT id FROM mashoor_staff_users').get()).id
+      await assert.rejects(
+        db.prepare("UPDATE mashoor_vendor_companies SET removed_at = CURRENT_TIMESTAMP, removed_by = ? WHERE name = 'Kept Active'").run(staffId),
+        /CONSTRAINT|check/i,
+      )
+      await db
+        .prepare("UPDATE mashoor_vendor_companies SET status = 'removed', removed_at = CURRENT_TIMESTAMP, removed_by = ? WHERE name = 'Kept Active'")
+        .run(staffId)
+      await assert.rejects(db.prepare("UPDATE mashoor_vendor_companies SET removed_by = 999999 WHERE name = 'Kept Active'").run(), /foreign key/i)
     } finally {
       await db.close()
       await testDb.drop()
@@ -85,7 +119,8 @@ describe('MySQL migrations', () => {
     const testDb = await createTestDatabase()
     const db = await testDb.open({ importChecklists: false })
     try {
-      await assert.rejects(checkSchema(db, loadMigrations().slice(0, 7)), /version 8, newer than the 7 migration file/)
+      const latest = loadMigrations().length
+      await assert.rejects(checkSchema(db, loadMigrations().slice(0, 7)), new RegExp(`version ${latest}, newer than the 7 migration file`))
     } finally {
       await db.close()
       await testDb.drop()
