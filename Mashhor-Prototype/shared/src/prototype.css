@@ -1,18 +1,773 @@
 /* Prototype additions on top of the shared Mashoor styles
    (Listing-Sample/Mashoor/packages/shared/src/styles.css). */
 
+/* Colour roles (60-30-10): neutral surfaces, charcoal for structure and
+   "you are here" states, blue only on things you click to act. The pine
+   green is the brand colour (logo). Red is kept for errors and destructive
+   actions. */
+:root {
+  --brand: #1f5c4f;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-soft: #e8effd;
+  --accent-text: #1e40af;
+  --focus-ring: 0 0 0 3px rgb(37 99 235 / 0.32);
+  --secondary: var(--text);
+  --secondary-soft: var(--sunken);
+  --todo: #b45309; /* amber: "waiting for you" counts; white text stays readable */
+}
+.brand-mark {
+  background: var(--brand);
+}
+a,
+a:hover,
+.btn-link,
+.btn-link:hover,
+a.cell-title:hover {
+  color: var(--secondary);
+}
+/* Current page in the main navigation carries the brand colour. */
+.nav-link.active {
+  background: #e6efea;
+  color: var(--brand);
+}
+.nav-link.active::before {
+  background: var(--brand);
+}
+.chip[aria-pressed='true'] {
+  background: var(--secondary-soft);
+  border-color: var(--secondary);
+  color: var(--secondary);
+  box-shadow: inset 0 0 0 1px var(--secondary);
+}
+.chip[aria-pressed='true'] .count {
+  color: var(--secondary);
+}
+.pick:has(input:checked) {
+  border-color: var(--secondary);
+  background: var(--secondary-soft);
+}
+
 .proto-tag {
   display: inline-block;
   margin-left: 0.5rem;
   padding: 0.05rem 0.45rem;
-  border: 1px dashed var(--accent);
+  border: 1px dashed var(--brand);
   border-radius: 999px;
-  color: var(--accent);
+  color: var(--brand);
   font-size: 0.7rem;
   font-weight: 650;
   letter-spacing: 0.02em;
   text-transform: uppercase;
   white-space: nowrap;
+}
+
+/* Portal top navigation as full-height tabs: the current page gets a tinted
+   box (top corners rounded so the underline stays flush) plus an underline. */
+.portal-header-inner {
+  padding-block: 0;
+  min-height: 4rem;
+}
+.portal-nav {
+  align-self: stretch;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+}
+.portal-nav .nav-link {
+  min-height: 100%;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius) var(--radius) 0 0;
+  border-bottom: 3px solid transparent;
+  background: none;
+  font-size: var(--text-base);
+}
+.portal-nav .nav-link:hover {
+  background: none;
+  color: var(--text);
+  border-bottom-color: var(--border);
+}
+.portal-nav .nav-link.active {
+  background: #e6efea;
+  color: var(--brand);
+  border-bottom-color: var(--brand);
+  font-weight: 650;
+}
+@media (max-width: 840px) {
+  .portal-header-inner {
+    padding-block: var(--space-3) 0;
+  }
+  .portal-nav .nav-link {
+    min-height: 3rem;
+  }
+}
+
+/* Portal account menu: initials + name + caret button opening a native
+   popover with who you are, Settings and Sign out. */
+.proto-account {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-1);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.proto-account:hover,
+.portal-user:has(.proto-menu:popover-open) .proto-account {
+  background: var(--sunken);
+  border-color: var(--border);
+}
+.proto-account .avatar {
+  width: 2rem;
+  height: 2rem;
+  font-size: var(--text-xs);
+}
+.proto-account-caret {
+  rotate: 90deg;
+  color: var(--text-muted);
+}
+@media (max-width: 840px) {
+  .proto-account-name {
+    display: none;
+  }
+}
+
+/* Fallback placement: top-right of the window. Display is set only while
+   open, because a display value on a closed popover overrides the hiding. */
+.proto-menu {
+  position: fixed;
+  inset: auto;
+  top: 4.25rem;
+  right: var(--space-4);
+  margin: 0;
+  min-width: 16rem;
+  max-width: calc(100vw - 2 * var(--space-4));
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+}
+/* Where supported, hang the menu under its button (popoverTarget sets the anchor). */
+@supports (position-area: block-end) {
+  .proto-menu {
+    top: auto;
+    right: auto;
+    margin-top: var(--space-2);
+    position-area: block-end span-inline-start;
+    position-try-fallbacks: flip-inline;
+  }
+}
+.proto-menu:popover-open {
+  display: grid;
+}
+.proto-menu-head {
+  display: grid;
+  gap: 0.1rem;
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  margin-bottom: var(--space-1);
+  border-bottom: 1px solid var(--border);
+  line-height: 1.35;
+}
+.proto-menu-head span {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+.proto-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.proto-menu-item:hover {
+  background: var(--sunken);
+}
+.proto-menu-item .icon {
+  color: var(--text-muted);
+}
+
+/* In-page tabs (inspection queues): same underline language as the top
+   navigation, one step smaller. */
+.tabs {
+  gap: var(--space-1);
+  /* One row that scrolls sideways when it doesn't fit (never wraps into a list). */
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  scroll-snap-type: inline proximity;
+  scroll-padding-inline: 2.5rem;
+}
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+.tab {
+  flex: none;
+  white-space: nowrap;
+  scroll-snap-align: start;
+  padding: var(--space-3) var(--space-4);
+  margin-top: var(--space-2);
+  border-bottom-width: 3px;
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+/* Fade the edge that has more tabs beyond it; no fade when everything fits.
+   Driven by the row's own scroll position (no script). */
+@property --tabs-fade-start {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+@property --tabs-fade-end {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+@supports (animation-timeline: scroll()) {
+  .tabs {
+    --tabs-fade: 2.5rem;
+    mask:
+      linear-gradient(black, black) no-clip subtract,
+      linear-gradient(to right, black, transparent) 0 0 / var(--tabs-fade-start) 100% no-repeat no-clip,
+      linear-gradient(to right, transparent, black) 100% 0 / var(--tabs-fade-end) 100% no-repeat no-clip;
+    animation:
+      tabs-fade-start linear both,
+      tabs-fade-end linear both;
+    animation-timeline: scroll(self inline);
+    animation-range:
+      0 var(--tabs-fade),
+      calc(100% - var(--tabs-fade)) 100%;
+  }
+}
+@keyframes tabs-fade-start {
+  to {
+    --tabs-fade-start: var(--tabs-fade);
+  }
+}
+@keyframes tabs-fade-end {
+  from {
+    --tabs-fade-end: var(--tabs-fade);
+  }
+}
+.tab:hover {
+  border-bottom-color: var(--border);
+}
+.tab.active,
+button.tab.active {
+  background: var(--secondary-soft);
+  color: var(--secondary);
+  font-weight: 700;
+  border-bottom-color: var(--secondary);
+}
+/* Count circles: amber = items waiting for you (also the header badge),
+   grey = a plain count, whichever tab is selected. */
+.tab.active .count {
+  background: var(--surface);
+}
+.tab .count.todo,
+.nav-count {
+  background: var(--todo);
+  color: #fff;
+  font-weight: 650;
+}
+
+/* Client's decision card: top of the side column, kept in view while the
+   checklist scrolls. In the one-column layout it goes above the checklist
+   (the side column dissolves so its cards can be ordered separately). */
+.proto-decision-actions {
+  display: grid;
+  gap: var(--space-3);
+}
+@media (min-width: 1080px) {
+  .proto-decision {
+    position: sticky;
+    top: var(--space-4);
+    z-index: 2;
+  }
+}
+@media (max-width: 1079px) {
+  .proto-side {
+    display: contents !important; /* overrides the inline grid style */
+  }
+  .proto-decision {
+    order: -1;
+  }
+  .proto-fold {
+    order: 1;
+  }
+}
+
+/* Side-column folds (History, Summary, Sign-off): a clickable header row with
+   a caret; the open state is the browser's own <details>. */
+.proto-fold > summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.15rem var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  list-style: none;
+  cursor: pointer;
+  border-radius: var(--radius-lg);
+}
+.proto-fold > summary::-webkit-details-marker {
+  display: none;
+}
+.proto-fold > summary::after {
+  content: '';
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-right: 2px solid var(--text-muted);
+  border-bottom: 2px solid var(--text-muted);
+  rotate: 45deg;
+  translate: 0 -0.15rem;
+}
+.proto-fold[open] > summary::after {
+  rotate: -135deg;
+  translate: 0 0.15rem;
+}
+.proto-fold > summary:hover {
+  background: var(--surface-muted);
+}
+.proto-fold > summary:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.proto-fold[open] > summary {
+  border-bottom: 1px solid var(--border);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+.proto-fold-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 650;
+  font-size: var(--text-lg);
+}
+.proto-fold-title .badge {
+  font-size: var(--text-xs);
+}
+.proto-fold-meta {
+  grid-column: 1;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+/* A shared card inside a fold: drop its frame and its own heading. */
+.proto-fold > .card {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: none;
+}
+.proto-fold > .card > .card-head {
+  display: none;
+}
+/* The side column is narrow: always show the summary table as stacked rows. */
+.proto-fold .table-stack thead {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+.proto-fold .table-stack,
+.proto-fold .table-stack tbody,
+.proto-fold .table-stack tr {
+  display: block;
+  width: 100%;
+}
+.proto-fold .table-stack tr {
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--border);
+}
+.proto-fold .table-stack tbody tr:last-child {
+  border-bottom: 0;
+}
+.proto-fold .table-stack td,
+.proto-fold .table-stack td:first-child,
+.proto-fold .table-stack td:last-child {
+  display: grid;
+  grid-template-columns: 6.5rem minmax(0, 1fr);
+  gap: var(--space-3);
+  padding: 0.3rem 0;
+  border: 0;
+  text-align: left;
+}
+.proto-fold .table-stack td::before {
+  content: attr(data-label);
+  font-size: var(--text-xs);
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.proto-fold .table-stack td[data-label=''] {
+  display: block;
+}
+.proto-fold .table-stack td[data-label='']::before {
+  content: none;
+}
+
+/* Timeline dots are markers, not controls: neutral, not the button blue. */
+.timeline-dot {
+  background: var(--text-subtle);
+}
+
+/* Back link above page titles, drawn as a white secondary button so it reads
+   as clickable (white = go/look, blue = your turn). */
+.back-link {
+  min-height: 2.125rem;
+  padding: 0 var(--space-3) 0 var(--space-2);
+  margin-bottom: var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+}
+.back-link:hover {
+  background: var(--sunken);
+}
+.back-link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* "Mark:" key above the checklist is a legend, not controls: tinted, borderless
+   symbols instead of outlined boxes that look like buttons. Screen only; the
+   print sheet keeps its own legend styling. */
+.doc-card .legend .mark,
+.status-chip .mark {
+  border-color: transparent;
+  background: var(--sunken);
+  box-shadow: none;
+}
+.doc-card .legend .mark.tone-ok,
+.status-chip.tone-ok .mark {
+  background: var(--success-soft);
+}
+.doc-card .legend .mark.tone-bad,
+.status-chip.tone-bad .mark {
+  background: var(--danger-soft);
+}
+.doc-card .legend .mark.tone-warn,
+.status-chip.tone-warn .mark {
+  background: var(--warning-soft);
+}
+
+/* Read-only vehicle details: the identifiers and the entered details are two
+   <dl> grids that wrap separately and leave orphans ("Vehicle type" alone on
+   a row). Flow both into one even grid. */
+.card-body:has(> dl.detail-grid + dl.detail-grid) {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-5) var(--space-6);
+}
+.card-body:has(> dl.detail-grid + dl.detail-grid) > dl.detail-grid {
+  display: contents;
+}
+@media (max-width: 600px) {
+  .card-body:has(> dl.detail-grid + dl.detail-grid) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Journey strip (JourneyStrip.jsx): five steps joined by a line.
+   charcoal = done, ringed = waiting on someone else, amber = your turn,
+   green = approved. Horizontal on wide screens, a vertical list on phones. */
+.proto-journey-card {
+  padding: var(--space-5) var(--space-6);
+}
+.proto-journey {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.proto-journey li {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-2);
+  text-align: center;
+}
+/* Connector halves: left half belongs to this step, right half to the next. */
+.proto-journey li::before,
+.proto-journey li::after {
+  content: '';
+  position: absolute;
+  top: calc(1rem - 1.5px);
+  height: 3px;
+  background: var(--border);
+}
+.proto-journey li::before {
+  left: 0;
+  right: 50%;
+}
+.proto-journey li::after {
+  left: 50%;
+  right: 0;
+}
+.proto-journey li:first-child::before,
+.proto-journey li:last-child::after {
+  display: none;
+}
+.proto-journey li.after-done::before,
+.proto-journey li.is-done::after {
+  background: var(--secondary);
+}
+.proto-journey-dot {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  box-sizing: border-box;
+  border: 2px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-subtle);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.proto-journey-dot .icon {
+  width: 1rem;
+  height: 1rem;
+  stroke-width: 3;
+}
+.proto-journey-text {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+.proto-journey-label {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.proto-journey-sub {
+  font-size: var(--text-xs);
+  color: var(--text-subtle);
+  overflow-wrap: anywhere;
+}
+.proto-journey .is-done .proto-journey-dot {
+  border-color: var(--secondary);
+  background: var(--secondary);
+  color: var(--surface);
+}
+.proto-journey .is-now .proto-journey-dot {
+  border: 3px solid var(--secondary);
+  color: var(--secondary);
+}
+.proto-journey .is-yours .proto-journey-dot {
+  border-color: var(--todo);
+  background: var(--todo);
+  color: #fff;
+  box-shadow: 0 0 0 4px var(--warning-soft);
+}
+.proto-journey .is-approved .proto-journey-dot {
+  border-color: var(--brand);
+  background: var(--brand);
+  color: #fff;
+  box-shadow: 0 0 0 4px #e6efea;
+}
+.proto-journey :is(.is-done, .is-now, .is-yours, .is-approved) .proto-journey-label {
+  color: var(--text);
+  font-weight: 650;
+}
+.proto-journey :is(.is-done, .is-now) .proto-journey-sub {
+  color: var(--text-muted);
+}
+.proto-journey .is-yours .proto-journey-sub {
+  color: var(--todo);
+  font-weight: 700;
+}
+.proto-journey .is-approved :is(.proto-journey-label, .proto-journey-sub) {
+  color: var(--brand);
+}
+@media (max-width: 720px) {
+  .proto-journey {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .proto-journey li {
+    display: grid;
+    grid-template-columns: 2rem minmax(0, 1fr);
+    column-gap: var(--space-3);
+    align-items: start;
+    padding: 0 0 var(--space-4);
+    text-align: left;
+  }
+  .proto-journey li:last-child {
+    padding-bottom: 0;
+  }
+  /* Vertical rail: only the line down to the next step. */
+  .proto-journey li::before {
+    display: none;
+  }
+  .proto-journey li::after {
+    top: 2rem;
+    bottom: 0;
+    left: calc(1rem - 1.5px);
+    right: auto;
+    width: 3px;
+    height: auto;
+  }
+  .proto-journey-text {
+    padding-top: 0.3rem;
+  }
+}
+
+/* Status badges are information, not calls to action: white pill, the word
+   carries the meaning, the dot only marks a problem (red) or done (green).
+   Amber and blue stay reserved for "your turn". Count badges (.plain) keep
+   their tint. */
+.badge:not(.plain) {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+.badge:not(.plain)::before {
+  background: var(--border-strong);
+  opacity: 1;
+}
+.badge.success:not(.plain)::before {
+  background: var(--success);
+}
+.badge.danger:not(.plain)::before {
+  background: var(--danger);
+}
+
+/* History: one connected timeline (line from each dot down to the next). */
+.timeline li {
+  position: relative;
+}
+.timeline li:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: calc(0.3rem - 1px);
+  top: 1.05rem;
+  bottom: calc(-1 * var(--space-4) - 0.45rem);
+  width: 2px;
+  background: var(--border);
+}
+
+/* Summary fold: every entry is the same vehicle as the page title, so the
+   vehicle cell is dropped. */
+.proto-fold .table-stack td:first-child {
+  display: none;
+}
+
+/* Checklist filter bar (IssueFilter in InspectionPage.jsx). */
+.proto-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3) var(--space-4);
+  padding: var(--space-3) var(--space-5);
+}
+.proto-segmented {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.proto-segmented button {
+  min-height: 2.125rem;
+  padding: 0 var(--space-4);
+  border: 0;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.proto-segmented button + button {
+  border-left: 1px solid var(--border-strong);
+}
+.proto-segmented button:hover {
+  background: var(--sunken);
+}
+.proto-segmented button[aria-pressed='true'] {
+  background: var(--secondary);
+  color: var(--surface);
+}
+.proto-segmented button:focus-visible {
+  outline: none;
+  box-shadow: inset var(--focus-ring);
+}
+
+.proto-all-clear {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--success);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+/* Approved banner: the finish of an inspection's journey. */
+.proto-approved {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid #b6cfc6;
+  border-radius: var(--radius-lg);
+  background: #e6efea;
+}
+.proto-approved-mark {
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: none;
+  border-radius: 50%;
+  background: var(--brand);
+  color: #fff;
+}
+.proto-approved-mark .icon {
+  stroke-width: 3;
+}
+.proto-approved-text {
+  display: grid;
+  gap: 0.1rem;
+  flex: 1;
+  min-width: 12rem;
+}
+.proto-approved-text strong {
+  color: var(--brand);
+  font-size: var(--text-lg);
+}
+
+/* Rows aren't clickable as a whole (only the title and the action button),
+   so they shouldn't highlight on hover. */
+.table tbody tr:hover td {
+  background: transparent;
 }
 
 .proto-revision-pick {

@@ -6,9 +6,9 @@ export const VEHICLE_TYPES = ['FORKLIFT', 'DOUBLE CAB HILUX', 'MEDIUM BUS', 'LAR
 export const INSPECTION_STATUS = {
   assigned: { label: 'Assigned', tone: '' },
   draft: { label: 'In progress', tone: '' },
-  pending_verification: { label: 'Pending client verification', tone: 'warning' },
+  pending_verification: { label: 'Pending verification', tone: 'warning' },
   returned: { label: 'Re-check requested', tone: 'danger' },
-  pending_approval: { label: 'Pending HOO approval', tone: 'accent' },
+  pending_approval: { label: 'Awaiting Head of Operation', tone: 'accent' },
   approved: { label: 'Approved', tone: 'success' },
 }
 
@@ -28,7 +28,7 @@ export const EVENT_LABELS = {
   submitted: 'Submitted for client verification',
   resubmitted: 'Resubmitted after re-check',
   recheck_requested: 'Re-check requested',
-  submitted_for_approval: 'Verified and submitted to HOO approval',
+  submitted_for_approval: 'Verified, sent to Head of Operation',
   'acknowledgement.auto': 'Auto-acknowledged — no remarks',
   'signed.checked_by': 'Confirmed as Checked by',
   'signed.agreed_by': 'Confirmed as Agreed by',

@@ -173,7 +173,7 @@ export function SignoffPanel({ inspection, revision, renderAction, captions }) {
                   {captions?.[stage]?.caption && stage !== 'approved_by' && <span className="subtle"> — {captions[stage].caption}</span>}
                 </span>
                 <span className="subtle">
-                  {who ? `Assigned to ${who.name}${who.active ? '' : ' (deactivated)'}` : 'Not assigned — ask Mashoor staff to assign this stage'}
+                  {who ? `Assigned to ${who.name}${who.active ? '' : ' (deactivated)'}` : 'Not assigned — ask the Mashhor office to assign this stage'}
                 </span>
                 {signed && (
                   <span className="signoff-by">
@@ -206,7 +206,7 @@ export function EventTimeline({ events }) {
             <strong>{EVENT_LABELS[e.action] ?? e.action}</strong>
             <span className="subtle">
               {' '}
-              {e.actorType === 'system' ? 'System' : e.actorName ?? 'Mashoor staff'} · {formatDate(e.at)}
+              {e.actorType === 'system' ? 'System' : e.actorName ?? 'Mashhor office'} · {formatDate(e.at)}
               {e.revision ? ` · revision ${e.revision}` : ''}
             </span>
             {e.detail && <p className="timeline-detail prewrap">{e.detail}</p>}

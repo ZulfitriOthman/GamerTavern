@@ -8,20 +8,23 @@
 // reloads the page, except while the inspector has unsaved edits — then the
 // update is announced with a Reload button instead of discarding their work.
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router'
+import { Link, useNavigate, useParams } from 'react-router'
 import { vehicleTitle, STAGE_LABELS } from '@mashoor/shared/inspection'
 import { useAuth } from '@mashoor/shared/useAuth'
 import { Icon } from '@mashoor/shared/Icon'
-import { buildSummary, hasRemarks, progress, submitProblems } from '@mashoor/shared/checklist'
+import { formatDay } from '@mashoor/shared/format'
+import { buildSummary, hasRemarks, progress, statusTone, submitProblems } from '@mashoor/shared/checklist'
 import { ChecklistForm } from '@mashoor/shared/ChecklistForm'
 import { EventTimeline, InspectionStatusBadge, RevisionHistory, SignoffPanel, SummarySection } from '@mashoor/shared/InspectionView'
 import { Alert, ConfirmDialog, EmptyState, Field, Loading, Modal, PageHeader } from '@mashoor/shared/ui'
 import { useLiveVersion } from '@prototype/useLive.js'
+import { JourneyStrip } from '@prototype/JourneyStrip.jsx'
 import { api, diagramUrl } from '../api.js'
 
 export default function InspectionPage() {
   const { id } = useParams()
   const { session } = useAuth()
+  const navigate = useNavigate()
   const [data, setData] = useState(null)
   const [loadError, setLoadError] = useState(null)
   const [reloadKey, setReloadKey] = useState(0)
@@ -72,7 +75,7 @@ export default function InspectionPage() {
     }
   }, [id, reloadKey])
 
-  const back = { to: '/inspections', label: 'Inspections' }
+  const back = { to: '/inspections', label: 'Back to inspections' }
   if (loadError) {
     return (
       <>
@@ -105,6 +108,10 @@ export default function InspectionPage() {
   const { inspection, viewer } = data
   const current = inspection.revisions.find((r) => r.current)
   const captionsFrom = (viewer.canEdit ? inspection.working?.definition : current?.snapshot.definition)?.signoff
+  const myTurn = Boolean(current) && viewer.stages.some((s) => !s.signed && !s.blockedReason)
+  // The status badge sits on the Summary fold when there is one, otherwise beside the title.
+  const showSummary = !viewer.canEdit && Boolean(current)
+  const statusBadge = <InspectionStatusBadge status={inspection.status} />
 
   function after(result, message) {
     setData((d) => ({ ...d, inspection: result.inspection }))
@@ -113,14 +120,29 @@ export default function InspectionPage() {
     reload()
   }
 
+  // After submitting, the inspector's task is done: back to the list, with where it went and what happens next.
+  function submitted(result) {
+    const sent = result.inspection
+    navigate('/inspections?queue=submitted', {
+      state: {
+        notice: {
+          title: `${vehicleTitle(sent.vehicle)} sent to ${sent.company.name} for review`,
+          body: 'You’ll find it under Submitted. If they ask for a re-check, it comes back under Re-check requested.',
+        },
+      },
+    })
+  }
+
+  const approver = current?.signoffs.find((s) => s.stage === 'approved_by')?.name
+
   return (
     <>
       <PageHeader
         back={back}
         title={vehicleTitle(inspection.vehicle)}
-        badge={<InspectionStatusBadge status={inspection.status} />}
-        description={`${inspection.templateName}${inspection.templateVersion ? ` (v${inspection.templateVersion})` : ''} · ${inspection.company.name}${
-          inspection.currentRevision ? ` · revision ${inspection.currentRevision}` : ''
+        badge={showSummary ? undefined : statusBadge}
+        description={`${inspection.templateName} · ${inspection.company.name}${
+          inspection.currentRevision > 1 ? ` · revision ${inspection.currentRevision}` : ''
         }`}
         actions={
           (current || viewer.canEdit) && (
@@ -130,6 +152,23 @@ export default function InspectionPage() {
           )
         }
       />
+      <JourneyStrip inspection={inspection} viewer={viewer} />
+      {inspection.status === 'approved' && (
+        <section className="proto-approved" aria-label="Approved">
+          <span className="proto-approved-mark" aria-hidden="true">
+            <Icon name="check" />
+          </span>
+          <span className="proto-approved-text">
+            <strong>Approved by the Head of Operation</strong>
+            <span>
+              {[approver, formatDay(inspection.approvedAt, '')].filter(Boolean).join(' · ')}. This checklist is final.
+            </span>
+          </span>
+          <Link className="btn" to={`/inspections/${inspection.id}/print`}>
+            Print final checklist
+          </Link>
+        </section>
+      )}
       {error && (
         <Alert tone="danger" title={error.stale ? 'This inspection has changed' : undefined} onDismiss={() => setError(null)}>
           {error.message}
@@ -181,30 +220,36 @@ export default function InspectionPage() {
         </Alert>
       )}
       {inspection.status === 'returned' && inspection.recheckReason && (
-        <Alert tone="warning" title="Re-check requested by the client">
+        // The client sees their own request; the inspector sees who sent it back.
+        <Alert tone="warning" title={session.user.role === 'client' ? 'Re-check requested' : `Re-check requested by ${inspection.company.name}`}>
           <span className="prewrap">{inspection.recheckReason}</span>
           {viewer.canEdit && <div>Correct the checklist below and resubmit it for verification.</div>}
+          {session.user.role === 'client' && <div>Sent back to {inspection.inspector.name}. Waiting for the corrected checklist.</div>}
         </Alert>
       )}
 
       <div className="split form-split">
         <div style={{ display: 'grid', gap: '1.5rem', alignContent: 'start', minWidth: 0 }}>
           {viewer.canEdit ? (
-            <FormEditor key={inspection.updatedAt} inspection={inspection} onSaved={after} onError={report} onDirtyChange={setEditing} />
+            <FormEditor
+              key={inspection.updatedAt}
+              inspection={inspection}
+              onSaved={after}
+              onSubmitted={submitted}
+              onError={report}
+              onDirtyChange={setEditing}
+            />
           ) : current ? (
             <>
-              <Alert tone="info">
-                Revision {current.revision} as submitted by {current.submittedBy?.name ?? 'the inspector'}. Nothing on it can be changed; a re-check creates a new
-                revision.
-              </Alert>
-              <ChecklistForm
-                readOnly
-                definition={current.snapshot.definition}
-                answers={current.snapshot.answers}
-                vehicle={current.snapshot.vehicle}
-                diagramUrl={diagramUrl(inspection.id, current.snapshot.definition)}
-              />
-              <SummarySection summary={current.summary} vehicle={current.snapshot.vehicle} />
+              <IssueFilter key={current.revision} definition={current.snapshot.definition} answers={current.snapshot.answers}>
+                <ChecklistForm
+                  readOnly
+                  definition={current.snapshot.definition}
+                  answers={current.snapshot.answers}
+                  vehicle={current.snapshot.vehicle}
+                  diagramUrl={diagramUrl(inspection.id, current.snapshot.definition)}
+                />
+              </IssueFilter>
             </>
           ) : (
             <section className="card">
@@ -214,31 +259,11 @@ export default function InspectionPage() {
             </section>
           )}
 
-          {viewer.canVerify && current && <ClientDecision inspection={inspection} revision={current} onDone={after} onError={report} />}
-
-          <SignoffPanel
-            inspection={inspection}
-            revision={current}
-            captions={captionsFrom}
-            renderAction={(stage) => {
-              const mine = viewer.stages.find((s) => s.stage === stage)
-              if (!mine || mine.signed) return null
-              if (mine.blockedReason) return <span className="subtle">{mine.blockedReason}</span>
-              return <SignAction stage={stage} inspection={inspection} revision={current} session={session} onDone={after} onError={report} />
-            }}
-          />
         </div>
 
-        <div style={{ display: 'grid', gap: '1.5rem', alignContent: 'start', minWidth: 0 }}>
-          <section className="card" aria-labelledby="history-title">
-            <div className="card-head">
-              <div>
-                <h2 id="history-title">History</h2>
-                <p>
-                  Assigned to {inspection.inspector.name} · {inspection.company.name}
-                </p>
-              </div>
-            </div>
+        <div className="proto-side" style={{ display: 'grid', gap: '1.5rem', alignContent: 'start', minWidth: 0 }}>
+          {viewer.canVerify && current && <ClientDecision inspection={inspection} revision={current} onDone={after} onError={report} />}
+          <Fold title="History" meta={`Assigned to ${inspection.inspector.name} · ${inspection.company.name}`}>
             <EventTimeline events={inspection.events} />
             {inspection.revisions.some((r) => !r.current) && (
               <div className="card-body" style={{ borderTop: '1px solid var(--border)' }}>
@@ -249,8 +274,104 @@ export default function InspectionPage() {
                 />
               </div>
             )}
-          </section>
+          </Fold>
+          {showSummary && (
+            <Fold
+              title={<>Summary {statusBadge}</>}
+              meta={
+                current.summary.length > 0 ? (
+                  `${current.summary.length} remark${current.summary.length === 1 ? '' : 's'} or action${current.summary.length === 1 ? '' : 's'}`
+                ) : (
+                  <span className="proto-all-clear">
+                    <Icon name="check" /> No defects or remarks
+                  </span>
+                )
+              }
+              defaultOpen={current.summary.length > 0}
+            >
+              <SummarySection summary={current.summary} vehicle={current.snapshot.vehicle} />
+            </Fold>
+          )}
+          <Fold
+            title="Acknowledgement and sign-off"
+            meta={myTurn ? 'Waiting for your confirmation' : current ? `Revision ${current.revision}` : 'Opens once the checklist is submitted'}
+            defaultOpen={myTurn}
+          >
+            <SignoffPanel
+              inspection={inspection}
+              revision={current}
+              captions={captionsFrom}
+              renderAction={(stage) => {
+                const mine = viewer.stages.find((s) => s.stage === stage)
+                if (!mine || mine.signed) return null
+                if (mine.blockedReason) return <span className="subtle">{mine.blockedReason}</span>
+                return <SignAction stage={stage} inspection={inspection} revision={current} session={session} onDone={after} onError={report} />
+              }}
+            />
+          </Fold>
         </div>
+      </div>
+    </>
+  )
+}
+
+// Collapsible side-column card (native <details>). Shared cards placed inside
+// lose their own frame and heading in CSS; the summary line replaces them.
+function Fold({ title, meta, defaultOpen = false, children }) {
+  return (
+    <details className="card proto-fold" open={defaultOpen}>
+      <summary>
+        <span className="proto-fold-title">{title}</span>
+        {meta && <span className="proto-fold-meta">{meta}</span>}
+      </summary>
+      {children}
+    </details>
+  )
+}
+
+// Keys of checklist items that need a reviewer's attention: a defect or
+// missing mark (by the legend's meaning), or any remark / action text.
+function issueKeys(definition, answers) {
+  const keys = []
+  const visit = (item) => {
+    const answer = answers.items?.[item.key]
+    const label = definition.statusLegend.find((s) => s.value === answer?.status)?.label
+    if (['bad', 'warn'].includes(statusTone(label)) || answer?.remark?.trim() || answer?.action?.trim()) keys.push(item.key)
+    item.children?.forEach(visit)
+  }
+  definition.sections.forEach((section) => section.items.forEach(visit))
+  return keys
+}
+
+// Read-only checklist with a "Remarks and defects / All items" switch. The
+// shared form is left as is; rows without an issue are hidden in CSS by their
+// existing `item-<key>` ids.
+function IssueFilter({ definition, answers, children }) {
+  const issues = useMemo(() => issueKeys(definition, answers), [definition, answers])
+  const total = progress(definition, answers).total
+  const [onlyIssues, setOnlyIssues] = useState(issues.length > 0)
+  const ids = issues.map((key) => `#item-${CSS.escape(key)}`).join(', ')
+  return (
+    <>
+      {/* With nothing to filter there is no bar; the Summary card says "No defects or remarks". */}
+      {issues.length > 0 && (
+        <div className="card proto-filter">
+          <div className="proto-segmented" role="group" aria-label="Show checklist items">
+            <button type="button" aria-pressed={onlyIssues} onClick={() => setOnlyIssues(true)}>
+              Remarks and defects ({issues.length})
+            </button>
+            <button type="button" aria-pressed={!onlyIssues} onClick={() => setOnlyIssues(false)}>
+              All items ({total})
+            </button>
+          </div>
+          {onlyIssues && <span className="subtle">{Math.max(total - issues.length, 0)} other items hidden</span>}
+        </div>
+      )}
+      <div className={onlyIssues ? 'proto-only-issues' : undefined}>
+        {onlyIssues && (
+          <style>{`.proto-only-issues .cl-section:not(:has(${ids})), .proto-only-issues .cl-items > li:not(${ids}):not(:has(${ids})) { display: none; }`}</style>
+        )}
+        {children}
       </div>
     </>
   )
@@ -258,8 +379,8 @@ export default function InspectionPage() {
 
 // What a live update means, in words (null for reconnects and access changes).
 const LIVE_TEXT = {
-  created: 'staff created this inspection.',
-  updated: 'staff corrected or reassigned this inspection.',
+  created: 'the Mashhor office created this inspection.',
+  updated: 'the Mashhor office corrected or reassigned this inspection.',
   saved: 'the inspector saved a draft.',
   submitted: 'the inspector submitted a new revision.',
   returned: 'the client requested a re-check.',
@@ -273,7 +394,7 @@ function liveText(event) {
 
 // The inspector's editable form: draft save (nothing required) and submit
 // (every applicable field required — checked here first, then by the API).
-function FormEditor({ inspection, onSaved, onError, onDirtyChange }) {
+function FormEditor({ inspection, onSaved, onSubmitted, onError, onDirtyChange }) {
   const { definition } = inspection.working
   const [answers, setAnswers] = useState(inspection.working.answers)
   const [dirty, setDirty] = useState(false)
@@ -347,7 +468,7 @@ function FormEditor({ inspection, onSaved, onError, onDirtyChange }) {
       const result = await api(`/inspections/${inspection.id}/submit`, { method: 'POST', body: { answers } })
       setConfirming(false)
       setDirty(false)
-      onSaved(result, `Revision ${nextRevision} submitted for client verification.`)
+      onSubmitted(result)
     } catch (err) {
       setConfirming(false)
       if (err.data?.problems?.length) showProblems(err.data.problems)
@@ -432,17 +553,19 @@ function ClientDecision({ inspection, revision, onDone, onError }) {
   }
 
   return (
-    <section className="card" aria-labelledby="verify-title">
+    <section className="card proto-decision" aria-labelledby="verify-title">
       <div className="card-head">
         <div>
-          <h2 id="verify-title">Client verification</h2>
-          <p>Review revision {revisionNumber}. Ask the inspector to re-check it, or send it on for Head of Operation approval.</p>
+          <h2 id="verify-title">Actions</h2>
         </div>
       </div>
-      <div className="card-body row-actions" style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+      <div className="card-body proto-decision-actions">
+        <button type="button" className="btn btn-primary" onClick={() => setDialog('forward')}>
+          Send to Head of Operation <Icon name="next" />
+        </button>
         <button
           type="button"
-          className="btn btn-danger-outline"
+          className="btn"
           onClick={() => {
             setReason('')
             setReasonError('')
@@ -450,9 +573,6 @@ function ClientDecision({ inspection, revision, onDone, onError }) {
           }}
         >
           <Icon name="back" /> Request Re-check
-        </button>
-        <button type="button" className="btn btn-primary" onClick={() => setDialog('forward')}>
-          Submit to HOO Approval <Icon name="next" />
         </button>
       </div>
 
@@ -482,11 +602,11 @@ function ClientDecision({ inspection, revision, onDone, onError }) {
       <ConfirmDialog
         open={dialog === 'forward'}
         tone="primary"
-        title="Submit to HOO Approval?"
+        title="Send to the Head of Operation?"
         description={`You confirm revision ${revisionNumber} as verified. It goes to the Head of Operation for approval and can no longer be returned from here.`}
-        confirmLabel="Submit to HOO Approval"
+        confirmLabel="Send to Head of Operation"
         busy={busy}
-        onConfirm={() => send('verify', {}, `Revision ${revisionNumber} submitted to HOO approval.`)}
+        onConfirm={() => send('verify', {}, `Revision ${revisionNumber} sent to the Head of Operation for approval.`)}
         onCancel={() => setDialog(null)}
       />
     </section>

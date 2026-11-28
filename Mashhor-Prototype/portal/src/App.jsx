@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Navigate, NavLink, Outlet, Route, Routes, useLocation } from 'react-router'
 import { RequireAuth } from '@mashoor/shared/AuthProvider'
 import { useAuth } from '@mashoor/shared/useAuth'
@@ -8,7 +8,7 @@ import { Avatar, Brand } from '@mashoor/shared/ui'
 // Existing portal page, reused unchanged: password change.
 import SettingsPage from '@legacy-portal/pages/SettingsPage.jsx'
 import { InspectionPrintPage } from '@prototype/InspectionPrintPage.jsx'
-import { LiveIndicator, LiveProvider } from '@prototype/live.jsx'
+import { LiveProvider } from '@prototype/live.jsx'
 import { useLiveVersion } from '@prototype/useLive.js'
 // Copy of the existing role-based work lists with a live refetch.
 import InspectionsPage from './pages/InspectionsPage.jsx'
@@ -19,7 +19,7 @@ import { api, diagramUrl } from './api.js'
 const HOME = '/inspections'
 const RETURNABLE = [/^\/inspections$/, /^\/inspections\/\d{1,15}$/, /^\/inspections\/\d{1,15}\/print$/, /^\/settings$/]
 const isAllowedReturn = (pathname) => RETURNABLE.some((pattern) => pattern.test(pathname))
-const ROLE_TEXT = { inspector: 'Inspector', client: 'Vendor / Client' }
+const ROLE_TEXT = { inspector: 'Inspector', client: 'Client' }
 
 function Layout() {
   const { session, logout } = useAuth()
@@ -41,7 +41,14 @@ function Layout() {
     }
   }, [location.key, live.version])
 
-  const waiting = counts ? (isInspector ? counts.returned + counts.assigned : counts.pending_verification) + counts.signoffs : 0
+  // The account menu is a native popover; close it once a link inside it navigates.
+  const menu = useRef(null)
+  useEffect(() => {
+    if (menu.current?.matches(':popover-open')) menu.current.hidePopover()
+  }, [location.key])
+
+  // Same queues as TODO in pages/InspectionsPage.jsx (the amber tab counts).
+  const waiting = counts ? (isInspector ? counts.assigned + counts.draft + counts.returned : counts.pending_verification) + counts.signoffs : 0
   const stages = session.signatoryStages ?? []
 
   return (
@@ -51,36 +58,40 @@ function Layout() {
       </a>
       <header className="portal-header">
         <div className="portal-header-inner">
-          <Brand sub={isInspector ? 'Inspector Portal' : 'Vendor Portal'} to="/" />
-          <span className="proto-tag">Prototype · demo data</span>
-          <LiveIndicator />
+          <Brand sub={isInspector ? 'Inspector Portal' : 'Client Portal'} to="/" />
           <nav className="portal-nav" aria-label="Main">
             <NavLink to="/inspections" className="nav-link">
-              <Icon name="check" /> Inspections
+              Inspections
               {waiting > 0 && (
                 <span className="nav-count" aria-label={`${waiting} waiting for you`}>
                   {waiting}
                 </span>
               )}
             </NavLink>
-            <NavLink to="/settings" className="nav-link">
-              <Icon name="settings" /> Settings
-            </NavLink>
           </nav>
           <div className="portal-user">
-            <span className="user-chip">
+            <span className="proto-tag">Prototype · demo data</span>
+            <button type="button" className="proto-account" popoverTarget="portal-menu" aria-label={`Account: ${session.user.name}`}>
               <Avatar name={session.user.name} />
-              <span className="user-chip-text">
+              <span className="proto-account-name">{session.user.name}</span>
+              <Icon name="next" className="proto-account-caret" />
+            </button>
+            <div id="portal-menu" ref={menu} className="proto-menu" popover="auto">
+              <div className="proto-menu-head">
                 <strong>{session.user.name}</strong>
+                <span>{session.company.name}</span>
                 <span>
-                  {session.company.name} · {ROLE_TEXT[session.user.role] ?? session.user.role}
+                  {ROLE_TEXT[session.user.role] ?? session.user.role}
                   {stages.length > 0 && ` · ${stages.length} sign-off stage${stages.length === 1 ? '' : 's'}`}
                 </span>
-              </span>
-            </span>
-            <button type="button" className="btn btn-sm" onClick={logout}>
-              <Icon name="logout" /> Sign out
-            </button>
+              </div>
+              <NavLink to="/settings" className="proto-menu-item">
+                <Icon name="settings" /> Settings
+              </NavLink>
+              <button type="button" className="proto-menu-item" onClick={logout}>
+                <Icon name="logout" /> Sign out
+              </button>
+            </div>
           </div>
         </div>
       </header>
@@ -100,9 +111,9 @@ export default function App() {
           <LoginPage
             title="Sign in"
             subtitle="Inspectors, client verifiers and signatories sign in with their username. Prototype with fictional demo data."
-            brandSub="Vendor Portal"
+            brandSub="Inspector & Client Portal"
             identifier="username"
-            help="Forgot your password? Ask Mashhor staff to reset it."
+            help="Forgot your password? Ask the Mashhor office to reset it."
             home={HOME}
             isAllowedReturn={isAllowedReturn}
           />
