@@ -106,7 +106,7 @@ export function RevisionRecord({ inspection, revision, printedAt }) {
               <tr key={i}>
                 <td style={{ whiteSpace: 'nowrap' }}>{formatDate(e.at)}</td>
                 <td>{EVENT_LABELS[e.action] ?? e.action}</td>
-                <td>{e.actorType === 'system' ? 'System' : (e.actorName ?? 'Mashhor staff')}</td>
+                <td>{e.actorType === 'system' ? 'System' : (e.actorName ?? 'Mashhor office')}</td>
                 <td className="prewrap">{e.detail ?? ''}</td>
               </tr>
             ))}

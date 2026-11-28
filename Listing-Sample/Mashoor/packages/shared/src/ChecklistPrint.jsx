@@ -194,7 +194,7 @@ export function ChecklistPrint({ definition, answers, vehicle, meta, revision, s
           {meta.companyName} · Inspection #{meta.inspectionId} · {meta.templateName}
           {meta.templateVersion ? ` (template v${meta.templateVersion})` : ''}
           {revision ? ` · Revision ${revision.revision}, submitted ${formatDate(revision.submittedAt)}${revision.submittedBy ? ` by ${revision.submittedBy.name}` : ''}` : ''}
-          {' · '}Sign-offs are digital confirmations recorded in Mashoor, not handwritten signatures.
+          {' · '}Sign-offs are digital confirmations recorded in Mashhor, not handwritten signatures.
         </p>
       </article>
 

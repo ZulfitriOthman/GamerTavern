@@ -1,11 +1,11 @@
 // Copied from Listing-Sample/Mashoor/portal/src/pages/InspectionsPage.jsx; the
 // prototype only adds a live refetch (useLiveVersion) to its two effects.
-import { useEffect, useState } from 'react'
-import { Link, useSearchParams } from 'react-router'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router'
 import { formatDate } from '@mashoor/shared/format'
 import { useAuth } from '@mashoor/shared/useAuth'
 import { InspectionStatusBadge, VehicleTitle } from '@mashoor/shared/InspectionView'
-import { EmptyState, Loading, PageHeader } from '@mashoor/shared/ui'
+import { Alert, EmptyState, Loading, PageHeader } from '@mashoor/shared/ui'
 import { useLiveVersion } from '@prototype/useLive.js'
 import { api } from '../api.js'
 
@@ -19,11 +19,27 @@ const QUEUES = {
   client: [
     { key: 'pending_verification', label: 'Pending verification', empty: 'No inspections are waiting for your verification.' },
     { key: 'returned', label: 'Re-check requested', empty: 'No inspections are out for re-check.' },
-    { key: 'pending_approval', label: 'Awaiting HOO approval', empty: 'No inspections are waiting for Head of Operation approval.' },
+    { key: 'pending_approval', label: 'Awaiting Head of Operation', empty: 'No inspections are waiting for Head of Operation approval.' },
     { key: 'completed', label: 'Completed', empty: 'No approved inspections yet.' },
   ],
 }
 const SIGNOFFS = { key: 'signoffs', label: 'My sign-offs', empty: 'Nothing is waiting for your sign-off.' }
+// Queues whose items wait on this viewer; the same ones the header badge adds up (App.jsx).
+const TODO = { inspector: ['assigned', 'draft', 'returned', 'signoffs'], client: ['pending_verification', 'signoffs'] }
+
+// Row button names the viewer's next step; it is primary only when the step is theirs.
+const NEXT_STEP = {
+  inspector: { assigned: 'Start', draft: 'Continue', returned: 'Continue' },
+  client: { pending_verification: 'Review' },
+}
+function RowAction({ role, queue, inspection }) {
+  const label = queue === 'signoffs' ? 'Sign' : NEXT_STEP[role]?.[inspection.status]
+  return (
+    <Link className={`btn btn-sm${label ? ' btn-primary' : ''}`} to={`/inspections/${inspection.id}`}>
+      {label ?? 'View'}
+    </Link>
+  )
+}
 
 export default function InspectionsPage() {
   const { session } = useAuth()
@@ -35,10 +51,30 @@ export default function InspectionsPage() {
   const role = session.user.role
   // Refetch queue counts and the list when an inspection changes (Socket.IO /mashoor).
   const live = useLiveVersion()
-  const queues = [...QUEUES[role], ...(stages.length ? [SIGNOFFS] : [])]
-  const active = queues.find((q) => q.key === params.get('queue')) ?? queues[0]
+  // Signers with something to sign get "My sign-offs" as the first, default tab.
+  const signoffsFirst = stages.length > 0 && counts?.signoffs > 0
+  const queues = stages.length ? (signoffsFirst ? [SIGNOFFS, ...QUEUES[role]] : [...QUEUES[role], SIGNOFFS]) : QUEUES[role]
+  const requested = params.get('queue')
+  // With no tab in the URL a signer's default depends on the counts: wait for them so the tab doesn't jump.
+  const active = queues.find((q) => q.key === requested) ?? (stages.length && !requested && !counts ? null : queues[0])
+  const activeKey = active?.key
   // A list loaded for another tab counts as still loading.
-  const list = loaded?.key === active.key ? loaded.inspections : null
+  const list = active && loaded?.key === activeKey ? loaded.inspections : null
+
+  // One-off message handed over by the inspection page (e.g. after submitting);
+  // dropped from the history entry so a refresh doesn't show it again.
+  const location = useLocation()
+  const navigate = useNavigate()
+  const [notice, setNotice] = useState(location.state?.notice ?? null)
+  useEffect(() => {
+    if (location.state?.notice) navigate({ search: location.search }, { replace: true, state: null })
+  }, [location.state, location.search, navigate])
+
+  // On narrow screens the tab row scrolls: keep the selected tab in view (only the row scrolls, not the page).
+  const tabRow = useRef(null)
+  useEffect(() => {
+    tabRow.current?.querySelector('.tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest', container: 'nearest' })
+  }, [activeKey])
 
   useEffect(() => {
     api('/inspections/counts').then(
@@ -48,14 +84,15 @@ export default function InspectionsPage() {
       },
       () => {},
     )
-  }, [active.key, live.version])
+  }, [activeKey, live.version])
 
   useEffect(() => {
+    if (!activeKey) return undefined
     let cancelled = false
-    api(`/inspections?queue=${active.key}`).then(
+    api(`/inspections?queue=${activeKey}`).then(
       (d) => {
         if (cancelled) return
-        setLoaded({ key: active.key, inspections: d.inspections })
+        setLoaded({ key: activeKey, inspections: d.inspections })
         setError('')
       },
       (err) => !cancelled && setError(err.message),
@@ -63,7 +100,7 @@ export default function InspectionsPage() {
     return () => {
       cancelled = true
     }
-  }, [active.key, live.version])
+  }, [activeKey, live.version])
 
   return (
     <>
@@ -75,27 +112,34 @@ export default function InspectionsPage() {
             : `Vehicle inspections for ${session.company.name}: verify submitted checklists and follow them to Head of Operation approval.`
         }
       />
+      {notice && (
+        <Alert tone="success" title={notice.title} onDismiss={() => setNotice(null)}>
+          {notice.body}
+        </Alert>
+      )}
       <section className="card" aria-label="Inspection lists">
-        <nav className="tabs" aria-label="Inspection lists" style={{ padding: '0 1.5rem' }}>
+        <nav ref={tabRow} className="tabs" aria-label="Inspection lists" style={{ padding: '0 1.5rem' }}>
           {queues.map((q) => (
             <Link
               key={q.key}
               to={`/inspections?queue=${q.key}`}
-              className={`tab${q.key === active.key ? ' active' : ''}`}
-              aria-current={q.key === active.key ? 'page' : undefined}
+              className={`tab${q.key === activeKey ? ' active' : ''}`}
+              aria-current={q.key === activeKey ? 'page' : undefined}
               onClick={(e) => {
                 e.preventDefault()
                 setParams({ queue: q.key })
               }}
             >
               {q.label}
-              {counts && counts[q.key] !== undefined && <span className="count">{counts[q.key]}</span>}
+              {counts && counts[q.key] !== undefined && (
+                <span className={`count${counts[q.key] > 0 && TODO[role]?.includes(q.key) ? ' todo' : ''}`}>{counts[q.key]}</span>
+              )}
             </Link>
           ))}
         </nav>
         {error && <EmptyState tone="error" title="Inspections couldn’t load">{error}</EmptyState>}
         {!list && !error && <Loading />}
-        {list?.length === 0 && <EmptyState icon="inbox" title="Nothing here">{active.empty}</EmptyState>}
+        {list?.length === 0 && <EmptyState icon="inbox" title="Nothing here">{active?.empty}</EmptyState>}
         {list?.length > 0 && (
           <div className="table-wrap">
             <table className="table table-stack">
@@ -134,16 +178,17 @@ export default function InspectionsPage() {
                       <InspectionStatusBadge status={i.status} />
                     </td>
                     <td data-label={role === 'inspector' ? 'Checklist' : 'Inspector'}>
-                      {role === 'inspector' ? i.templateName : (i.inspector?.name ?? '—')}
-                      {i.currentRevision > 0 && <span className="subtle"> · rev. {i.currentRevision}</span>}
+                      {/* One element, so the stacked phone layout keeps it on one line; revision shown only once there is more than one. */}
+                      <span>
+                        {role === 'inspector' ? i.templateName : (i.inspector?.name ?? '—')}
+                        {i.currentRevision > 1 && <span className="subtle"> · revision {i.currentRevision}</span>}
+                      </span>
                     </td>
                     <td data-label="Updated" className="subtle num">
                       {formatDate(i.updatedAt)}
                     </td>
                     <td data-label="" className="col-actions">
-                      <Link className="btn btn-sm" to={`/inspections/${i.id}`}>
-                        Open
-                      </Link>
+                      <RowAction role={role} queue={activeKey} inspection={i} />
                     </td>
                   </tr>
                 ))}

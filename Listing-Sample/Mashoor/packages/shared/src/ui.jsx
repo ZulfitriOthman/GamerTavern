@@ -12,13 +12,13 @@ export function Brand({ sub, to }) {
         M
       </span>
       <span className="brand-text">
-        <span className="brand-name">Mashoor</span>
+        <span className="brand-name">Mashhor</span>
         {sub && <span className="brand-sub">{sub}</span>}
       </span>
     </>
   )
   return to ? (
-    <Link className="brand" to={to} aria-label={sub ? `Mashoor ${sub} home` : 'Mashoor home'}>
+    <Link className="brand" to={to} aria-label={sub ? `Mashhor ${sub} home` : 'Mashhor home'}>
       {content}
     </Link>
   ) : (
